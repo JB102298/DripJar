@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -73,11 +73,25 @@ export default function ProfileScreen() {
       contentContainerStyle={{ paddingTop: insets.top + 20, paddingBottom: insets.bottom + 100 }}
     >
       <View style={styles.header}>
-        <MemberAvatar 
-          displayName={profile?.displayName || 'Traveler'} 
-          avatarUrl={profile?.avatarUrl} 
-          size={80} 
-        />
+        <Pressable
+          onPress={() => {
+            if (Platform.OS === 'web') {
+              window.alert('Photo upload is coming soon!');
+            } else {
+              Alert.alert('Coming Soon', 'Photo upload will be available in a future update.');
+            }
+          }}
+          style={styles.avatarWrapper}
+        >
+          <MemberAvatar 
+            displayName={profile?.displayName || 'Traveler'} 
+            avatarUrl={profile?.avatarUrl} 
+            size={80} 
+          />
+          <View style={[styles.cameraOverlay, { backgroundColor: colors.primary }]}>
+            <Feather name="camera" size={14} color="#fff" />
+          </View>
+        </Pressable>
         <Text style={[styles.name, { color: colors.foreground }]}>
           {profile?.displayName || `${profile?.firstName} ${profile?.lastName}`}
         </Text>
@@ -136,6 +150,21 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 32,
+  },
+  avatarWrapper: {
+    position: 'relative',
+  },
+  cameraOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   name: {
     fontSize: 24,

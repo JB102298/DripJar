@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Platform, TextInput } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 import { Feather } from '@expo/vector-icons';
+import { CalendarPicker } from './CalendarPicker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 interface DateInputProps {
@@ -9,9 +10,10 @@ interface DateInputProps {
   onChange: (date: Date) => void;
   placeholder?: string;
   error?: string;
+  minDate?: Date;
 }
 
-export function DateInput({ value, onChange, placeholder = 'Select date', error }: DateInputProps) {
+export function DateInput({ value, onChange, placeholder = 'Select date', error, minDate }: DateInputProps) {
   const colors = useColors();
   const [showPicker, setShowPicker] = useState(false);
 
@@ -19,64 +21,64 @@ export function DateInput({ value, onChange, placeholder = 'Select date', error 
     return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   };
 
-  const handleWebChange = (text: string) => {
-    const d = new Date(text);
-    if (!isNaN(d.getTime())) {
-      onChange(d);
-    }
+  const handleSelect = (date: Date) => {
+    onChange(date);
+    // Keep open on web so user can see selection; they dismiss by tapping the button again
   };
 
   return (
     <View style={styles.container}>
-      {Platform.OS === 'web' ? (
-        <View
+      <Pressable
+        style={[
+          styles.inputContainer,
+          { borderColor: error ? colors.destructive : showPicker ? colors.primary : colors.input, backgroundColor: colors.card },
+        ]}
+        onPress={() => setShowPicker(s => !s)}
+      >
+        <Feather name="calendar" size={20} color={showPicker ? colors.primary : colors.mutedForeground} style={styles.icon} />
+        <Text
           style={[
-            styles.inputContainer,
-            { borderColor: error ? colors.destructive : colors.input, backgroundColor: colors.card },
+            styles.text,
+            { color: value ? colors.foreground : colors.mutedForeground },
           ]}
         >
-          <Feather name="calendar" size={20} color={colors.mutedForeground} style={styles.icon} />
-          <TextInput
-            style={[styles.webInput, { color: colors.foreground }]}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.mutedForeground}
-            onChangeText={handleWebChange}
-            value={value ? value.toISOString().split('T')[0] : ''}
-          />
-        </View>
-      ) : (
-        <>
-          <Pressable
-            style={[
-              styles.inputContainer,
-              { borderColor: error ? colors.destructive : colors.input, backgroundColor: colors.card },
-            ]}
-            onPress={() => setShowPicker(true)}
-          >
-            <Feather name="calendar" size={20} color={colors.mutedForeground} style={styles.icon} />
-            <Text
-              style={[
-                styles.text,
-                { color: value ? colors.foreground : colors.mutedForeground },
-              ]}
-            >
-              {value ? formatDate(value) : placeholder}
-            </Text>
-          </Pressable>
-          {showPicker && (
-            <DateTimePicker
-              value={value || new Date()}
-              mode="date"
-              display="spinner"
-              onChange={(event, date) => {
+          {value ? formatDate(value) : placeholder}
+        </Text>
+        <Feather
+          name={showPicker ? 'chevron-up' : 'chevron-down'}
+          size={18}
+          color={colors.mutedForeground}
+        />
+      </Pressable>
+
+      {error ? (
+        <Text style={[styles.errorText, { color: colors.destructive }]}>{error}</Text>
+      ) : null}
+
+      {showPicker && (
+        Platform.OS === 'web' ? (
+          <View style={styles.calendarWrapper}>
+            <CalendarPicker
+              value={value}
+              onChange={(date) => {
+                handleSelect(date);
                 setShowPicker(false);
-                if (date) {
-                  onChange(date);
-                }
               }}
+              minDate={minDate}
             />
-          )}
-        </>
+          </View>
+        ) : (
+          <DateTimePicker
+            value={value || new Date()}
+            mode="date"
+            display="spinner"
+            minimumDate={minDate}
+            onChange={(event, date) => {
+              setShowPicker(false);
+              if (date) onChange(date);
+            }}
+          />
+        )
       )}
     </View>
   );
@@ -101,10 +103,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     flex: 1,
   },
-  webInput: {
-    fontSize: 16,
-    flex: 1,
-    height: '100%',
-    outlineStyle: 'none',
+  errorText: {
+    fontSize: 13,
+    marginTop: 6,
+    marginLeft: 4,
+  },
+  calendarWrapper: {
+    marginTop: 8,
   },
 });
