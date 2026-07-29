@@ -3,20 +3,32 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: TripJar API - collaborative group savings platform
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
-    description: Health operations
+  - name: auth
+  - name: profile
+  - name: jars
+  - name: members
+  - name: invitations
+  - name: contributions
+  - name: schedules
+  - name: milestones
+  - name: commitments
+  - name: agreements
+  - name: notifications
+  - name: activity
+  - name: dashboard
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +36,947 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # AUTH
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "409":
+          description: Email already in use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/forgot-password:
+    post:
+      operationId: forgotPassword
+      tags: [auth]
+      summary: Request password reset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /auth/reset-password:
+    post:
+      operationId: resetPassword
+      tags: [auth]
+      summary: Reset password with token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid or expired token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # PROFILE
+  /profile:
+    get:
+      operationId: getProfile
+      tags: [profile]
+      summary: Get current user profile
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+    patch:
+      operationId: updateProfile
+      tags: [profile]
+      summary: Update current user profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+
+  # DASHBOARD
+  /dashboard:
+    get:
+      operationId: getDashboard
+      tags: [dashboard]
+      summary: Get dashboard data for current user
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardData"
+
+  # JARS
+  /jars:
+    get:
+      operationId: listJars
+      tags: [jars]
+      summary: List all jars for current user
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: role
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JarSummary"
+    post:
+      operationId: createJar
+      tags: [jars]
+      summary: Create a new jar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJarRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Jar"
+
+  /jars/{jarId}:
+    get:
+      operationId: getJar
+      tags: [jars]
+      summary: Get jar details
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Jar"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateJar
+      tags: [jars]
+      summary: Update jar
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateJarRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Jar"
+
+  /jars/{jarId}/launch:
+    post:
+      operationId: launchJar
+      tags: [jars]
+      summary: Launch a jar (change status from draft to saving)
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Jar"
+
+  /jars/{jarId}/cancel:
+    post:
+      operationId: cancelJar
+      tags: [jars]
+      summary: Cancel a jar
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelJarRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Jar"
+
+  /jars/{jarId}/health:
+    get:
+      operationId: getJarHealth
+      tags: [jars]
+      summary: Get jar health status
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JarHealth"
+
+  # MEMBERS
+  /jars/{jarId}/members:
+    get:
+      operationId: listJarMembers
+      tags: [members]
+      summary: List jar members
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JarMember"
+
+  /jars/{jarId}/members/{memberId}:
+    patch:
+      operationId: updateJarMember
+      tags: [members]
+      summary: Update jar member (contribution target, role)
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateJarMemberRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JarMember"
+
+  # INVITATIONS
+  /jars/{jarId}/invitations:
+    post:
+      operationId: createInvitation
+      tags: [invitations]
+      summary: Invite someone to a jar
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInvitationRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invitation"
+
+  /invitations:
+    get:
+      operationId: listMyInvitations
+      tags: [invitations]
+      summary: List invitations for current user
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InvitationWithJar"
+
+  /invitations/token/{token}:
+    get:
+      operationId: getInvitationByToken
+      tags: [invitations]
+      summary: Get invitation details by token
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationWithJar"
+        "404":
+          description: Not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /invitations/{invitationId}/accept:
+    post:
+      operationId: acceptInvitation
+      tags: [invitations]
+      summary: Accept an invitation
+      parameters:
+        - name: invitationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JarMember"
+
+  /invitations/{invitationId}/decline:
+    post:
+      operationId: declineInvitation
+      tags: [invitations]
+      summary: Decline an invitation
+      parameters:
+        - name: invitationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  # CONTRIBUTIONS
+  /jars/{jarId}/contributions:
+    get:
+      operationId: listContributions
+      tags: [contributions]
+      summary: List contributions for a jar
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: memberId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Contribution"
+    post:
+      operationId: createContribution
+      tags: [contributions]
+      summary: Add a contribution to a jar
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateContributionRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contribution"
+
+  /jars/{jarId}/contributions/{contributionId}/reverse:
+    post:
+      operationId: reverseContribution
+      tags: [contributions]
+      summary: Reverse a contribution
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: contributionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReverseContributionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contribution"
+
+  # SCHEDULES
+  /jars/{jarId}/schedule:
+    get:
+      operationId: getContributionSchedule
+      tags: [schedules]
+      summary: Get my contribution schedule for a jar
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContributionSchedule"
+    post:
+      operationId: createContributionSchedule
+      tags: [schedules]
+      summary: Create or replace contribution schedule
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateScheduleRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContributionSchedule"
+    patch:
+      operationId: updateContributionSchedule
+      tags: [schedules]
+      summary: Update contribution schedule
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateScheduleRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContributionSchedule"
+
+  # MILESTONES
+  /jars/{jarId}/milestones:
+    get:
+      operationId: listMilestones
+      tags: [milestones]
+      summary: List milestones for a jar
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Milestone"
+    post:
+      operationId: createMilestone
+      tags: [milestones]
+      summary: Create a milestone
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMilestoneRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Milestone"
+
+  /jars/{jarId}/milestones/{milestoneId}:
+    patch:
+      operationId: updateMilestone
+      tags: [milestones]
+      summary: Update a milestone
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: milestoneId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMilestoneRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Milestone"
+    delete:
+      operationId: deleteMilestone
+      tags: [milestones]
+      summary: Delete a milestone
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: milestoneId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  # COMMITMENT REQUESTS
+  /jars/{jarId}/commitments:
+    get:
+      operationId: listCommitmentRequests
+      tags: [commitments]
+      summary: List commitment requests for a jar
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CommitmentRequest"
+    post:
+      operationId: createCommitmentRequest
+      tags: [commitments]
+      summary: Create a commitment request
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommitmentRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommitmentRequest"
+
+  /jars/{jarId}/commitments/{commitmentId}/vote:
+    post:
+      operationId: voteOnCommitment
+      tags: [commitments]
+      summary: Vote on a commitment request
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: commitmentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommitmentVoteRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommitmentRequest"
+
+  # AGREEMENTS
+  /jars/{jarId}/agreements:
+    get:
+      operationId: listAgreements
+      tags: [agreements]
+      summary: List agreements for a jar
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Agreement"
+
+  /jars/{jarId}/agreements/{agreementId}/accept:
+    post:
+      operationId: acceptAgreement
+      tags: [agreements]
+      summary: Accept an agreement
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: agreementId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgreementAcceptance"
+
+  # NOTIFICATIONS
+  /notifications:
+    get:
+      operationId: listNotifications
+      tags: [notifications]
+      summary: List notifications for current user
+      parameters:
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Notification"
+
+  /notifications/{notificationId}/read:
+    patch:
+      operationId: markNotificationRead
+      tags: [notifications]
+      summary: Mark a notification as read
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Notification"
+
+  /notifications/read-all:
+    post:
+      operationId: markAllNotificationsRead
+      tags: [notifications]
+      summary: Mark all notifications as read
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  # ACTIVITY
+  /jars/{jarId}/activity:
+    get:
+      operationId: listJarActivity
+      tags: [activity]
+      summary: List activity events for a jar
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityEvent"
+
+  /activity:
+    get:
+      operationId: listMyActivity
+      tags: [activity]
+      summary: List all activity for current user across all jars
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityEvent"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +984,985 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required: [error]
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required: [message]
+
+    # AUTH
+    RegisterRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        firstName:
+          type: string
+        lastName:
+          type: string
+      required: [email, password, firstName, lastName]
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required: [email, password]
+
+    ForgotPasswordRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required: [email]
+
+    ResetPasswordRequest:
+      type: object
+      properties:
+        token:
+          type: string
+        password:
+          type: string
+          minLength: 8
+      required: [token, password]
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        profile:
+          $ref: "#/components/schemas/Profile"
+      required: [user, profile]
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        emailVerified:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, email, emailVerified, createdAt]
+
+    Profile:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        displayName:
+          type: string
+        avatarUrl:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        timeZone:
+          type: string
+        defaultCurrency:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, userId, firstName, lastName, displayName, timeZone, defaultCurrency, createdAt]
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        displayName:
+          type: string
+        avatarUrl:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        timeZone:
+          type: string
+        defaultCurrency:
+          type: string
+
+    # DASHBOARD
+    DashboardData:
+      type: object
+      properties:
+        featuredJar:
+          $ref: "#/components/schemas/JarSummary"
+          nullable: true
+        personalProgress:
+          $ref: "#/components/schemas/PersonalProgress"
+          nullable: true
+        memberProgress:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberProgressSummary"
+        upcomingActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/UpcomingActivityItem"
+        recentContributions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Contribution"
+        totalJars:
+          type: integer
+        activeJars:
+          type: integer
+        unreadNotifications:
+          type: integer
+      required: [memberProgress, upcomingActivity, recentContributions, totalJars, activeJars, unreadNotifications]
+
+    PersonalProgress:
+      type: object
+      properties:
+        targetAmountCents:
+          type: integer
+        contributedAmountCents:
+          type: integer
+        remainingAmountCents:
+          type: integer
+        percentComplete:
+          type: number
+        nextScheduledDate:
+          type: string
+          format: date
+          nullable: true
+        nextScheduledAmountCents:
+          type: integer
+          nullable: true
+        estimatedCompletionDate:
+          type: string
+          format: date
+          nullable: true
+        isOnTrack:
+          type: boolean
+      required: [targetAmountCents, contributedAmountCents, remainingAmountCents, percentComplete, isOnTrack]
+
+    MemberProgressSummary:
+      type: object
+      properties:
+        memberId:
+          type: string
+        userId:
+          type: string
+        displayName:
+          type: string
+        avatarUrl:
+          type: string
+          nullable: true
+        role:
+          type: string
+        contributionTargetCents:
+          type: integer
+        contributedAmountCents:
+          type: integer
+        percentComplete:
+          type: number
+        status:
+          type: string
+          enum: [Ahead, OnTrack, NeedsAttention, AtRisk, NotStarted]
+      required: [memberId, userId, displayName, role, contributionTargetCents, contributedAmountCents, percentComplete, status]
+
+    UpcomingActivityItem:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [contribution_due, lock_date, commitment_pending, milestone_deadline, jar_target_date]
+        title:
+          type: string
+        description:
+          type: string
+        date:
+          type: string
+          format: date
+        jarId:
+          type: string
+        jarName:
+          type: string
+      required: [type, title, description, date, jarId, jarName]
+
+    # JARS
+    Jar:
+      type: object
+      properties:
+        id:
+          type: string
+        organizerId:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        category:
+          type: string
+          enum: [Vacation, Cruise, Wedding, Honeymoon, MissionTrip, Reunion, Celebration, Other]
+        description:
+          type: string
+          nullable: true
+        destination:
+          type: string
+          nullable: true
+        coverImageUrl:
+          type: string
+          nullable: true
+        startDate:
+          type: string
+          format: date
+          nullable: true
+        endDate:
+          type: string
+          format: date
+          nullable: true
+        targetDate:
+          type: string
+          format: date
+        goalAmountCents:
+          type: integer
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [Draft, Inviting, Saving, CommitmentPending, Committed, FullyFunded, Completed, Cancelled]
+        approvalThreshold:
+          type: number
+        memberCount:
+          type: integer
+        totalSavedCents:
+          type: integer
+        percentFunded:
+          type: number
+        daysRemaining:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, organizerId, name, slug, category, targetDate, goalAmountCents, currency, status, approvalThreshold, memberCount, totalSavedCents, percentFunded, createdAt, updatedAt]
+
+    JarSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        organizerId:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        destination:
+          type: string
+          nullable: true
+        coverImageUrl:
+          type: string
+          nullable: true
+        targetDate:
+          type: string
+          format: date
+        goalAmountCents:
+          type: integer
+        currency:
+          type: string
+        status:
+          type: string
+        memberCount:
+          type: integer
+        totalSavedCents:
+          type: integer
+        percentFunded:
+          type: number
+        daysRemaining:
+          type: integer
+          nullable: true
+        userRole:
+          type: string
+          nullable: true
+        health:
+          $ref: "#/components/schemas/JarHealth"
+          nullable: true
+      required: [id, organizerId, name, category, targetDate, goalAmountCents, currency, status, memberCount, totalSavedCents, percentFunded]
+
+    CreateJarRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+          enum: [Vacation, Cruise, Wedding, Honeymoon, MissionTrip, Reunion, Celebration, Other]
+        description:
+          type: string
+          nullable: true
+        destination:
+          type: string
+          nullable: true
+        coverImageUrl:
+          type: string
+          nullable: true
+        startDate:
+          type: string
+          format: date
+          nullable: true
+        endDate:
+          type: string
+          format: date
+          nullable: true
+        targetDate:
+          type: string
+          format: date
+        goalAmountCents:
+          type: integer
+        currency:
+          type: string
+          default: USD
+        approvalThreshold:
+          type: number
+          default: 0.67
+      required: [name, category, targetDate, goalAmountCents]
+
+    UpdateJarRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        destination:
+          type: string
+          nullable: true
+        coverImageUrl:
+          type: string
+          nullable: true
+        startDate:
+          type: string
+          format: date
+          nullable: true
+        endDate:
+          type: string
+          format: date
+          nullable: true
+        targetDate:
+          type: string
+          format: date
+        goalAmountCents:
+          type: integer
+        approvalThreshold:
+          type: number
+
+    CancelJarRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+
+    JarHealth:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [Ahead, OnTrack, NeedsAttention, AtRisk]
+        message:
+          type: string
+        actualPercentage:
+          type: number
+        expectedPercentage:
+          type: number
+        daysElapsed:
+          type: integer
+        totalDays:
+          type: integer
+        amountBehindCents:
+          type: integer
+        estimatedCompletionDate:
+          type: string
+          format: date
+          nullable: true
+      required: [status, message, actualPercentage, expectedPercentage, daysElapsed, totalDays, amountBehindCents]
+
+    # MEMBERS
+    JarMember:
+      type: object
+      properties:
+        id:
+          type: string
+        jarId:
+          type: string
+        userId:
+          type: string
+        role:
+          type: string
+          enum: [organizer, member, viewer]
+        contributionTargetCents:
+          type: integer
+        contributedAmountCents:
+          type: integer
+        percentComplete:
+          type: number
+        status:
+          type: string
+          enum: [active, inactive, removed]
+        healthStatus:
+          type: string
+          enum: [Ahead, OnTrack, NeedsAttention, AtRisk, NotStarted]
+        joinedAt:
+          type: string
+          format: date-time
+          nullable: true
+        profile:
+          $ref: "#/components/schemas/Profile"
+          nullable: true
+      required: [id, jarId, userId, role, contributionTargetCents, contributedAmountCents, percentComplete, status, healthStatus]
+
+    UpdateJarMemberRequest:
+      type: object
+      properties:
+        contributionTargetCents:
+          type: integer
+        role:
+          type: string
+          enum: [member, viewer]
+        status:
+          type: string
+          enum: [active, inactive, removed]
+
+    # INVITATIONS
+    Invitation:
+      type: object
+      properties:
+        id:
+          type: string
+        jarId:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [member, viewer]
+        contributionTargetCents:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          enum: [pending, accepted, declined, expired, revoked]
+        token:
+          type: string
+          nullable: true
+        sentAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required: [id, jarId, email, role, status, sentAt, expiresAt]
+
+    InvitationWithJar:
+      type: object
+      properties:
+        id:
+          type: string
+        jarId:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+        contributionTargetCents:
+          type: integer
+          nullable: true
+        status:
+          type: string
+        token:
+          type: string
+          nullable: true
+        sentAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+        jar:
+          $ref: "#/components/schemas/JarSummary"
+      required: [id, jarId, email, role, status, sentAt, expiresAt, jar]
+
+    CreateInvitationRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [member, viewer]
+          default: member
+        contributionTargetCents:
+          type: integer
+          nullable: true
+      required: [email]
+
+    # CONTRIBUTIONS
+    Contribution:
+      type: object
+      properties:
+        id:
+          type: string
+        jarId:
+          type: string
+        memberId:
+          type: string
+        amountCents:
+          type: integer
+        contributionDate:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [pending, completed, failed, reversed, refunded, simulated]
+        sourceType:
+          type: string
+          enum: [manual, scheduled, simulated]
+        milestoneId:
+          type: string
+          nullable: true
+        note:
+          type: string
+          nullable: true
+        memberName:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, jarId, memberId, amountCents, contributionDate, status, sourceType, createdAt]
+
+    CreateContributionRequest:
+      type: object
+      properties:
+        amountCents:
+          type: integer
+          minimum: 1
+        contributionDate:
+          type: string
+          format: date
+        milestoneId:
+          type: string
+          nullable: true
+        note:
+          type: string
+          nullable: true
+      required: [amountCents]
+
+    ReverseContributionRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+
+    # SCHEDULES
+    ContributionSchedule:
+      type: object
+      properties:
+        id:
+          type: string
+        jarId:
+          type: string
+        memberId:
+          type: string
+        frequency:
+          type: string
+          enum: [weekly, biweekly, twiceMonthly, monthly, custom, manual]
+        amountCents:
+          type: integer
+        startDate:
+          type: string
+          format: date
+        preferredDay:
+          type: integer
+          nullable: true
+        endCondition:
+          type: string
+          enum: [targetDate, goalReached, manual]
+        isPaused:
+          type: boolean
+        isActive:
+          type: boolean
+        projectedTotalCents:
+          type: integer
+          nullable: true
+        estimatedCompletionDate:
+          type: string
+          format: date
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, jarId, memberId, frequency, amountCents, startDate, endCondition, isPaused, isActive, createdAt]
+
+    CreateScheduleRequest:
+      type: object
+      properties:
+        frequency:
+          type: string
+          enum: [weekly, biweekly, twiceMonthly, monthly, custom, manual]
+        amountCents:
+          type: integer
+          minimum: 1
+        startDate:
+          type: string
+          format: date
+        preferredDay:
+          type: integer
+          nullable: true
+        endCondition:
+          type: string
+          enum: [targetDate, goalReached, manual]
+          default: targetDate
+      required: [frequency, amountCents, startDate]
+
+    UpdateScheduleRequest:
+      type: object
+      properties:
+        frequency:
+          type: string
+          enum: [weekly, biweekly, twiceMonthly, monthly, custom, manual]
+        amountCents:
+          type: integer
+          minimum: 1
+        preferredDay:
+          type: integer
+          nullable: true
+        isPaused:
+          type: boolean
+
+    # MILESTONES
+    Milestone:
+      type: object
+      properties:
+        id:
+          type: string
+        jarId:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        targetAmountCents:
+          type: integer
+        allocatedAmountCents:
+          type: integer
+        percentFunded:
+          type: number
+        dueDate:
+          type: string
+          format: date
+          nullable: true
+        priority:
+          type: integer
+        status:
+          type: string
+          enum: [pending, funded, committed, completed]
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, jarId, name, targetAmountCents, allocatedAmountCents, percentFunded, priority, status, createdAt]
+
+    CreateMilestoneRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        targetAmountCents:
+          type: integer
+          minimum: 1
+        dueDate:
+          type: string
+          format: date
+          nullable: true
+        priority:
+          type: integer
+          default: 0
+      required: [name, targetAmountCents]
+
+    UpdateMilestoneRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        targetAmountCents:
+          type: integer
+          minimum: 1
+        dueDate:
+          type: string
+          format: date
+          nullable: true
+        priority:
+          type: integer
+        status:
+          type: string
+          enum: [pending, funded, committed, completed]
+
+    # COMMITMENT REQUESTS
+    CommitmentRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        jarId:
+          type: string
+        milestoneId:
+          type: string
+          nullable: true
+        amountCents:
+          type: integer
+        purpose:
+          type: string
+        vendorName:
+          type: string
+          nullable: true
+        paymentDeadline:
+          type: string
+          format: date
+          nullable: true
+        requiredThreshold:
+          type: number
+        status:
+          type: string
+          enum: [pending, approved, rejected, expired, cancelled]
+        approvedCount:
+          type: integer
+        rejectedCount:
+          type: integer
+        pendingCount:
+          type: integer
+        approvalPercentage:
+          type: number
+        votes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CommitmentVote"
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, jarId, amountCents, purpose, requiredThreshold, status, approvedCount, rejectedCount, pendingCount, approvalPercentage, votes, createdAt]
+
+    CreateCommitmentRequest:
+      type: object
+      properties:
+        milestoneId:
+          type: string
+          nullable: true
+        amountCents:
+          type: integer
+          minimum: 1
+        purpose:
+          type: string
+        vendorName:
+          type: string
+          nullable: true
+        paymentDeadline:
+          type: string
+          format: date
+          nullable: true
+        requiredThreshold:
+          type: number
+          default: 0.67
+        note:
+          type: string
+          nullable: true
+      required: [amountCents, purpose]
+
+    CommitmentVote:
+      type: object
+      properties:
+        id:
+          type: string
+        commitmentRequestId:
+          type: string
+        memberId:
+          type: string
+        vote:
+          type: string
+          enum: [approve, reject, clarification]
+        note:
+          type: string
+          nullable: true
+        memberName:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, commitmentRequestId, memberId, vote, createdAt]
+
+    CommitmentVoteRequest:
+      type: object
+      properties:
+        vote:
+          type: string
+          enum: [approve, reject, clarification]
+        note:
+          type: string
+          nullable: true
+      required: [vote]
+
+    # AGREEMENTS
+    Agreement:
+      type: object
+      properties:
+        id:
+          type: string
+        jarId:
+          type: string
+        version:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        effectiveDate:
+          type: string
+          format: date
+        acceptances:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgreementAcceptance"
+        myAcceptance:
+          $ref: "#/components/schemas/AgreementAcceptance"
+          nullable: true
+      required: [id, jarId, version, content, createdAt, effectiveDate, acceptances]
+
+    AgreementAcceptance:
+      type: object
+      properties:
+        id:
+          type: string
+        agreementId:
+          type: string
+        userId:
+          type: string
+        acceptedAt:
+          type: string
+          format: date-time
+        memberName:
+          type: string
+          nullable: true
+      required: [id, agreementId, userId, acceptedAt]
+
+    # NOTIFICATIONS
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        type:
+          type: string
+          enum: [invitation_received, member_joined, contribution_recorded, contribution_due, contribution_overdue, jar_halfway_funded, milestone_funded, commitment_requested, member_approved_commitment, member_rejected_commitment, lock_date_approaching, goal_fully_funded, general]
+        title:
+          type: string
+        message:
+          type: string
+        isRead:
+          type: boolean
+        relatedJarId:
+          type: string
+          nullable: true
+        relatedJarName:
+          type: string
+          nullable: true
+        actionUrl:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, userId, type, title, message, isRead, createdAt]
+
+    # ACTIVITY
+    ActivityEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        jarId:
+          type: string
+        userId:
+          type: string
+          nullable: true
+        eventType:
+          type: string
+          enum: [jar_created, invitation_sent, member_joined, contribution_added, contribution_reversed, target_changed, milestone_created, milestone_funded, commitment_requested, approval_submitted, jar_locked, jar_completed, jar_cancelled, member_left, agreement_accepted]
+        description:
+          type: string
+        actorName:
+          type: string
+          nullable: true
+        actorAvatarUrl:
+          type: string
+          nullable: true
+        amountCents:
+          type: integer
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, jarId, eventType, description, createdAt]
