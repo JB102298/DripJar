@@ -4,13 +4,15 @@ import {
   jars,
   jarMembers,
   contributions,
+  contributionSchedules,
   profiles,
   notifications,
   activityEvents,
 } from "@workspace/db";
-import { eq, and, desc, sql, inArray, count } from "drizzle-orm";
+import { eq, and, desc, sql, inArray, count, gte, lte } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
 import { calculateJarHealth, calculateMemberHealth } from "../lib/jar-health.js";
+import { computeNextDueDate, computePreviousDueDate, toISODate } from "../lib/schedule-utils.js";
 
 const router = Router();
 
@@ -125,15 +127,67 @@ router.get("/dashboard", requireAuth, async (req, res) => {
         ? Math.min(100, (contributedAmountCents / myMembership.contributionTargetCents) * 100)
         : 0;
 
+      // Fetch active schedule for this member
+      const scheduleRows = await db
+        .select()
+        .from(contributionSchedules)
+        .where(
+          and(
+            eq(contributionSchedules.jarId, featuredJar.id),
+            eq(contributionSchedules.memberId, myMembership.id),
+            eq(contributionSchedules.isActive, true),
+          ),
+        )
+        .limit(1);
+      const activeSchedule = scheduleRows[0] ?? null;
+
+      let nextScheduledDate: string | null = null;
+      let nextScheduledAmountCents: number | null = null;
+      let hasMissedContribution = false;
+
+      if (activeSchedule && !activeSchedule.isPaused) {
+        const nextDue = computeNextDueDate(activeSchedule, new Date());
+        if (nextDue) {
+          nextScheduledDate = toISODate(nextDue);
+          nextScheduledAmountCents = activeSchedule.amountCents;
+        }
+
+        // Check if the previous due date was missed (no contribution in ±1 day window)
+        const prevDue = computePreviousDueDate(activeSchedule, new Date());
+        if (prevDue) {
+          const windowStart = toISODate(new Date(prevDue.getFullYear(), prevDue.getMonth(), prevDue.getDate() - 1));
+          const windowEnd = toISODate(new Date(prevDue.getFullYear(), prevDue.getMonth(), prevDue.getDate() + 1));
+
+          const contribsNearDue = await db
+            .select({ id: contributions.id })
+            .from(contributions)
+            .where(
+              and(
+                eq(contributions.memberId, myMembership.id),
+                eq(contributions.jarId, featuredJar.id),
+                gte(contributions.contributionDate, windowStart),
+                lte(contributions.contributionDate, windowEnd),
+                inArray(contributions.status, ["completed", "simulated"]),
+              ),
+            )
+            .limit(1);
+
+          hasMissedContribution = !contribsNearDue[0];
+        }
+      }
+
+      const baseIsOnTrack = percentComplete >= (featuredJarData.health?.expectedPercentage ?? 0) - 10;
+
       personalProgress = {
         targetAmountCents: myMembership.contributionTargetCents,
         contributedAmountCents,
         remainingAmountCents,
         percentComplete,
-        nextScheduledDate: null,
-        nextScheduledAmountCents: null,
+        nextScheduledDate,
+        nextScheduledAmountCents,
         estimatedCompletionDate: null,
-        isOnTrack: percentComplete >= (featuredJarData.health?.expectedPercentage ?? 0) - 10,
+        isOnTrack: baseIsOnTrack && !hasMissedContribution,
+        hasMissedScheduledContribution: hasMissedContribution,
       };
     }
 

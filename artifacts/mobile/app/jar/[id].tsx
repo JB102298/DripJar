@@ -9,7 +9,8 @@ import {
   useListJarMembers,
   useListMilestones,
   useListJarActivity,
-  useListAgreements
+  useListAgreements,
+  useGetContributionSchedule,
 } from '@workspace/api-client-react';
 import { ImageBackground } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,6 +21,7 @@ import { JarHealthBadge } from '@/components/JarHealthBadge';
 import { ProgressBar } from '@/components/ProgressBar';
 import { MemberAvatar } from '@/components/MemberAvatar';
 import { EmptyState } from '@/components/EmptyState';
+import { ScheduleSetupSheet } from '@/components/ScheduleSetupSheet';
 import { useAuth } from '@/contexts/auth-context';
 
 type Tab = 'Overview' | 'Members' | 'Milestones' | 'Activity' | 'Agreements' | 'Settings';
@@ -34,6 +36,7 @@ export default function JarDetailScreen() {
   
   const [activeTab, setActiveTab] = useState<Tab>('Overview');
   const [refreshing, setRefreshing] = useState(false);
+  const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
 
   const { data: jar, isLoading: jarLoading, refetch: refetchJar } = useGetJar(id!, { query: { enabled: !!id } });
   const { data: health, refetch: refetchHealth } = useGetJarHealth(id!, { query: { enabled: !!id } });
@@ -41,11 +44,13 @@ export default function JarDetailScreen() {
   const { data: milestones, refetch: refetchMilestones } = useListMilestones(id!, { query: { enabled: !!id && activeTab === 'Milestones' } });
   const { data: activity, refetch: refetchActivity } = useListJarActivity(id!, undefined, { query: { enabled: !!id && activeTab === 'Activity' } });
   const { data: agreements, refetch: refetchAgreements } = useListAgreements(id!, { query: { enabled: !!id && activeTab === 'Agreements' } });
+  const { data: mySchedule, refetch: refetchSchedule } = useGetContributionSchedule(id!, { query: { enabled: !!id && activeTab === 'Overview' } });
 
   const onRefresh = async () => {
     setRefreshing(true);
     await refetchJar();
     await refetchHealth();
+    if (activeTab === 'Overview') await refetchSchedule();
     if (activeTab === 'Members') await refetchMembers();
     if (activeTab === 'Milestones') await refetchMilestones();
     if (activeTab === 'Activity') await refetchActivity();
@@ -55,6 +60,66 @@ export default function JarDetailScreen() {
 
   const formatCurrency = (cents: number) => {
     return '$' + (cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  };
+
+  const renderScheduleCard = () => {
+    const hasSchedule = mySchedule && mySchedule.isActive;
+    const freqLabel = hasSchedule
+      ? mySchedule.frequency === 'weekly'
+        ? 'Weekly'
+        : mySchedule.frequency === 'biweekly'
+        ? 'Every 2 weeks'
+        : mySchedule.frequency === 'monthly'
+        ? 'Monthly'
+        : mySchedule.frequency
+      : null;
+
+    return (
+      <View style={[styles.scheduleCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={styles.scheduleCardHeader}>
+          <View style={styles.scheduleCardLeft}>
+            <Feather name="repeat" size={16} color={colors.primary} style={{ marginRight: 8 }} />
+            <Text style={[styles.scheduleCardTitle, { color: colors.foreground }]}>
+              {hasSchedule ? 'Your Schedule' : 'Contribution Schedule'}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => setScheduleSheetVisible(true)}
+            style={[styles.scheduleEditBtn, { backgroundColor: colors.secondary }]}
+          >
+            <Feather name={hasSchedule ? 'edit-2' : 'plus'} size={14} color={colors.primary} />
+            <Text style={[styles.scheduleEditBtnText, { color: colors.primary }]}>
+              {hasSchedule ? 'Edit' : 'Set Up'}
+            </Text>
+          </Pressable>
+        </View>
+
+        {hasSchedule ? (
+          <View style={styles.scheduleDetails}>
+            {mySchedule.isPaused && (
+              <View style={[styles.pausedBadge, { backgroundColor: colors.muted }]}>
+                <Feather name="pause" size={12} color={colors.mutedForeground} />
+                <Text style={[styles.pausedText, { color: colors.mutedForeground }]}>Paused</Text>
+              </View>
+            )}
+            <View style={styles.scheduleDetailRow}>
+              <Text style={[styles.scheduleDetailLabel, { color: colors.mutedForeground }]}>Frequency</Text>
+              <Text style={[styles.scheduleDetailValue, { color: colors.foreground }]}>{freqLabel}</Text>
+            </View>
+            <View style={styles.scheduleDetailRow}>
+              <Text style={[styles.scheduleDetailLabel, { color: colors.mutedForeground }]}>Amount</Text>
+              <Text style={[styles.scheduleDetailValue, { color: colors.foreground }]}>
+                {formatCurrency(mySchedule.amountCents)}
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <Text style={[styles.scheduleEmptyText, { color: colors.mutedForeground }]}>
+            Set up a recurring schedule so you never miss a contribution.
+          </Text>
+        )}
+      </View>
+    );
   };
 
   const renderOverview = () => {
@@ -94,6 +159,8 @@ export default function JarDetailScreen() {
             <Text style={[styles.healthMessage, { color: colors.foreground }]}>{health.message}</Text>
           </View>
         )}
+
+        {renderScheduleCard()}
 
         <View style={[styles.actionRow, { marginTop: 24 }]}>
           <Pressable 
@@ -248,6 +315,14 @@ export default function JarDetailScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <ScheduleSetupSheet
+        visible={scheduleSheetVisible}
+        jarId={id!}
+        onClose={() => {
+          setScheduleSheetVisible(false);
+          refetchSchedule();
+        }}
+      />
       <View style={[styles.headerImageContainer, { height: insets.top + 160 }]}>
         <ImageBackground source={imageSource} style={StyleSheet.absoluteFill} contentFit="cover">
           <LinearGradient colors={['rgba(0,0,0,0.4)', 'rgba(0,0,0,0.8)']} style={StyleSheet.absoluteFill} />
@@ -402,6 +477,71 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 15,
     lineHeight: 22,
+  },
+  // Schedule card
+  scheduleCard: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginTop: 16,
+  },
+  scheduleCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  scheduleCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  scheduleCardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  scheduleEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  scheduleEditBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  scheduleDetails: {
+    gap: 8,
+  },
+  scheduleDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  scheduleDetailLabel: {
+    fontSize: 14,
+  },
+  scheduleDetailValue: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  pausedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  pausedText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  scheduleEmptyText: {
+    fontSize: 14,
+    lineHeight: 20,
   },
   actionRow: {
     flexDirection: 'row',
