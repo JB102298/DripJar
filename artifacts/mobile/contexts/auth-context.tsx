@@ -52,21 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (credentials: LoginRequest) => {
     const data = await loginMutation({ data: credentials });
-    // Assuming data includes token in a real app, 
-    // but the schema says AuthResponse returns user and profile.
-    // If the server sets a cookie, or returns a token. 
-    // Let's assume there's a token field or we just store a flag if it's cookie based.
-    // Let's look at schema AuthResponse. It only has user and profile.
-    // I will mock a token for auth-token-getter or use cookie based approach.
-    // The prompt says: "On success they receive { user, profile, token } and must call..."
-    // Wait, the OpenAPI spec says: AuthResponse: { user: User, profile: Profile }. There's no token in schema?
-    // I will mock a generic token if it's not in AuthResponse, or maybe it returns it in headers.
-    // Wait, the prompt specifically says:
-    // "The login/register functions call useLogin/useRegister mutations. On success they receive { user, profile, token } and must call: 1. AsyncStorage.setItem('auth_token', token)"
-    // I will cast it or assume it's there.
-    const response = data as unknown as { token?: string };
-    const newToken = response.token || 'mock_token_for_now';
-    
+    const newToken = data.token;
     await AsyncStorage.setItem('auth_token', newToken);
     setAuthTokenGetter(() => newToken);
     setToken(newToken);
@@ -74,9 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = async (data: RegisterRequest) => {
     const responseData = await registerMutation({ data });
-    const response = responseData as unknown as { token?: string };
-    const newToken = response.token || 'mock_token_for_now';
-    
+    const newToken = responseData.token;
     await AsyncStorage.setItem('auth_token', newToken);
     setAuthTokenGetter(() => newToken);
     setToken(newToken);

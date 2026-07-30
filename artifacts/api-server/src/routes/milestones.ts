@@ -39,7 +39,7 @@ router.get("/jars/:jarId/milestones", requireAuth, async (req, res) => {
         );
       const allocatedAmountCents = Number(allocated[0]?.total ?? 0);
       const percentFunded = ms.targetAmountCents > 0
-        ? Math.min(100, (allocatedAmountCents / ms.targetAmountCents) * 100)
+        ? Math.min(100, Math.round((allocatedAmountCents / ms.targetAmountCents) * 1000) / 10)
         : 0;
 
       return {

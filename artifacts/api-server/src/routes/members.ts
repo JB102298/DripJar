@@ -61,7 +61,7 @@ router.get("/jars/:jarId/members", requireAuth, async (req, res) => {
       const contributedAmountCents = Number(contribResult[0]?.total ?? 0);
       const percentComplete =
         m.contributionTargetCents > 0
-          ? Math.min(100, (contributedAmountCents / m.contributionTargetCents) * 100)
+          ? Math.min(100, Math.round((contributedAmountCents / m.contributionTargetCents) * 1000) / 10)
           : 0;
 
       const healthStatus = calculateMemberHealth(

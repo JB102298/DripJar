@@ -56,7 +56,7 @@ function daysRemaining(targetDate: string): number | null {
 async function buildJarSummary(jar: typeof jars.$inferSelect, userId: string) {
   const totalSavedCents = await getTotalSaved(jar.id);
   const percentFunded = jar.goalAmountCents > 0
-    ? Math.min(100, (totalSavedCents / jar.goalAmountCents) * 100)
+    ? Math.min(100, Math.round((totalSavedCents / jar.goalAmountCents) * 1000) / 10)
     : 0;
 
   const memberCount = await db
@@ -238,7 +238,7 @@ router.get("/jars/:jarId", requireAuth, async (req, res) => {
 
   const totalSavedCents = await getTotalSaved(jarId);
   const percentFunded = jar.goalAmountCents > 0
-    ? Math.min(100, (totalSavedCents / jar.goalAmountCents) * 100)
+    ? Math.min(100, Math.round((totalSavedCents / jar.goalAmountCents) * 1000) / 10)
     : 0;
 
   const memberCount = await db

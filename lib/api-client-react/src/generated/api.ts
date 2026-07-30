@@ -2114,9 +2114,9 @@ export const getGetContributionScheduleUrl = (jarId: string,) => {
 /**
  * @summary Get my contribution schedule for a jar
  */
-export const getContributionSchedule = async (jarId: string, options?: Parameters<typeof customFetch>[1]): Promise<ContributionSchedule> => {
+export const getContributionSchedule = async (jarId: string, options?: Parameters<typeof customFetch>[1]): Promise<ContributionSchedule | null> => {
 
-  return customFetch<ContributionSchedule>(getGetContributionScheduleUrl(jarId),
+  return customFetch<ContributionSchedule | null>(getGetContributionScheduleUrl(jarId),
   {
     ...options,
     method: 'GET'

@@ -69,7 +69,7 @@ router.get("/dashboard", requireAuth, async (req, res) => {
       );
     const totalSavedCents = Number(savedResult[0]?.total ?? 0);
     const percentFunded = featuredJar.goalAmountCents > 0
-      ? Math.min(100, (totalSavedCents / featuredJar.goalAmountCents) * 100)
+      ? Math.min(100, Math.round((totalSavedCents / featuredJar.goalAmountCents) * 1000) / 10)
       : 0;
 
     const memberCount = await db
@@ -223,7 +223,7 @@ router.get("/dashboard", requireAuth, async (req, res) => {
           );
         const contributedAmountCents = Number(memberContribs[0]?.total ?? 0);
         const percentComplete = m.contributionTargetCents > 0
-          ? Math.min(100, (contributedAmountCents / m.contributionTargetCents) * 100)
+          ? Math.min(100, Math.round((contributedAmountCents / m.contributionTargetCents) * 1000) / 10)
           : 0;
         const status = calculateMemberHealth(
           m.contributionTargetCents,

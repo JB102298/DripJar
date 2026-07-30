@@ -62,8 +62,9 @@ export interface Profile {
 }
 
 export interface AuthResponse {
+  token: string;
   user: User;
-  profile: Profile;
+  profile: Profile | null;
 }
 
 export interface UpdateProfileRequest {
@@ -125,6 +126,7 @@ export interface PersonalProgress {
   nextScheduledAmountCents?: number | null;
   estimatedCompletionDate?: string | null;
   isOnTrack: boolean;
+  hasMissedScheduledContribution?: boolean;
 }
 
 export type MemberProgressSummaryStatus = typeof MemberProgressSummaryStatus[keyof typeof MemberProgressSummaryStatus];
@@ -264,6 +266,9 @@ export interface Jar {
   totalSavedCents: number;
   percentFunded: number;
   daysRemaining?: number | null;
+  health?: JarHealth | null;
+  userRole?: string | null;
+  launchedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
