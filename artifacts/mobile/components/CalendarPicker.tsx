@@ -102,7 +102,8 @@ export function CalendarPicker({ value, onChange, minDate }: CalendarPickerProps
           {row.map((day, ci) => {
             if (!day) return <View key={ci} style={styles.cell} />;
 
-            const cellDate = new Date(viewYear, viewMonth, day);
+            // Use noon to avoid UTC-shift off-by-one when calling toISOString()
+            const cellDate = new Date(viewYear, viewMonth, day, 12, 0, 0);
             const isSelected = value ? isSameDay(cellDate, value) : false;
             const isToday = isSameDay(cellDate, today);
             const isDisabled = minDate ? cellDate < minDate : false;

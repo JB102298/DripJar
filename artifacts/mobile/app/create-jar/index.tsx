@@ -25,7 +25,7 @@ export default function CreateJarStep1() {
   const insets = useSafeAreaInsets();
   const { state, updateState } = useCreateJarContext();
 
-  const isFormValid = state.name && state.category && state.destination;
+  const isFormValid = state.name && state.category;
 
   const handleNext = () => {
     if (isFormValid) {
@@ -95,7 +95,7 @@ export default function CreateJarStep1() {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={[styles.label, { color: colors.foreground }]}>Destination</Text>
+          <Text style={[styles.label, { color: colors.foreground }]}>Destination (Optional)</Text>
           <View style={[styles.inputContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <TextInput
               style={[styles.input, { color: colors.foreground }]}

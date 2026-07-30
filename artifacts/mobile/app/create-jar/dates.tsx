@@ -14,9 +14,14 @@ export default function CreateJarStep2() {
   const insets = useSafeAreaInsets();
   const { state, updateState } = useCreateJarContext();
 
-  const startDate = state.startDate ? new Date(state.startDate) : undefined;
-  const endDate = state.endDate ? new Date(state.endDate) : undefined;
-  const targetDate = state.targetDate ? new Date(state.targetDate) : undefined;
+  // Parse stored YYYY-MM-DD at noon local time to avoid UTC-shift off-by-one
+  const parseLocal = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d, 12, 0, 0); };
+  // Store as YYYY-MM-DD using local calendar date (not UTC)
+  const toLocalISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const startDate = state.startDate ? parseLocal(state.startDate) : undefined;
+  const endDate = state.endDate ? parseLocal(state.endDate) : undefined;
+  const targetDate = state.targetDate ? parseLocal(state.targetDate) : undefined;
 
   const isFormValid = !!targetDate && (!startDate || targetDate <= startDate);
 
@@ -46,7 +51,7 @@ export default function CreateJarStep2() {
           <Text style={[styles.label, { color: colors.foreground }]}>Trip Start Date (Optional)</Text>
           <DateInput
             value={startDate}
-            onChange={(d) => updateState({ startDate: d.toISOString().split('T')[0] })}
+            onChange={(d) => updateState({ startDate: toLocalISO(d) })}
             placeholder="Select trip start date"
           />
         </View>
@@ -55,7 +60,7 @@ export default function CreateJarStep2() {
           <Text style={[styles.label, { color: colors.foreground }]}>Trip End Date (Optional)</Text>
           <DateInput
             value={endDate}
-            onChange={(d) => updateState({ endDate: d.toISOString().split('T')[0] })}
+            onChange={(d) => updateState({ endDate: toLocalISO(d) })}
             placeholder="Select trip end date"
           />
         </View>
@@ -69,7 +74,7 @@ export default function CreateJarStep2() {
           </Text>
           <DateInput
             value={targetDate}
-            onChange={(d) => updateState({ targetDate: d.toISOString().split('T')[0] })}
+            onChange={(d) => updateState({ targetDate: toLocalISO(d) })}
             placeholder="Select target date"
           />
           {targetDate && startDate && targetDate > startDate && (
