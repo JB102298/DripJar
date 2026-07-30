@@ -6,6 +6,7 @@ import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
 import { logActivity } from "../lib/activity.js";
 import { createNotification } from "../lib/notifications.js";
 import crypto from "node:crypto";
+import { sendInvitationEmail } from "../lib/email.js";
 
 const router = Router();
 
@@ -62,6 +63,16 @@ router.post("/jars/:jarId/invitations", requireAuth, async (req, res) => {
   }).returning();
 
   if (!invitation) { res.status(500).json({ error: "InternalError", message: "Failed to create invitation" }); return; }
+
+  // Send invitation email (non-blocking — errors are logged but don't fail the request)
+  const inviterProfile = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
+  const inviterName = inviterProfile[0]?.displayName ?? "A TripJar member";
+  sendInvitationEmail({
+    toEmail: email.toLowerCase(),
+    jarName: jar[0].name,
+    inviterName,
+    token,
+  }).catch(() => { /* already logged inside sendInvitationEmail */ });
 
   await logActivity({
     jarId,

@@ -1,5 +1,17 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, RefreshControl, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  RefreshControl,
+  Platform,
+  Modal,
+  TextInput,
+  Alert,
+  KeyboardAvoidingView,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,6 +23,7 @@ import {
   useListJarActivity,
   useListAgreements,
   useGetContributionSchedule,
+  useCreateInvitation,
 } from '@workspace/api-client-react';
 import { ImageBackground } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -37,6 +50,10 @@ export default function JarDetailScreen() {
   const [activeTab, setActiveTab] = useState<Tab>('Overview');
   const [refreshing, setRefreshing] = useState(false);
   const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
+  const [inviteModalVisible, setInviteModalVisible] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteSending, setInviteSending] = useState(false);
+  const [inviteError, setInviteError] = useState('');
 
   const { data: jar, isLoading: jarLoading, refetch: refetchJar } = useGetJar(id!, { query: { enabled: !!id } });
   const { data: health, refetch: refetchHealth } = useGetJarHealth(id!, { query: { enabled: !!id } });
@@ -45,6 +62,8 @@ export default function JarDetailScreen() {
   const { data: activity, refetch: refetchActivity } = useListJarActivity(id!, undefined, { query: { enabled: !!id && activeTab === 'Activity' } });
   const { data: agreements, refetch: refetchAgreements } = useListAgreements(id!, { query: { enabled: !!id && activeTab === 'Agreements' } });
   const { data: mySchedule, refetch: refetchSchedule } = useGetContributionSchedule(id!, { query: { enabled: !!id && activeTab === 'Overview' } });
+
+  const createInvitationMutation = useCreateInvitation();
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -175,10 +194,47 @@ export default function JarDetailScreen() {
     );
   };
 
+  const handleSendInvite = async () => {
+    if (!inviteEmail.trim()) {
+      setInviteError('Please enter an email address');
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(inviteEmail.trim())) {
+      setInviteError('Please enter a valid email address');
+      return;
+    }
+    setInviteError('');
+    setInviteSending(true);
+    try {
+      await createInvitationMutation.mutateAsync({
+        jarId: id!,
+        data: { email: inviteEmail.trim().toLowerCase() },
+      });
+      setInviteModalVisible(false);
+      setInviteEmail('');
+      Alert.alert('Invitation sent!', `An invitation has been sent to ${inviteEmail.trim()}.`);
+    } catch (e: any) {
+      const msg = e?.message ?? 'Failed to send invitation. Please try again.';
+      setInviteError(msg);
+    } finally {
+      setInviteSending(false);
+    }
+  };
+
   const renderMembers = () => {
     if (!members) return <SkeletonLoader height={200} />;
     return (
       <View style={styles.tabContent}>
+        {isOrganizer && (
+          <Pressable
+            style={[styles.inviteButton, { backgroundColor: colors.primary }]}
+            onPress={() => { setInviteEmail(''); setInviteError(''); setInviteModalVisible(true); }}
+          >
+            <Feather name="user-plus" size={18} color="#fff" />
+            <Text style={styles.inviteButtonText}>Invite Member</Text>
+          </Pressable>
+        )}
         {members.map(member => (
           <View key={member.id} style={[styles.memberRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <MemberAvatar 
@@ -208,7 +264,7 @@ export default function JarDetailScreen() {
             </View>
           </View>
         ))}
-        {members.length === 0 && <EmptyState icon="users" title="No members yet" />}
+        {members.length === 0 && !isOrganizer && <EmptyState icon="users" title="No members yet" />}
       </View>
     );
   };
@@ -315,6 +371,64 @@ export default function JarDetailScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Invite Member Modal */}
+      <Modal
+        visible={inviteModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setInviteModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <Pressable style={styles.modalBackdrop} onPress={() => setInviteModalVisible(false)} />
+          <View style={[styles.modalSheet, { backgroundColor: colors.card }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: colors.foreground }]}>Invite Member</Text>
+              <Pressable onPress={() => setInviteModalVisible(false)}>
+                <Feather name="x" size={24} color={colors.mutedForeground} />
+              </Pressable>
+            </View>
+            <Text style={[styles.modalSubtitle, { color: colors.mutedForeground }]}>
+              Enter the email address of the person you'd like to invite to {jar?.name}.
+            </Text>
+            <View style={[styles.modalInputContainer, { backgroundColor: colors.background, borderColor: inviteError ? '#EF4444' : colors.border }]}>
+              <Feather name="mail" size={18} color={colors.mutedForeground} style={{ marginRight: 10 }} />
+              <TextInput
+                style={[styles.modalInput, { color: colors.foreground }]}
+                placeholder="friend@example.com"
+                placeholderTextColor={colors.mutedForeground}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                autoFocus
+                value={inviteEmail}
+                onChangeText={text => { setInviteEmail(text); setInviteError(''); }}
+                onSubmitEditing={handleSendInvite}
+                returnKeyType="send"
+              />
+            </View>
+            {inviteError ? (
+              <Text style={[styles.modalError, { color: '#EF4444' }]}>{inviteError}</Text>
+            ) : null}
+            <Pressable
+              style={[styles.modalSendButton, { backgroundColor: inviteSending ? colors.muted : colors.primary }]}
+              onPress={handleSendInvite}
+              disabled={inviteSending}
+            >
+              {inviteSending ? (
+                <Text style={[styles.modalSendText, { color: colors.mutedForeground }]}>Sending…</Text>
+              ) : (
+                <>
+                  <Feather name="send" size={18} color="#fff" />
+                  <Text style={styles.modalSendText}>Send Invitation</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       <ScheduleSetupSheet
         visible={scheduleSheetVisible}
         jarId={id!}
@@ -676,5 +790,81 @@ const styles = StyleSheet.create({
   agreementStatus: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  // Invite button (Members tab)
+  inviteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 48,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  inviteButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  // Invite modal
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  modalSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: 40,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  modalInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    height: 52,
+    marginBottom: 8,
+  },
+  modalInput: {
+    flex: 1,
+    fontSize: 16,
+  },
+  modalError: {
+    fontSize: 13,
+    marginBottom: 16,
+  },
+  modalSendButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 52,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  modalSendText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: 'bold',
   },
 });

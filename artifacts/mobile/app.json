@@ -3,6 +3,7 @@
     "name": "TripJar",
     "slug": "tripjar",
     "version": "1.0.0",
+    "scheme": "tripjar",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "automatic",
