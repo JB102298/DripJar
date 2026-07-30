@@ -5,6 +5,7 @@ import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
 import { logActivity } from "../lib/activity.js";
 import { createNotification, notifyAllMembers } from "../lib/notifications.js";
+import { contributionLimiter } from "../lib/rate-limit.js";
 
 const router = Router();
 
@@ -74,7 +75,7 @@ router.get("/jars/:jarId/contributions", requireAuth, async (req, res) => {
 });
 
 // POST /jars/:jarId/contributions
-router.post("/jars/:jarId/contributions", requireAuth, async (req, res) => {
+router.post("/jars/:jarId/contributions", requireAuth, contributionLimiter, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const { jarId } = req.params as { jarId: string };
 

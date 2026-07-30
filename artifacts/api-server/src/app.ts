@@ -1,5 +1,6 @@
 import express, { type Express } from "express";
 import cors from "cors";
+import helmet from "helmet";
 import pinoHttp from "pino-http";
 import router from "./routes/index.js";
 import { logger } from "./lib/logger.js";
@@ -8,6 +9,19 @@ const app: Express = express();
 
 // Trust proxy for deployed environments
 app.set("trust proxy", 1);
+
+// ─── Security headers ─────────────────────────────────────────────────────────
+
+app.use(
+  helmet({
+    // Allow Expo/React Native web previews to load resources
+    crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: false, // CSP managed separately if needed
+  }),
+);
+app.disable("x-powered-by");
+
+// ─── Request logging ──────────────────────────────────────────────────────────
 
 app.use(
   pinoHttp({
@@ -18,45 +32,84 @@ app.use(
           id: req.id,
           method: req.method,
           url: req.url?.split("?")[0],
+          // Never log Authorization header or any token
         };
       },
       res(res) {
-        return {
-          statusCode: res.statusCode,
-        };
+        return { statusCode: res.statusCode };
       },
     },
   }),
 );
 
-// CORS: allow all origins in dev, restrict in production
-const allowedOrigins = process.env["ALLOWED_ORIGINS"]
-  ? process.env["ALLOWED_ORIGINS"].split(",")
-  : null;
+// ─── CORS — exact origin matching ────────────────────────────────────────────
+
+/**
+ * Parse ALLOWED_ORIGINS env var into a Set of normalized origin strings.
+ * Uses `new URL()` origin semantics — no substring matching.
+ *
+ * Returns null when the variable is absent (allow all, dev only).
+ * Throws at startup when an entry is malformed.
+ */
+function buildAllowedOriginSet(): Set<string> | null {
+  const raw = process.env["ALLOWED_ORIGINS"];
+  if (!raw) return null;
+
+  const origins = new Set<string>();
+  for (const entry of raw.split(",")) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    try {
+      const normalized = new URL(trimmed).origin;
+      if (!normalized || normalized === "null") {
+        throw new Error(`Could not normalize origin from "${trimmed}"`);
+      }
+      origins.add(normalized);
+    } catch (err) {
+      throw new Error(
+        `ALLOWED_ORIGINS entry "${trimmed}" is invalid: ${(err as Error).message}`,
+      );
+    }
+  }
+  return origins.size > 0 ? origins : null;
+}
+
+const allowedOriginSet = buildAllowedOriginSet();
 
 app.use(
   cors({
-    origin: allowedOrigins
-      ? (origin, callback) => {
-          if (!origin || allowedOrigins.some((o) => origin.includes(o))) {
+    origin: allowedOriginSet
+      ? (incomingOrigin, callback) => {
+          // No Origin header → allow (native mobile + server-to-server)
+          if (!incomingOrigin) {
+            callback(null, true);
+            return;
+          }
+          // Exact match only — never use includes/startsWith/regex partial matching
+          if (allowedOriginSet.has(incomingOrigin)) {
             callback(null, true);
           } else {
             callback(new Error("Not allowed by CORS"));
           }
         }
-      : true,
+      : true, // Dev: allow all origins
     credentials: true,
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
 
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+// ─── Body parsing ─────────────────────────────────────────────────────────────
+
+app.use(express.json({ limit: "256kb" }));
+app.use(express.urlencoded({ extended: true, limit: "256kb" }));
+
+// ─── Routes ───────────────────────────────────────────────────────────────────
 
 app.use("/api", router);
 
-// Global error handler
+// ─── Global error handler ────────────────────────────────────────────────────
+
 app.use(
   (
     err: Error,
@@ -64,7 +117,9 @@ app.use(
     res: express.Response,
     _next: express.NextFunction,
   ) => {
-    logger.error({ err }, "Unhandled error");
+    logger.error({ err: { message: err.message, name: err.name } }, "Unhandled error");
+
+    // Never expose stack traces, SQL details, or internal messages in production
     res.status(500).json({
       error: "InternalError",
       message:

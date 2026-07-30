@@ -7,11 +7,12 @@ import { logActivity } from "../lib/activity.js";
 import { createNotification } from "../lib/notifications.js";
 import crypto from "node:crypto";
 import { sendInvitationEmail } from "../lib/email.js";
+import { invitationLimiter } from "../lib/rate-limit.js";
 
 const router = Router();
 
 // POST /jars/:jarId/invitations
-router.post("/jars/:jarId/invitations", requireAuth, async (req, res) => {
+router.post("/jars/:jarId/invitations", requireAuth, invitationLimiter, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const userEmail = (req as AuthenticatedRequest).userEmail;
   const { jarId } = req.params as { jarId: string };

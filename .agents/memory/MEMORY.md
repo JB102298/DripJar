@@ -1,3 +1,4 @@
+- [Security sprint](security-sprint.md) — auth hardening decisions: 15-min JWTs with jti, refresh token rotation, hashed reset tokens, exact CORS, rate-limit test pattern
 - [TripJar architecture](tripjar-arch.md) — JWT auth (Bearer token), integer cents everywhere, simulated payments only for MVP
 - [Zod codegen disabled](zod-codegen-disabled.md) — orval 8.x generates zod v4 syntax but workspace uses zod v3.25.76; api-zod is empty/disabled
 - [Backend route layout](backend-routes.md) — all 18 routes registered, auth uses `requireAuth` from `src/lib/auth.ts`

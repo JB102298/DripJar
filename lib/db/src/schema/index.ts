@@ -20,7 +20,7 @@ export const users = pgTable("users", {
   email: text("email").notNull(),
   passwordHash: text("password_hash"),
   emailVerified: boolean("email_verified").notNull().default(false),
-  resetToken: text("reset_token"),
+  resetTokenHash: text("reset_token_hash"),
   resetTokenExpiresAt: timestamp("reset_token_expires_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -35,6 +35,28 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   notifications: many(notifications),
   activityEvents: many(activityEvents),
   agreementAcceptances: many(agreementAcceptances),
+  refreshSessions: many(refreshSessions),
+}));
+
+// ─── Refresh Sessions ─────────────────────────────────────────────────────────
+
+export const refreshSessions = pgTable("refresh_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  userAgent: text("user_agent"),
+  ipAddress: text("ip_address"),
+  expiresAt: timestamp("expires_at").notNull(),
+  revokedAt: timestamp("revoked_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  lastUsedAt: timestamp("last_used_at"),
+}, (t) => [
+  uniqueIndex("refresh_sessions_token_hash_idx").on(t.tokenHash),
+  index("refresh_sessions_user_id_idx").on(t.userId),
+]);
+
+export const refreshSessionsRelations = relations(refreshSessions, ({ one }) => ({
+  user: one(users, { fields: [refreshSessions.userId], references: [users.id] }),
 }));
 
 // ─── Profiles ────────────────────────────────────────────────────────────────

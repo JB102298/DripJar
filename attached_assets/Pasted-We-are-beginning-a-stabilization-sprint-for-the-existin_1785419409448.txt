@@ -1,0 +1,247 @@
+We are beginning a stabilization sprint for the existing TripJar codebase.
+
+Do not add new product features or redesign the user interface during this sprint.
+
+Your objective is to harden authentication, session handling, password resets, CORS, API security, and configuration without breaking the existing mobile application or API contracts unnecessarily.
+
+Before changing code:
+
+1. Inspect the current monorepo structure.
+2. Identify every file that will need modification.
+3. Produce a concise implementation plan.
+4. Identify any database migrations required.
+5. Identify any mobile-client changes required.
+6. Do not begin implementation until the plan is complete.
+
+Then implement the following work.
+
+SECURITY FIX 1 — REMOVE JWT SECRET FALLBACK
+
+The API currently uses a hard-coded fallback JWT secret when JWT_SECRET is missing.
+
+Remove all fallback secrets.
+
+Requirements:
+
+- JWT_SECRET must be supplied through an environment variable.
+- The API must fail fast during startup when JWT_SECRET is missing.
+- The startup error must clearly state that JWT_SECRET is required.
+- Never log the JWT secret.
+- Document JWT_SECRET in the example environment file and README.
+- Add a minimum secret-length validation of 32 characters.
+- Do not silently generate a new secret at startup because that would invalidate sessions after every restart.
+
+SECURITY FIX 2 — REPLACE 30-DAY ACCESS TOKENS WITH ACCESS AND REFRESH SESSIONS
+
+The current app uses a single bearer JWT lasting approximately 30 days. Replace this with a safer session design.
+
+Requirements:
+
+- Access token lifetime: 15 minutes.
+- Refresh token lifetime: 30 days.
+- Refresh tokens must be cryptographically random or strongly signed.
+- Store only a hash of each refresh token in the database.
+- Create a sessions or refresh_tokens table with:
+  - id
+  - userId
+  - tokenHash
+  - deviceName or userAgent, nullable
+  - ipAddress, nullable
+  - expiresAt
+  - revokedAt, nullable
+  - createdAt
+  - lastUsedAt, nullable
+- Implement token rotation.
+- When a refresh token is used successfully:
+  - revoke or replace the previous token
+  - issue a new access token
+  - issue a new refresh token
+- Detect reuse of an already-rotated or revoked refresh token and revoke that user’s related token family or all sessions.
+- Implement:
+  - POST /auth/refresh
+  - POST /auth/logout
+  - POST /auth/logout-all
+- Logout must revoke the current refresh session.
+- Logout-all must revoke every refresh session for the user.
+- Password reset must revoke every active session for the user.
+- Do not expose token hashes through API responses.
+
+MOBILE AUTH CHANGES
+
+Update the Expo React Native client to support the new token model.
+
+Requirements:
+
+- Store access and refresh tokens using Expo SecureStore, not AsyncStorage.
+- Automatically refresh an expired access token once.
+- Prevent infinite retry loops.
+- If refresh fails, clear authentication state and return the user to login.
+- Ensure simultaneous failed API calls do not trigger multiple refresh requests.
+- Preserve the existing login and registration user experience.
+- Never log tokens.
+
+SECURITY FIX 3 — HASH PASSWORD RESET TOKENS
+
+The current application stores raw password-reset tokens in the users table.
+
+Replace this behavior.
+
+Requirements:
+
+- Generate a cryptographically secure random reset token.
+- Send or display the raw token only through the reset-delivery mechanism.
+- Store only the SHA-256 hash of the token.
+- Rename database fields if helpful, for example:
+  - resetTokenHash
+  - resetTokenExpiresAt
+- When processing a reset:
+  - hash the submitted raw token
+  - compare the resulting hash against the stored hash
+  - ensure it is not expired
+- Reset tokens must be single-use.
+- Clear the token hash after successful use.
+- Revoke all active sessions after a successful password reset.
+- Preserve the neutral forgot-password response that prevents email enumeration.
+- Do not place raw reset tokens in production logs.
+- In development, provide a safe mock-email preview or development-only response controlled by an explicit environment variable.
+
+SECURITY FIX 4 — CORRECT CORS VALIDATION
+
+The current production CORS implementation uses substring matching against allowed origins.
+
+Replace it with exact origin matching.
+
+Requirements:
+
+- Parse ALLOWED_ORIGINS as a comma-separated list.
+- Trim whitespace.
+- Normalize each entry using URL origin semantics.
+- Compare the incoming request origin against an exact Set of normalized origins.
+- Do not use includes(), startsWith(), endsWith(), regular expression partial matching, or hostname substring matching.
+- Requests with no Origin header may be permitted for native mobile clients and server-to-server requests.
+- In production, fail startup if ALLOWED_ORIGINS is missing unless the application is explicitly configured for native-only access.
+- Preserve support for local Expo and development origins through explicit configuration.
+- Add tests proving that:
+  - https://tripjar.com is allowed when configured
+  - https://app.tripjar.com is only allowed when separately configured
+  - https://tripjar.com.evil.example is rejected
+  - https://eviltripjar.com is rejected
+
+SECURITY FIX 5 — RATE LIMITING
+
+Add rate limiting to sensitive endpoints.
+
+Use a maintained Express-compatible rate-limiting library.
+
+Apply separate policies:
+
+Authentication:
+- Login: maximum 10 attempts per 15 minutes per IP, with additional protection by normalized email when practical.
+- Registration: maximum 5 attempts per hour per IP.
+- Forgot password: maximum 5 attempts per hour per IP and normalized email.
+- Reset password: maximum 10 attempts per hour per IP.
+- Refresh token: maximum 30 attempts per 15 minutes per IP.
+- Invitation lookup and acceptance: maximum 30 attempts per 15 minutes per IP.
+- Contribution creation and commitment voting: reasonable authenticated-user limits that prevent accidental or malicious flooding.
+
+Requirements:
+
+- Return HTTP 429.
+- Provide a user-friendly error response.
+- Include Retry-After where supported.
+- Respect the existing trusted-proxy configuration.
+- Do not use in-memory limiting as the final production design if multiple API instances may run.
+- It is acceptable to use an in-memory store for local development, but create a clear production adapter boundary and document the limitation.
+
+SECURITY FIX 6 — SECURITY HEADERS AND REQUEST SAFETY
+
+Add and configure Helmet.
+
+Requirements:
+
+- Use appropriate default security headers.
+- Do not break Expo or API requests.
+- Disable x-powered-by.
+- Keep JSON and URL-encoded request body limits at a safe size.
+- Add consistent API error handling.
+- Ensure production errors never expose stack traces, SQL, secrets, or internal implementation details.
+- Preserve detailed server-side logging without logging passwords, access tokens, refresh tokens, reset tokens, or authorization headers.
+
+SECURITY FIX 7 — CENTRALIZED INPUT VALIDATION
+
+Introduce centralized Zod validation for authentication-related endpoints first.
+
+Create reusable schemas for:
+
+- Registration
+- Login
+- Forgot password
+- Reset password
+- Refresh token
+- Profile update
+
+Requirements:
+
+- Normalize emails to lowercase and trim whitespace.
+- Validate email format.
+- Enforce first-name, last-name, and display-name length limits.
+- Reject whitespace-only names.
+- Enforce password minimum and maximum lengths.
+- Reject unexpected request properties or explicitly strip them consistently.
+- Return a consistent 400 validation-error format containing safe field-level messages.
+- Never return raw Zod internals directly to the client.
+- Apply server-side validation even if the mobile client already validates.
+
+DATABASE INTEGRITY
+
+Use database transactions where authentication operations require multiple writes.
+
+At minimum:
+
+- User registration plus profile creation.
+- Refresh-token rotation.
+- Password reset plus session revocation.
+
+Create all required Drizzle schema changes and migrations.
+
+TESTING REQUIREMENTS
+
+Add automated tests covering:
+
+- Startup fails when JWT_SECRET is absent.
+- Startup rejects an undersized JWT secret.
+- Login issues access and refresh tokens.
+- Access token expires according to configuration.
+- Refresh rotates the refresh token.
+- Reuse of an old refresh token is rejected.
+- Logout revokes the current session.
+- Logout-all revokes every session.
+- Password reset tokens are stored hashed, not raw.
+- Password reset token is single-use.
+- Password reset revokes all sessions.
+- Invalid CORS origins are rejected.
+- Rate limits return 429.
+- Invalid authentication payloads return structured validation errors.
+- Registration rolls back if profile creation fails.
+
+DELIVERABLES
+
+When complete, provide:
+
+1. Files changed.
+2. Database migration summary.
+3. New environment variables.
+4. Commands used to run migrations.
+5. Commands used to run tests.
+6. Test results.
+7. Any mobile-client migration steps.
+8. Any known limitations.
+9. Any items not completed.
+
+Do not report this sprint as complete unless:
+
+- TypeScript compilation passes.
+- Linting passes, if configured.
+- Database migrations apply successfully.
+- Automated tests pass.
+- Existing login, registration, logout, password reset, and authenticated API access have been manually smoke-tested.
