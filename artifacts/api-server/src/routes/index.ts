@@ -14,6 +14,7 @@ import agreementsRouter from "./agreements.js";
 import notificationsRouter from "./notifications.js";
 import activityRouter from "./activity.js";
 import remindersRouter from "./reminders.js";
+import downloadRouter from "./download.js";
 
 const router: IRouter = Router();
 
@@ -32,5 +33,6 @@ router.use(agreementsRouter);
 router.use(notificationsRouter);
 router.use(activityRouter);
 router.use(remindersRouter);
+router.use(downloadRouter);
 
 export default router;
