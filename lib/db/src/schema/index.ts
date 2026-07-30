@@ -48,11 +48,17 @@ export const refreshSessions = pgTable("refresh_sessions", {
   ipAddress: text("ip_address"),
   expiresAt: timestamp("expires_at").notNull(),
   revokedAt: timestamp("revoked_at"),
+  revokeReason: text("revoke_reason"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   lastUsedAt: timestamp("last_used_at"),
+  // Every session belongs to a family.  On login/register a new UUID is minted;
+  // on rotation the new session inherits the parent's familyId.
+  // Replay detection revokes all active sessions sharing this familyId.
+  familyId: uuid("family_id").notNull().defaultRandom(),
 }, (t) => [
   uniqueIndex("refresh_sessions_token_hash_idx").on(t.tokenHash),
   index("refresh_sessions_user_id_idx").on(t.userId),
+  index("refresh_sessions_family_id_idx").on(t.familyId),
 ]);
 
 export const refreshSessionsRelations = relations(refreshSessions, ({ one }) => ({

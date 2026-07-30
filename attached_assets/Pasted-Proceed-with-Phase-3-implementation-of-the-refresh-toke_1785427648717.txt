@@ -1,0 +1,241 @@
+Proceed with Phase 3 implementation of the refresh-token security work.
+
+The Phase 1 and Phase 2 audit is approved.
+
+Do not modify migrations 0000, 0001, or 0002.
+Do not make unrelated authentication or UI changes.
+
+CHOSEN POLICY
+
+Implement:
+
+- One refresh-token family per login/device session
+- Every successful refresh rotates the token
+- Reuse of a rotated token revokes only the affected family
+- Logout revokes the current session or family
+- Logout-all revokes every active family for the user
+- Password reset revokes every active family for the user
+- Strict one-time rotation
+- A lost refresh response may require that device to sign in again
+- Other device families must remain unaffected
+
+MIGRATION
+
+Create a new migration:
+
+0003_refresh_token_security
+
+Add to refresh_sessions:
+
+- family_id UUID NOT NULL
+- revoke_reason text nullable
+
+Add an index on family_id.
+
+For existing refresh_sessions rows:
+
+- Assign each existing row its own valid family_id.
+- Preserve every existing row.
+- Do not change token hashes, expiration dates, user IDs, or other session data.
+
+Prefer generating family UUIDs in application or migration-safe SQL without creating an undocumented PostgreSQL extension dependency.
+
+If using gen_random_uuid(), first verify that the required extension already exists and is represented in deployment setup. Otherwise use a migration strategy that does not depend on an untracked extension.
+
+Update the Drizzle schema, migration snapshot, and journal normally.
+
+Do not edit prior snapshots.
+
+REVOKE REASONS
+
+Use controlled values such as:
+
+- rotated
+- token_reuse_detected
+- logout
+- logout_all
+- password_reset
+- expired
+
+Avoid arbitrary user-provided revoke-reason strings.
+
+ATOMIC REFRESH ROTATION
+
+Rewrite the refresh operation so the following all occur inside one database transaction:
+
+1. Hash the submitted token.
+2. Locate the refresh_sessions row by token_hash.
+3. Lock that row using PostgreSQL SELECT ... FOR UPDATE.
+4. Validate revokedAt and expiresAt after the lock is acquired.
+5. Load or validate the owning user as needed.
+6. If active:
+   - mark the old row revoked
+   - set revokeReason = rotated
+   - insert exactly one replacement row
+   - inherit the same familyId
+7. Commit.
+8. Only after successful commit, return the new access and refresh tokens.
+
+Do not perform the security-sensitive session validation before the transaction and rely on that result later.
+
+CONCURRENT REQUEST REQUIREMENT
+
+When two independent requests submit the same active refresh token concurrently:
+
+- Exactly one request may return success.
+- Exactly one replacement session may be created.
+- The second request must wait for the lock, then observe that the original row is revoked.
+- The second request must execute replay handling.
+- It must not create another replacement.
+
+Use separate database connections in the concurrency test so PostgreSQL locking is genuinely exercised.
+
+REPLAY HANDLING
+
+When a revoked/rotated token is submitted:
+
+- Identify its familyId.
+- Revoke every still-active row in that family.
+- Set revokeReason = token_reuse_detected for rows revoked by replay handling.
+- Do not revoke unrelated families.
+- Return a generic response such as:
+
+  {
+    "error": "Unauthorized",
+    "message": "Invalid refresh token"
+  }
+
+Do not reveal whether:
+
+- replay was detected
+- a family was revoked
+- other sessions exist
+- the submitted token was expired, rotated, or otherwise invalid
+
+Replay handling must also be transactional.
+
+EXPIRED TOKENS
+
+When an expired active token is encountered:
+
+- Reject it.
+- Mark it revoked with revokeReason = expired if that is the chosen implementation.
+- Do not create a replacement.
+- Do not revoke unrelated families.
+
+LOGOUT BEHAVIOR
+
+Verify and implement:
+
+- logout: revoke only the submitted current refresh session or its family, and set revokeReason = logout
+- logout-all: revoke all active sessions for that user and set revokeReason = logout_all
+- password reset: revoke all active sessions within the existing password-reset transaction and set revokeReason = password_reset
+
+Clearly document whether normal logout revokes one row or the entire current family. Prefer revoking the family so no descendant or sibling session in that chain remains active.
+
+TOKEN CREATION
+
+For login and registration:
+
+- Generate a new familyId with crypto.randomUUID().
+- Store it on the initial refresh session.
+
+For rotation:
+
+- Reuse the parent session's familyId.
+
+Never store raw refresh tokens.
+
+MOBILE CLIENT
+
+Do not rewrite the mobile auth system unnecessarily.
+
+Verify through tests that:
+
+- concurrent API calls share one refresh promise
+- only one refresh HTTP request is sent
+- an original request is retried no more than once
+- terminal refresh failure clears both SecureStore tokens
+- no infinite refresh loop occurs
+- raw tokens are not logged
+- revoked-family failure returns the user to login safely
+
+Add mobile changes only if testing proves current behavior does not satisfy these requirements.
+
+TESTS
+
+Add automated tests covering at least:
+
+1. Login creates a session with a new familyId.
+2. Registration creates a session with a new familyId.
+3. Successful refresh revokes the old row with reason rotated.
+4. Replacement row inherits the same familyId.
+5. Old token cannot be successfully reused.
+6. Two concurrent refreshes produce exactly one successful response.
+7. Concurrent refresh creates exactly one replacement row.
+8. Replay revokes every active row in the affected family.
+9. Replay does not revoke another legitimate device family.
+10. Replay response is generic.
+11. Logout revokes the intended family with reason logout.
+12. Logout-all revokes all user families with reason logout_all.
+13. Password reset revokes all families with reason password_reset.
+14. Expired token is rejected and creates no replacement.
+15. Previously revoked token is rejected.
+16. A database failure after revoking the parent but before inserting the child rolls back both changes.
+17. A database failure after inserting the replacement also rolls back the transaction.
+18. No valid replacement remains after a failed transaction.
+19. Existing refresh_sessions rows survive migration 0003.
+20. Mobile refresh mutex sends only one refresh request.
+21. Original mobile request is retried at most once.
+22. Terminal mobile refresh failure clears SecureStore.
+23. Tokens do not appear in logs or returned errors.
+
+MIGRATION VERIFICATION
+
+Verify migration 0003 against:
+
+- the current development database
+- a fresh database migrated from 0000 through 0003
+- a database containing existing refresh_sessions rows
+
+Confirm:
+
+- no session rows are lost
+- every existing row receives a non-null familyId
+- the family index exists
+- foreign-key behavior remains unchanged
+- drizzle-kit generate reports no pending or duplicate schema changes afterward
+
+RUN AND REPORT
+
+Run:
+
+- API build
+- normal test suite
+- dedicated rate-limit suite
+- refresh-token security/concurrency tests
+- migration verification
+- drizzle-kit schema-diff verification
+- mobile TypeScript/tests or Expo diagnostics
+
+Report:
+
+1. Files changed
+2. Migration filename and exact SQL
+3. Schema and snapshot changes
+4. Existing-session migration results
+5. Exact transaction flow
+6. Exact row-locking implementation
+7. Replay-revocation behavior
+8. Concurrent-request results
+9. Rollback test results
+10. Multi-device isolation results
+11. Mobile-client verification
+12. API build result
+13. Normal test totals
+14. Rate-limit test totals
+15. New refresh-security test totals
+16. Remaining known edge cases
+17. Situations that require the user to sign in again
+
+Do not mark the task complete unless the concurrency test proves exactly one successful rotation using separate database connections and the rollback tests prove no partially rotated state can remain.

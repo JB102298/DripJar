@@ -1,0 +1,227 @@
+Task 4 — Refresh Token Security & Concurrency Audit
+
+Do not begin implementation immediately.
+
+First perform a complete audit of the existing refresh-token implementation.
+
+Do not modify unrelated authentication code.
+
+Do not redesign the login flow.
+
+Do not edit or rewrite migrations 0000, 0001, or 0002.
+
+If schema changes are required, create a new migration (0003 or later).
+
+⸻
+
+Phase 1 — Current Implementation Audit
+
+Inspect the complete refresh-token lifecycle and document exactly how it currently works.
+
+Explain:
+
+1. Refresh token creation
+2. Refresh token hashing
+3. Database lookup
+4. Session lookup
+5. Rotation flow
+6. Logout flow
+7. Logout-all flow
+8. Password reset session revocation
+9. SecureStore interaction
+10. Refresh mutex behavior
+11. Retry logic
+12. Session revocation
+13. Expiration handling
+14. Replay detection (if any)
+15. Concurrent refresh handling
+16. Database transaction usage
+17. PostgreSQL row locking
+18. Logging behavior
+19. Error responses
+20. Multi-device behavior
+
+Do not recommend changes until the audit is complete.
+
+Produce a numbered request-flow from:
+
+Login
+
+↓
+
+Authenticated requests
+
+↓
+
+Access token expiry
+
+↓
+
+Refresh
+
+↓
+
+Rotation
+
+↓
+
+Logout
+
+↓
+
+Password reset
+
+⸻
+
+Phase 2 — Security Evaluation
+
+Evaluate the implementation against current OAuth-style refresh-token best practices.
+
+Specifically answer:
+
+* Can two simultaneous refresh requests both succeed?
+* Can a rotated refresh token be reused?
+* What happens if the response containing the new refresh token is lost?
+* Does replay detection exist?
+* Are sessions isolated per device?
+* Is there a token family concept?
+* Are refresh tokens ever logged?
+* Are hashes compared safely?
+* Can replay on one device revoke every device?
+
+Then recommend one policy.
+
+Preferred policy:
+
+* One token family per device
+* Rotation every refresh
+* Replay revokes only the affected family
+* Password reset revokes every family
+* Logout revokes current family
+* Logout-all revokes every family
+
+If another policy is safer given the current architecture, explain why.
+
+⸻
+
+Phase 3 — Implementation
+
+Only after the audit.
+
+Implement improvements only where necessary.
+
+If a schema change is required:
+
+Create
+
+0003_refresh_token_security
+
+Do not modify previous migrations.
+
+Requirements:
+
+Atomic rotation
+
+Within one database transaction:
+
+* Locate session
+* Lock row
+* Validate
+* Revoke old session
+* Create replacement
+* Commit
+* Return tokens
+
+Exactly one concurrent refresh may succeed.
+
+⸻
+
+Replay detection
+
+Reusing a rotated token must:
+
+* Detect replay
+* Revoke the affected token family
+* Record revoke reason
+* Return generic Unauthorized
+
+Do not leak security details.
+
+⸻
+
+Network-loss behavior
+
+Document the behavior when:
+
+* Server rotates token
+* Response never reaches client
+* Client retries old token
+
+Either:
+
+* Keep strict one-time rotation
+
+OR
+
+Implement a carefully justified retry window.
+
+Do not weaken replay protection.
+
+⸻
+
+Mobile client
+
+Verify:
+
+* One refresh mutex
+* One refresh request
+* One retry
+* SecureStore cleared on terminal failure
+* No infinite refresh loop
+* No token logging
+* Graceful reauthentication after revoked family
+
+⸻
+
+Tests
+
+Add tests for:
+
+* Successful rotation
+* Replay detection
+* Concurrent refresh
+* Database rollback
+* Token-family isolation
+* Logout
+* Logout-all
+* Password reset
+* Expired tokens
+* Revoked tokens
+* Lost-response scenario
+* Mobile mutex
+* SecureStore clearing
+* No token leakage in logs
+
+⸻
+
+Verification
+
+Run:
+
+* API build
+* Normal tests
+* Rate-limit tests
+* New refresh-token tests
+* Migration verification
+
+Report:
+
+* Current implementation summary
+* Changes made
+* Migration (if any)
+* Transaction strategy
+* Row-lock strategy
+* Replay policy
+* Concurrent refresh results
+* Test totals
+* Remaining edge cases

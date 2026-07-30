@@ -58,6 +58,9 @@ function safeProfile(p: typeof profiles.$inferSelect) {
 }
 
 // ─── Helper: issue a token pair and create a refresh session ──────────────────
+//
+// Each call starts a new token *family*.  On rotation the family is inherited
+// from the parent session so the entire chain stays linked.
 
 async function issueTokenPair(
   userId: string,
@@ -66,6 +69,7 @@ async function issueTokenPair(
 ) {
   const accessToken = signAccessToken(userId, email);
   const { raw: refreshTokenRaw, hash: refreshTokenHash } = createRefreshToken();
+  const familyId = crypto.randomUUID(); // new family per login / register
 
   await db.insert(refreshSessions).values({
     userId,
@@ -73,6 +77,7 @@ async function issueTokenPair(
     userAgent: (req.headers as Record<string, string>)["user-agent"] ?? null,
     ipAddress: (req as { ip?: string }).ip ?? null,
     expiresAt: refreshTokenExpiresAt(),
+    familyId,
   });
 
   return { accessToken, refreshTokenRaw };
@@ -190,6 +195,26 @@ router.post("/auth/login", loginLimiter, validate(loginSchema), async (req, res)
 });
 
 // ─── POST /auth/refresh ───────────────────────────────────────────────────────
+//
+// Atomic rotation with row-level locking:
+//
+//  1. Open a transaction.
+//  2. SELECT … FOR UPDATE — acquires an exclusive row lock so concurrent
+//     requests using the same token are serialised rather than racing.
+//  3. Validate the session (not found / already revoked / expired).
+//  4. If the token is found but already revoked (revokedAt ≠ null) this is a
+//     replay attempt.  Revoke every active session in the same token family and
+//     return a generic 401 — do not reveal that replay was detected.
+//  5. On success: mark old session revoked ('rotated'), insert new session
+//     inheriting the same familyId, commit, return new token pair.
+//
+// Network-loss behaviour: if the server rotates the token but the response
+// never reaches the client, the client retries with the old token.  That token
+// is now 'rotated' and the server treats it as a replay, revoking the family.
+// The client must re-authenticate.  This is intentionally strict — weakening
+// it to allow a retry window would erode the replay guarantee.  The mobile
+// client's mutex (refreshLockRef) already prevents spurious concurrent calls
+// from the same device in normal operation.
 
 router.post(
   "/auth/refresh",
@@ -199,91 +224,126 @@ router.post(
     const { refreshToken: rawToken } = req.body as { refreshToken: string };
     const tokenHash = hashToken(rawToken);
 
-    const [session] = await db
-      .select()
-      .from(refreshSessions)
-      .where(eq(refreshSessions.tokenHash, tokenHash))
-      .limit(1);
+    type RotateResult =
+      | { ok: true; accessToken: string; refreshTokenRaw: string }
+      | { ok: false };
 
-    // Token not found at all
-    if (!session) {
-      res.status(401).json({ error: "Unauthorized", message: "Invalid refresh token" });
-      return;
-    }
+    const result = await db.transaction(async (tx): Promise<RotateResult> => {
 
-    // Token was already revoked — possible theft/reuse attack; revoke entire family
-    if (session.revokedAt !== null) {
-      logger.warn({ userId: session.userId }, "Refresh token reuse detected — revoking all sessions");
-      await db
-        .update(refreshSessions)
-        .set({ revokedAt: new Date() })
-        .where(
-          and(
-            eq(refreshSessions.userId, session.userId),
-            isNull(refreshSessions.revokedAt),
-          ),
+      // ── 1. Locate and lock the session row ──────────────────────────────────
+      const [session] = await tx
+        .select()
+        .from(refreshSessions)
+        .where(eq(refreshSessions.tokenHash, tokenHash))
+        .for("update")
+        .limit(1);
+
+      if (!session) {
+        return { ok: false };
+      }
+
+      // ── 2. Replay detection ─────────────────────────────────────────────────
+      // Token was already revoked (rotated, logged out, expired, etc.).
+      // Revoke every remaining active session in this token family and return
+      // a generic error — never reveal that replay was detected.
+      if (session.revokedAt !== null) {
+        logger.warn(
+          { userId: session.userId, familyId: session.familyId },
+          "Refresh token replay detected — revoking token family",
         );
-      res.status(401).json({
-        error: "Unauthorized",
-        message: "Refresh token has already been used. All sessions have been revoked for security.",
-      });
-      return;
-    }
+        await tx
+          .update(refreshSessions)
+          .set({ revokedAt: new Date(), revokeReason: "token_reuse_detected" })
+          .where(
+            and(
+              eq(refreshSessions.familyId, session.familyId),
+              isNull(refreshSessions.revokedAt),
+            ),
+          );
+        return { ok: false };
+      }
 
-    // Token expired
-    if (session.expiresAt < new Date()) {
-      await db
-        .update(refreshSessions)
-        .set({ revokedAt: new Date() })
-        .where(eq(refreshSessions.id, session.id));
-      res.status(401).json({ error: "Unauthorized", message: "Refresh token has expired" });
-      return;
-    }
+      // ── 3. Expiry check ─────────────────────────────────────────────────────
+      if (session.expiresAt < new Date()) {
+        await tx
+          .update(refreshSessions)
+          .set({ revokedAt: new Date(), revokeReason: "expired" })
+          .where(eq(refreshSessions.id, session.id));
+        return { ok: false };
+      }
 
-    const [user] = await db.select().from(users).where(eq(users.id, session.userId)).limit(1);
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized", message: "User not found" });
-      return;
-    }
+      // ── 4. Load user (inside transaction for read consistency) ──────────────
+      const [user] = await tx
+        .select({ id: users.id, email: users.email })
+        .from(users)
+        .where(eq(users.id, session.userId))
+        .limit(1);
 
-    // Rotate: revoke old token and issue new pair atomically
-    const { raw: newRefreshRaw, hash: newRefreshHash } = createRefreshToken();
-    const newAccessToken = signAccessToken(user.id, user.email);
+      if (!user) {
+        return { ok: false };
+      }
 
-    await db.transaction(async (tx) => {
+      // ── 5. Rotate: revoke old session, issue new one in the same family ─────
+      const { raw: newRaw, hash: newHash } = createRefreshToken();
+      const newAccessToken = signAccessToken(user.id, user.email);
+
       await tx
         .update(refreshSessions)
-        .set({ revokedAt: new Date() })
+        .set({ revokedAt: new Date(), revokeReason: "rotated" })
         .where(eq(refreshSessions.id, session.id));
 
       await tx.insert(refreshSessions).values({
         userId: user.id,
-        tokenHash: newRefreshHash,
+        tokenHash: newHash,
         userAgent: session.userAgent,
         ipAddress: session.ipAddress,
         expiresAt: refreshTokenExpiresAt(),
+        familyId: session.familyId, // inherit family → chain stays linked
       });
+
+      return { ok: true, accessToken: newAccessToken, refreshTokenRaw: newRaw };
     });
 
-    res.json({ token: newAccessToken, refreshToken: newRefreshRaw });
+    if (!result.ok) {
+      res.status(401).json({ error: "Unauthorized", message: "Invalid refresh token" });
+      return;
+    }
+
+    res.json({ token: result.accessToken, refreshToken: result.refreshTokenRaw });
   },
 );
 
 // ─── POST /auth/logout ────────────────────────────────────────────────────────
+//
+// Revokes every active session in the same token family as the submitted
+// refresh token — not just the single row matching the hash.  This ensures
+// no sibling or descendant token in the same rotation chain can be reused
+// after the user logs out (e.g. if a rotated-but-undelivered token exists).
 
 router.post("/auth/logout", requireAuth, validate(refreshTokenSchema), async (req, res) => {
   const { refreshToken: rawToken } = req.body as { refreshToken: string };
   const tokenHash = hashToken(rawToken);
 
-  await db
-    .update(refreshSessions)
-    .set({ revokedAt: new Date() })
-    .where(
-      and(
-        eq(refreshSessions.tokenHash, tokenHash),
-        isNull(refreshSessions.revokedAt),
-      ),
-    );
+  // Find the session's familyId (active sessions only — already-revoked tokens
+  // are silently ignored so logout is always a clean no-error response).
+  const [session] = await db
+    .select({ familyId: refreshSessions.familyId })
+    .from(refreshSessions)
+    .where(and(eq(refreshSessions.tokenHash, tokenHash), isNull(refreshSessions.revokedAt)))
+    .limit(1);
+
+  if (session) {
+    // Revoke the entire family so no chain member can be replayed after logout
+    await db
+      .update(refreshSessions)
+      .set({ revokedAt: new Date(), revokeReason: "logout" })
+      .where(
+        and(
+          eq(refreshSessions.familyId, session.familyId),
+          isNull(refreshSessions.revokedAt),
+        ),
+      );
+  }
 
   res.json({ message: "Logged out successfully" });
 });
@@ -295,7 +355,7 @@ router.post("/auth/logout-all", requireAuth, async (req, res) => {
 
   await db
     .update(refreshSessions)
-    .set({ revokedAt: new Date() })
+    .set({ revokedAt: new Date(), revokeReason: "logout_all" })
     .where(
       and(eq(refreshSessions.userId, userId), isNull(refreshSessions.revokedAt)),
     );
@@ -406,7 +466,7 @@ router.post(
 
       await tx
         .update(refreshSessions)
-        .set({ revokedAt: new Date() })
+        .set({ revokedAt: new Date(), revokeReason: "password_reset" })
         .where(
           and(eq(refreshSessions.userId, user.id), isNull(refreshSessions.revokedAt)),
         );

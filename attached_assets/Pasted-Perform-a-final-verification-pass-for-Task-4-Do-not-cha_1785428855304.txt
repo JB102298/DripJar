@@ -1,0 +1,87 @@
+Perform a final verification pass for Task 4.
+
+Do not change authentication behavior unless a verified inconsistency is found.
+
+1. DATABASE DEFAULT
+
+Query PostgreSQL directly and report the exact column_default for:
+
+public.refresh_sessions.family_id
+
+Also inspect:
+
+- schema.ts
+- 0003_refresh_token_security.sql
+- 0003_snapshot.json
+- the development database
+- a fresh database migrated from 0000 through 0003
+
+Confirm whether all five consistently define family_id as:
+
+uuid NOT NULL DEFAULT gen_random_uuid()
+
+If the database migration does not establish the default but schema.ts and the snapshot expect it:
+
+- create a new migration 0004_add_refresh_family_default
+- do not edit 0003
+- add DEFAULT gen_random_uuid()
+- verify no rows or family IDs change
+- run drizzle-kit generate afterward and confirm no schema differences
+
+Do not claim consistency based only on drizzle-kit output. Include the direct PostgreSQL column_default query result.
+
+2. CONCURRENCY CONNECTION PROOF
+
+Verify that the concurrent refresh test genuinely exercises PostgreSQL locking across separate database connections.
+
+Instrument the test safely using PostgreSQL:
+
+SELECT pg_backend_pid();
+
+Record the backend PID used by each concurrent refresh transaction.
+
+Confirm:
+
+- the PIDs are different
+- both requests target the same original session row
+- exactly one response is 200
+- exactly one response is 401
+- only one replacement row is inserted
+- the second transaction observes the committed revoked state after waiting for the row lock
+
+Do not log raw tokens.
+
+3. MOBILE AUTH TESTS
+
+Add the smallest appropriate test infrastructure necessary to test auth-context behavior without restructuring the mobile application.
+
+Test:
+
+- two concurrent refresh callers result in one refresh fetch
+- both callers receive the same refresh result
+- terminal refresh failure deletes both SecureStore keys
+- an original API request is retried no more than once
+- no infinite retry occurs
+
+Mock SecureStore and fetch. Do not require a device or emulator.
+
+If adding mobile test infrastructure would require broad unrelated changes, stop and report:
+
+- the exact packages/configuration required
+- the exact tests that remain unimplemented
+- a narrowly scoped follow-up task
+
+4. FINAL VERIFICATION
+
+Run:
+
+- API build
+- normal API tests
+- rate-limit tests
+- refresh-token security tests
+- mobile auth tests, if implemented
+- drizzle-kit schema-diff verification
+
+Report exact totals and files changed.
+
+Do not mark Task 4 fully complete unless the family_id default is consistent and the separate-connection concurrency behavior is proven. Clearly label mobile verification as automated or audit-only.
