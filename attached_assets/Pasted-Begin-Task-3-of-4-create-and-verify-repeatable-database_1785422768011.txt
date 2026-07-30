@@ -1,0 +1,126 @@
+Begin Task 3 of 4: create and verify repeatable database migrations for Stabilization Sprint 1.
+
+Do not make unrelated schema changes.
+Do not reset, drop, or recreate the existing database.
+Do not delete or overwrite existing user data.
+
+The Sprint 1 database changes were previously applied manually through raw SQL because Drizzle Kit could not perform the rename interactively. We now need a committed, version-controlled migration that can reproduce the current schema in another environment.
+
+Required schema changes:
+
+1. Rename:
+
+   users.reset_token
+
+   to:
+
+   users.reset_token_hash
+
+2. Preserve the existing reset-token values during the rename.
+
+3. Keep the existing reset-token expiration column unchanged unless the committed schema uses a different intentional name.
+
+4. Create the refresh_sessions table with all fields currently defined in the Drizzle schema, including:
+
+   - id
+   - userId
+   - tokenHash
+   - userAgent, nullable
+   - ipAddress, nullable
+   - expiresAt
+   - revokedAt, nullable
+   - createdAt
+   - lastUsedAt, nullable
+
+5. Include all intended:
+
+   - primary keys
+   - foreign keys
+   - unique constraints
+   - indexes
+   - defaults
+   - delete behavior
+
+Before making changes:
+
+1. Inspect the current database schema.
+2. Inspect the current Drizzle schema.
+3. Inspect the migration history directory and migration journal.
+4. Determine whether the current database already contains the changes.
+5. Explain how the migration will safely support:
+   - an older pre-Sprint-1 database
+   - the current database where the raw SQL was already applied
+   - a fresh database created from migrations
+
+Then implement the migration.
+
+MIGRATION REQUIREMENTS
+
+- Store the migration in the repository.
+- Use the project’s normal migration naming and journal format.
+- Do not rely only on a command previously run manually.
+- Do not generate destructive DROP TABLE or DROP COLUMN statements.
+- Do not copy reset-token values into a new empty column and then discard the original.
+- Preserve all current rows.
+- Use conditional SQL only where appropriate and supported.
+- If the migration system expects migrations to run exactly once, preserve that model rather than hiding errors broadly.
+- Do not use blanket exception handling that could conceal a real migration failure.
+
+CURRENT DATABASE HANDLING
+
+Because the live development database may already have:
+
+- reset_token_hash
+- refresh_sessions
+
+do not blindly rerun incompatible SQL.
+
+Use a safe reconciliation method, such as:
+
+- recording the migration as applied only after verifying that the current schema exactly matches it, or
+- making the migration narrowly state-aware without suppressing unrelated errors.
+
+Explain which method was chosen and why.
+
+VERIFICATION
+
+Create or use a temporary test database representing the pre-Sprint-1 schema.
+
+Verify that:
+
+1. A sample user record with a non-null reset_token survives the rename.
+2. The same value exists afterward in reset_token_hash.
+3. No user rows are lost.
+4. refresh_sessions is created successfully.
+5. Its foreign key points to the correct user table and column.
+6. The intended indexes and constraints exist.
+7. The resulting database schema matches the current Drizzle schema.
+8. Running the normal migration process from the beginning produces a valid fresh database.
+9. The existing development database is left intact.
+
+Also verify the application still:
+
+- Builds successfully
+- Starts successfully
+- Passes the normal test suite
+- Passes the dedicated rate-limit test suite
+
+DELIVERABLES
+
+Report:
+
+1. Migration filename.
+2. Exact SQL in the migration.
+3. Migration journal changes.
+4. Command used to apply migrations.
+5. How the already-updated development database was reconciled.
+6. Temporary pre-Sprint-1 migration test results.
+7. Fresh-database migration results.
+8. Row-preservation verification.
+9. Schema-diff verification.
+10. Normal test results.
+11. Dedicated rate-limit test results.
+12. Files changed.
+13. Any known limitations.
+
+Do not mark Task 3 complete unless the migration is committed, repeatable, tested against a pre-Sprint-1 schema, and confirmed not to damage the current database.

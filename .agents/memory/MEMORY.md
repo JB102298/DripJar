@@ -3,4 +3,5 @@
 - [Zod codegen disabled](zod-codegen-disabled.md) — orval 8.x generates zod v4 syntax but workspace uses zod v3.25.76; api-zod is empty/disabled
 - [Backend route layout](backend-routes.md) — all 18 routes registered, auth uses `requireAuth` from `src/lib/auth.ts`
 - [DB schema pushed](db-schema.md) — all 16 tables live; seed via `pnpm --filter @workspace/scripts run seed` (jordan@tripjar.dev / password123)
+- [DB migration system](db-migration-system.md) — drizzle migrations in lib/db/drizzle/; idempotent SQL; drizzle.config out must be relative; TTY caveat for generate
 - [Expo app plugin fix](expo-plugin-fix.md) — removed expo-build-properties from app.json plugins (not installed, not needed for web preview)
