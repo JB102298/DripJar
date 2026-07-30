@@ -5,12 +5,15 @@
   "type": "module",
   "scripts": {
     "hello": "tsx src/hello.ts",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "generate-pdf": "tsx src/generate-codebase-pdf.ts"
   },
   "dependencies": {
+    "@types/pdfkit": "^0.17.6",
     "@workspace/db": "workspace:*",
     "bcryptjs": "^3.0.2",
-    "drizzle-orm": "catalog:"
+    "drizzle-orm": "catalog:",
+    "pdfkit": "^0.19.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
