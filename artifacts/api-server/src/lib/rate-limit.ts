@@ -16,9 +16,11 @@ import rateLimit, { type Options } from "express-rate-limit";
  * Swap the store here and nowhere else — the rest of the app is unchanged.
  */
 function createLimiter(opts: Partial<Options>) {
-  // Disable rate limiting in the test environment so tests can make many
-  // requests without tripping the in-memory counters.
-  if (process.env["NODE_ENV"] === "test") {
+  // Disable rate limiting in the test environment so the normal test suite can
+  // make many requests without tripping in-memory counters.
+  // Exception: TEST_RATE_LIMITS=1 opts in to real limiters for the dedicated
+  // rate-limit verification suite.
+  if (process.env["NODE_ENV"] === "test" && process.env["TEST_RATE_LIMITS"] !== "1") {
     return (_req: import("express").Request, _res: import("express").Response, next: import("express").NextFunction) => next();
   }
   return rateLimit({

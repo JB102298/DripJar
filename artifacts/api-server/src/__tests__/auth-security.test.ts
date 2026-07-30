@@ -325,21 +325,5 @@ describe("Password reset", () => {
   });
 });
 
-// Rate limiting is disabled in NODE_ENV=test (by design) so that integration
-// tests can make many requests without being blocked. Rate-limit behaviour is
-// verified in production by the express-rate-limit middleware itself; the
-// test below only runs when TEST_RATE_LIMITS=1 is explicitly set.
-describe.runIf(process.env["TEST_RATE_LIMITS"] === "1")("Rate limiting", () => {
-  it("returns 429 after exceeding login limit", async () => {
-    const slowEmail = `rl-${unique()}@example.com`;
-    let lastStatus = 200;
-    for (let i = 0; i < 15; i++) {
-      const res = await request(app)
-        .post("/api/auth/login")
-        .send({ email: slowEmail, password: "wrong" });
-      lastStatus = res.status;
-      if (lastStatus === 429) break;
-    }
-    expect(lastStatus).toBe(429);
-  }, 60_000);
-});
+// Rate limiting is verified in the dedicated suite:
+//   pnpm --filter @workspace/api-server run test:rate-limits

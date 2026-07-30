@@ -8,7 +8,8 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:rate-limits": "TEST_RATE_LIMITS=1 vitest run --config vitest.rate-limits.config.ts"
   },
   "dependencies": {
     "@types/bcryptjs": "^3.0.0",

@@ -1,0 +1,86 @@
+Begin Task 2 of 4: dedicated rate-limit verification.
+
+Do not change production rate-limit thresholds merely to make tests pass.
+Do not add unrelated features or refactor unrelated application code.
+
+The current normal test suite disables rate limiting under NODE_ENV=test, which leaves the rate-limit security behavior unverified. Create a separate, deterministic test path that exercises the real rate-limit middleware.
+
+Requirements:
+
+1. Add a dedicated package command named:
+
+   test:rate-limits
+
+2. Run the rate-limit tests in isolation with rate limiting enabled, using an explicit environment variable such as:
+
+   TEST_RATE_LIMITS=1
+
+3. Ensure the test environment:
+
+   - Uses the real Express rate-limit middleware
+   - Does not depend on tests running in a particular order
+   - Starts with fresh limiter state
+   - Does not share exhausted counters with the normal test suite
+   - Uses a controlled IP identity
+   - Respects the application's trusted-proxy configuration
+   - Terminates cleanly without leaving an open server or database handle
+
+4. Verify at least these behaviors:
+
+   Login limiter:
+   - Requests up to the configured threshold are not rejected solely by rate limiting
+   - The next request returns HTTP 429
+   - The response has the application's consistent error shape
+   - Retry-After or standard rate-limit headers are present
+
+   Registration limiter:
+   - The configured hourly threshold is enforced
+
+   Forgot-password limiter:
+   - The configured IP threshold is enforced
+   - Normalized email behavior is tested if email-based limiting was implemented
+
+   Refresh-token limiter:
+   - The configured threshold is enforced
+
+   Invitation limiter:
+   - The configured threshold is enforced on the intended invitation endpoint
+
+   Contribution limiter:
+   - The limiter applies to the authenticated mutation endpoint
+   - It does not accidentally rate-limit unrelated read-only endpoints
+
+5. Verify key isolation where applicable:
+
+   - Requests from different IP addresses do not share the same IP counter
+   - Email normalization treats uppercase and lowercase versions of the same email consistently where email-based limiting exists
+   - Different authenticated users do not incorrectly share a user-scoped mutation counter, if the limiter is user-scoped
+
+6. Verify rate-limit responses do not reveal:
+
+   - Whether an email address exists
+   - Password details
+   - Tokens
+   - Internal stack traces
+
+7. Keep the existing normal test command deterministic.
+
+The target result should be:
+
+- Normal test suite: all applicable tests passing
+- Dedicated rate-limit suite: all tests passing
+- Skipped security tests: zero
+
+If the old guarded or skipped rate-limit test becomes redundant, replace or remove it rather than leaving it skipped.
+
+Run and report:
+
+1. The normal test command
+2. The dedicated rate-limit test command
+3. Exact pass/fail/skip counts
+4. Files changed
+5. Any changes made to test-only configuration
+6. Confirmation that production limits were not weakened
+7. Any known limitations of using an in-memory limiter store during testing
+
+Do not mark Task 2 complete unless both test commands exit successfully.
