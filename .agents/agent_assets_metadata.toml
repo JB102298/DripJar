@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "raKQyR83eyDO6fczd3Bi3"
+uri = "file://TripJar-Codebase.pdf"
+type = "pdf"
+title = "TripJar — Full Codebase"
