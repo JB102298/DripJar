@@ -1,0 +1,98 @@
+Correct the migration consistency issue using a new migration.
+
+Do not edit:
+
+- 0000_initial_schema.sql
+- 0001_sprint1_auth_hardening.sql
+- their recorded migration hashes
+- any previously applied migration records
+
+The current database and 0001 migration use this foreign-key name:
+
+refresh_sessions_user_id_fkey
+
+The current Drizzle schema expects:
+
+refresh_sessions_user_id_users_id_fk
+
+Create a new committed migration named clearly for the correction, such as:
+
+0002_align_refresh_session_fk_name
+
+The migration must rename the existing foreign-key constraint without dropping the table, column, data, or referential-integrity behavior.
+
+Expected SQL operation:
+
+ALTER TABLE "refresh_sessions"
+RENAME CONSTRAINT "refresh_sessions_user_id_fkey"
+TO "refresh_sessions_user_id_users_id_fk";
+
+Use the normal Drizzle journal and snapshot mechanism. Prefer regenerating the migration through drizzle-kit now that the exact rename is understood, but give it a descriptive filename rather than retaining an arbitrary generated name if the project tooling permits.
+
+Do not manually edit the drizzle.__drizzle_migrations hash for an already-applied migration.
+
+STATE HANDLING
+
+Verify the migration against:
+
+1. The current development database, where the old constraint name exists.
+2. A fresh database created from 0000 and 0001, where the old constraint name also exists.
+3. A fully migrated fresh database created from 0000 through 0002.
+
+The migration should follow the normal exactly-once migration model. It does not need to silently accept every possible schema state.
+
+If conditional handling is required, only allow these states:
+
+- Old name exists and new name does not:
+  Rename it.
+
+- New name exists and old name does not:
+  Treat the schema as already aligned only when reconciling a specifically verified environment.
+
+- Both exist or neither exists:
+  Fail and report the unexpected schema state.
+
+Do not use blanket exception handling.
+
+VERIFICATION
+
+After applying 0002:
+
+1. Confirm the FK still references:
+   refresh_sessions.user_id → users.id
+
+2. Confirm ON DELETE CASCADE is unchanged.
+
+3. Confirm all refresh_sessions rows remain intact.
+
+4. Run drizzle-kit generate again.
+
+5. Confirm it produces no additional migration or unexplained schema difference.
+
+6. Confirm:
+   - schema.ts
+   - latest snapshot
+   - fresh migrated database
+   - development database
+   all use:
+
+   refresh_sessions_user_id_users_id_fk
+
+7. Run:
+   - API build
+   - normal test suite
+   - dedicated rate-limit suite
+
+Report:
+
+- Migration filename
+- Exact SQL
+- Journal and snapshot changes
+- Development row count before and after
+- Fresh-database verification
+- Foreign-key target and delete behavior
+- drizzle-kit generate result after correction
+- Build result
+- Normal test totals
+- Rate-limit test totals
+- Files changed

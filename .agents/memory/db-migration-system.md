@@ -32,6 +32,19 @@ All statements use narrow conditional guards so migrations are safe to re-run:
 
 **Why:** Dev DB was built via `drizzle-kit push` (no migration history). Plain SQL would fail with "relation already exists" / "constraint already exists". Narrow guards let migrations run as no-ops against an already-current schema without hiding unrelated errors.
 
+## Current migration set (3 applied)
+
+- 0000_initial_schema — 17 pre-Sprint-1 tables (reset_token, no refresh_sessions)
+- 0001_sprint1_auth_hardening — renames reset_token → reset_token_hash, creates refresh_sessions with FK `refresh_sessions_user_id_fkey`
+- 0002_align_refresh_session_fk_name — renames FK to `refresh_sessions_user_id_users_id_fk` (Drizzle convention); RENAME CONSTRAINT + state-handling DO block
+
+Hashes (SHA-256 of SQL file content, recorded in drizzle.__drizzle_migrations):
+- 0000: `5ebc22d9dad9cd21bd1dc29aa4e97ae66cda96a0c29bbb38f95ea79f68764e59`
+- 0001: `bcbc0b21f034e9576776744dc20fc86d4aee8f7682a244088e5f95df44391bb6`
+- 0002: `21f99d3b57b4ebf73260308cc6f7c48a42baf8d517c1ac454372a7e567dcfcef`
+
+`drizzle-kit generate` produces "No schema changes, nothing to migrate" — schema.ts, snapshot, and DBs are fully aligned.
+
 ## Pre-seeding for databases built via push
 
 For any DB built via `drizzle-kit push` (not migrate), seed the migration tracking table before running migrate:

@@ -15,6 +15,13 @@
       "when": 1785423373313,
       "tag": "0001_sprint1_auth_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785424743904,
+      "tag": "0002_align_refresh_session_fk_name",
+      "breakpoints": true
     }
   ]
 }
