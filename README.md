@@ -1,8 +1,8 @@
-# TripJar
+# M3Jar
 
 Save Together. Travel Together.
 
-TripJar is a collaborative savings platform that helps friends, families, and groups save together for shared experiences.
+M3Jar is a collaborative savings platform that helps friends, families, and groups save together for shared experiences.
 
 ## Current Status
 

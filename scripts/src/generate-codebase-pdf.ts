@@ -1,5 +1,5 @@
 /**
- * Generates TripJar-Codebase.pdf — a formatted source listing of every
+ * Generates M3Jar-Codebase.pdf — a formatted source listing of every
  * application file, suitable for code review and archival.
  *
  * Security properties
@@ -36,7 +36,7 @@ import PDFDocument from "pdfkit";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_ROOT = path.resolve(__dirname, "../../");
-const OUTPUT_PATH = path.resolve(WORKSPACE_ROOT, "TripJar-Codebase.pdf");
+const OUTPUT_PATH = path.resolve(WORKSPACE_ROOT, "M3Jar-Codebase.pdf");
 
 // ─── Sanity-check: OUTPUT_PATH must stay inside WORKSPACE_ROOT ────────────────
 // Belt-and-suspenders: prevents path-traversal if WORKSPACE_ROOT is somehow
@@ -443,7 +443,7 @@ writeStream.on("finish", () => {
   const bytes = fs.statSync(OUTPUT_PATH).size;
   const totalFiles = allSections.reduce((n, s) => n + s.files.length, 0);
 
-  console.log(`✅  TripJar-Codebase.pdf written`);
+  console.log(`✅  M3Jar-Codebase.pdf written`);
   console.log(`   Path:     ${OUTPUT_PATH}`);
   console.log(`   Size:     ${(bytes / 1024).toFixed(1)} KB`);
   console.log(`   Pages:    ~${totalPages}`);

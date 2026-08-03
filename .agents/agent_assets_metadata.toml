@@ -3,6 +3,6 @@ generated = []
 
 [[outputs]]
 id = "raKQyR83eyDO6fczd3Bi3"
-uri = "file://TripJar-Codebase.pdf"
+uri = "file://M3Jar-Codebase.pdf"
 type = "pdf"
-title = "TripJar — Full Codebase"
+title = "M3Jar — Full Codebase"

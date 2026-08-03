@@ -10,9 +10,9 @@ Making Meaningful Moments Happen. A mobile-first collaborative group savings app
 | `pnpm --filter @workspace/mobile run dev` | Start Expo mobile app |
 | `pnpm run typecheck` | Full typecheck across all packages |
 | `pnpm --filter @workspace/db run push` | Push DB schema changes (dev only — requires TTY) |
-| `pnpm --filter @workspace/scripts run seed` | Seed dev DB (user: `jordan@tripjar.dev` / `password123`) |
+| `pnpm --filter @workspace/scripts run seed` | Seed dev DB (user: `jordan@m3jar.dev` / `password123`) |
 | `pnpm --filter @workspace/api-server run test` | Run security + unit test suite (`NODE_ENV=test`) |
-| `pnpm --filter @workspace/scripts run generate-pdf` | Regenerate `TripJar-Codebase.pdf` (see below) |
+| `pnpm --filter @workspace/scripts run generate-pdf` | Regenerate `M3Jar-Codebase.pdf` (see below) |
 
 ## Required Environment Variables
 
@@ -31,7 +31,7 @@ Making Meaningful Moments Happen. A mobile-first collaborative group savings app
 
 ## Regenerating the Codebase Report
 
-The `TripJar-Codebase.pdf` file is a formatted source listing used for code review and archival.
+The `M3Jar-Codebase.pdf` file is a formatted source listing used for code review and archival.
 
 ```bash
 pnpm --filter @workspace/scripts run generate-pdf

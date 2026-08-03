@@ -46,11 +46,11 @@ function daysAgo(n: number): string {
 // ─── Clear existing seed data ──────────────────────────────────────────────
 async function clearSeedData() {
   const seedEmails = [
-    "jordan@tripjar.dev",
-    "caitlyn@tripjar.dev",
-    "mom@tripjar.dev",
-    "dad@tripjar.dev",
-    "tyler@tripjar.dev",
+    "jordan@m3jar.dev",
+    "caitlyn@m3jar.dev",
+    "mom@m3jar.dev",
+    "dad@m3jar.dev",
+    "tyler@m3jar.dev",
   ];
   for (const email of seedEmails) {
     const [u] = await db.select().from(users).where(eq(users.email, email)).limit(1);
@@ -105,29 +105,29 @@ async function main() {
 
   // ── Create Users ────────────────────────────────────────────────────────
   const { user: jordan } = await createUser({
-    email: "jordan@tripjar.dev",
+    email: "jordan@m3jar.dev",
     firstName: "Jordan",
     lastName: "Barrett",
   });
   const { user: caitlyn } = await createUser({
-    email: "caitlyn@tripjar.dev",
+    email: "caitlyn@m3jar.dev",
     firstName: "Caitlyn",
     lastName: "Brooks",
   });
   const { user: mary } = await createUser({
-    email: "mom@tripjar.dev",
+    email: "mom@m3jar.dev",
     firstName: "Mary",
     lastName: "Barrett",
     displayName: "Mom",
   });
   const { user: robert } = await createUser({
-    email: "dad@tripjar.dev",
+    email: "dad@m3jar.dev",
     firstName: "Robert",
     lastName: "Barrett",
     displayName: "Dad",
   });
   const { user: tyler } = await createUser({
-    email: "tyler@tripjar.dev",
+    email: "tyler@m3jar.dev",
     firstName: "Tyler",
     lastName: "Barrett",
     displayName: "Brother",
@@ -425,13 +425,13 @@ async function main() {
   // ── Summary ──────────────────────────────────────────────────────────────
   console.log("\n🎉 Seed complete!\n");
   console.log("Demo account:");
-  console.log("  Email:    jordan@tripjar.dev");
+  console.log("  Email:    jordan@m3jar.dev");
   console.log("  Password: password123\n");
   console.log("Other accounts (same password):");
-  console.log("  caitlyn@tripjar.dev");
-  console.log("  mom@tripjar.dev");
-  console.log("  dad@tripjar.dev");
-  console.log("  tyler@tripjar.dev");
+  console.log("  caitlyn@m3jar.dev");
+  console.log("  mom@m3jar.dev");
+  console.log("  dad@m3jar.dev");
+  console.log("  tyler@m3jar.dev");
   console.log("\nJar: Hawaii 2027");
   console.log("  Goal: $10,000 | Saved: ~$7,170 (71.7%)");
   console.log(`  Target Date: ${targetDateStr}`);
