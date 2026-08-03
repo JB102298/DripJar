@@ -89,6 +89,18 @@ export interface UpdateProfileRequest {
   defaultCurrency?: string;
 }
 
+export type JarSummaryPhase = typeof JarSummaryPhase[keyof typeof JarSummaryPhase];
+
+
+export const JarSummaryPhase = {
+  Draft: 'Draft',
+  Inviting: 'Inviting',
+  Saving: 'Saving',
+  Commitment: 'Commitment',
+  Cancelled: 'Cancelled',
+  Completed: 'Completed',
+} as const;
+
 export type JarHealthStatus = typeof JarHealthStatus[keyof typeof JarHealthStatus];
 
 
@@ -118,9 +130,11 @@ export interface JarSummary {
   destination?: string | null;
   coverImageUrl?: string | null;
   targetDate: string;
+  cutoffDate?: string | null;
   goalAmountCents: number;
   currency: string;
   status: string;
+  phase: JarSummaryPhase;
   memberCount: number;
   totalSavedCents: number;
   percentFunded: number;
@@ -257,6 +271,21 @@ export const JarStatus = {
   Cancelled: 'Cancelled',
 } as const;
 
+/**
+ * Derived phase — Commitment when status=Saving and today>=cutoffDate
+ */
+export type JarPhase = typeof JarPhase[keyof typeof JarPhase];
+
+
+export const JarPhase = {
+  Draft: 'Draft',
+  Inviting: 'Inviting',
+  Saving: 'Saving',
+  Commitment: 'Commitment',
+  Cancelled: 'Cancelled',
+  Completed: 'Completed',
+} as const;
+
 export interface Jar {
   id: string;
   organizerId: string;
@@ -269,10 +298,15 @@ export interface Jar {
   startDate?: string | null;
   endDate?: string | null;
   targetDate: string;
+  /** Organizer-set date when Saving phase ends and Commitment phase begins */
+  cutoffDate?: string | null;
   goalAmountCents: number;
   currency: string;
   status: JarStatus;
-  approvalThreshold: number;
+  /** Derived phase — Commitment when status=Saving and today>=cutoffDate */
+  phase: JarPhase;
+  daysUntilCutoff?: number | null;
+  approvalThreshold?: number;
   memberCount: number;
   totalSavedCents: number;
   percentFunded: number;
@@ -304,6 +338,8 @@ export interface CreateJarRequest {
   startDate?: string | null;
   endDate?: string | null;
   targetDate: string;
+  /** Must be before targetDate and in the future */
+  cutoffDate?: string | null;
   goalAmountCents: number;
   currency?: string;
   approvalThreshold?: number;
@@ -317,8 +353,33 @@ export interface UpdateJarRequest {
   startDate?: string | null;
   endDate?: string | null;
   targetDate?: string;
+  cutoffDate?: string | null;
   goalAmountCents?: number;
   approvalThreshold?: number;
+}
+
+export interface EmailPreferences {
+  emailPrefContributionReminders: boolean;
+  emailPrefCutoffReminders: boolean;
+  emailPrefLifecycle: boolean;
+}
+
+export interface UpdateEmailPreferencesRequest {
+  emailPrefContributionReminders?: boolean;
+  emailPrefCutoffReminders?: boolean;
+  emailPrefLifecycle?: boolean;
+}
+
+export interface AgreementStatus {
+  agreementId?: string | null;
+  version?: string | null;
+  accepted: boolean;
+}
+
+export interface CreateAgreementRequest {
+  version: string;
+  content: string;
+  effectiveDate: string;
 }
 
 export interface CancelJarRequest {

@@ -23,6 +23,7 @@ import type {
   ActivityEvent,
   Agreement,
   AgreementAcceptance,
+  AgreementStatus,
   AuthResponse,
   CancelJarRequest,
   ChangePasswordRequest,
@@ -30,6 +31,7 @@ import type {
   CommitmentVoteRequest,
   Contribution,
   ContributionSchedule,
+  CreateAgreementRequest,
   CreateCommitmentRequest,
   CreateContributionRequest,
   CreateInvitationRequest,
@@ -37,6 +39,7 @@ import type {
   CreateMilestoneRequest,
   CreateScheduleRequest,
   DashboardData,
+  EmailPreferences,
   ErrorResponse,
   ForgotPasswordRequest,
   HealthStatus,
@@ -59,6 +62,7 @@ import type {
   ResetPasswordRequest,
   ReverseContributionRequest,
   SentInvitation,
+  UpdateEmailPreferencesRequest,
   UpdateJarMemberRequest,
   UpdateJarRequest,
   UpdateMilestoneRequest,
@@ -601,6 +605,154 @@ export const useResetPassword = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getResetPasswordMutationOptions(options));
+    }
+
+export const getGetAuthPreferencesUrl = () => {
+
+
+
+
+  return `/api/auth/preferences`
+}
+
+/**
+ * @summary Get email notification preferences for the current user
+ */
+export const getAuthPreferences = async ( options?: Parameters<typeof customFetch>[1]): Promise<EmailPreferences> => {
+
+  return customFetch<EmailPreferences>(getGetAuthPreferencesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAuthPreferencesQueryKey = () => {
+    return [
+    `/api/auth/preferences`
+    ] as const;
+    }
+
+
+export const getGetAuthPreferencesQueryOptions = <TData = Awaited<ReturnType<typeof getAuthPreferences>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAuthPreferences>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAuthPreferencesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAuthPreferences>>> = ({ signal }) => getAuthPreferences({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAuthPreferences>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAuthPreferencesQueryResult = NonNullable<Awaited<ReturnType<typeof getAuthPreferences>>>
+export type GetAuthPreferencesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get email notification preferences for the current user
+ */
+
+export function useGetAuthPreferences<TData = Awaited<ReturnType<typeof getAuthPreferences>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAuthPreferences>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAuthPreferencesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateAuthPreferencesUrl = () => {
+
+
+
+
+  return `/api/auth/preferences`
+}
+
+/**
+ * @summary Update email notification preferences
+ */
+export const updateAuthPreferences = async (updateEmailPreferencesRequest: UpdateEmailPreferencesRequest, options?: Parameters<typeof customFetch>[1]): Promise<EmailPreferences> => {
+
+  return customFetch<EmailPreferences>(getUpdateAuthPreferencesUrl(),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(updateEmailPreferencesRequest)
+  }
+);}
+
+
+
+
+
+export const getUpdateAuthPreferencesMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAuthPreferences>>, TError,{data: BodyType<UpdateEmailPreferencesRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateAuthPreferences>>, TError,{data: BodyType<UpdateEmailPreferencesRequest>}, TContext> => {
+
+const mutationKey = ['updateAuthPreferences'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAuthPreferences>>, {data: BodyType<UpdateEmailPreferencesRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateAuthPreferences(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateAuthPreferencesMutationResult = NonNullable<Awaited<ReturnType<typeof updateAuthPreferences>>>
+    export type UpdateAuthPreferencesMutationBody = BodyType<UpdateEmailPreferencesRequest>
+    export type UpdateAuthPreferencesMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update email notification preferences
+ */
+export const useUpdateAuthPreferences = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAuthPreferences>>, TError,{data: BodyType<UpdateEmailPreferencesRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateAuthPreferences>>,
+        TError,
+        {data: BodyType<UpdateEmailPreferencesRequest>},
+        TContext
+      > => {
+      return useMutation(getUpdateAuthPreferencesMutationOptions(options));
     }
 
 export const getChangePasswordUrl = () => {
@@ -3418,6 +3570,155 @@ export function useListAgreements<TData = Awaited<ReturnType<typeof listAgreemen
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListAgreementsQueryOptions(jarId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateJarAgreementUrl = (jarId: string,) => {
+
+
+
+
+  return `/api/jars/${jarId}/agreements`
+}
+
+/**
+ * @summary Create a new agreement version (organizer only; invalidates previous acceptances)
+ */
+export const createJarAgreement = async (jarId: string,
+    createAgreementRequest: CreateAgreementRequest, options?: Parameters<typeof customFetch>[1]): Promise<Agreement> => {
+
+  return customFetch<Agreement>(getCreateJarAgreementUrl(jarId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createAgreementRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateJarAgreementMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createJarAgreement>>, TError,{jarId: string;data: BodyType<CreateAgreementRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createJarAgreement>>, TError,{jarId: string;data: BodyType<CreateAgreementRequest>}, TContext> => {
+
+const mutationKey = ['createJarAgreement'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createJarAgreement>>, {jarId: string;data: BodyType<CreateAgreementRequest>}> = (props) => {
+          const {jarId,data} = props ?? {};
+
+          return  createJarAgreement(jarId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateJarAgreementMutationResult = NonNullable<Awaited<ReturnType<typeof createJarAgreement>>>
+    export type CreateJarAgreementMutationBody = BodyType<CreateAgreementRequest>
+    export type CreateJarAgreementMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create a new agreement version (organizer only; invalidates previous acceptances)
+ */
+export const useCreateJarAgreement = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createJarAgreement>>, TError,{jarId: string;data: BodyType<CreateAgreementRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createJarAgreement>>,
+        TError,
+        {jarId: string;data: BodyType<CreateAgreementRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateJarAgreementMutationOptions(options));
+    }
+
+export const getGetJarAgreementStatusUrl = (jarId: string,) => {
+
+
+
+
+  return `/api/jars/${jarId}/agreements/status`
+}
+
+/**
+ * @summary Get current agreement acceptance status for the caller
+ */
+export const getJarAgreementStatus = async (jarId: string, options?: Parameters<typeof customFetch>[1]): Promise<AgreementStatus> => {
+
+  return customFetch<AgreementStatus>(getGetJarAgreementStatusUrl(jarId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetJarAgreementStatusQueryKey = (jarId: string,) => {
+    return [
+    `/api/jars/${jarId}/agreements/status`
+    ] as const;
+    }
+
+
+export const getGetJarAgreementStatusQueryOptions = <TData = Awaited<ReturnType<typeof getJarAgreementStatus>>, TError = ErrorType<unknown>>(jarId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getJarAgreementStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetJarAgreementStatusQueryKey(jarId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getJarAgreementStatus>>> = ({ signal }) => getJarAgreementStatus(jarId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: jarId !== null && jarId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getJarAgreementStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetJarAgreementStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getJarAgreementStatus>>>
+export type GetJarAgreementStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get current agreement acceptance status for the caller
+ */
+
+export function useGetJarAgreementStatus<TData = Awaited<ReturnType<typeof getJarAgreementStatus>>, TError = ErrorType<unknown>>(
+ jarId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getJarAgreementStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetJarAgreementStatusQueryOptions(jarId,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

@@ -79,6 +79,12 @@ export const profiles = pgTable("profiles", {
   phone: text("phone"),
   timeZone: text("time_zone").notNull().default("America/New_York"),
   defaultCurrency: text("default_currency").notNull().default("USD"),
+  // Email notification preferences — defaults to opted-in for transactional
+  // product messages. Security emails (password reset, verification) always
+  // send regardless of these flags.
+  emailPrefContributionReminders: boolean("email_pref_contribution_reminders").notNull().default(true),
+  emailPrefCutoffReminders: boolean("email_pref_cutoff_reminders").notNull().default(true),
+  emailPrefLifecycle: boolean("email_pref_lifecycle").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
@@ -103,6 +109,10 @@ export const jars = pgTable("jars", {
   startDate: date("start_date"),
   endDate: date("end_date"),
   targetDate: date("target_date").notNull(),
+  // cutoffDate: organizer-set date when the Saving phase ends and the
+  // Commitment phase begins. Must be before targetDate. The jar's derived
+  // `phase` is "Commitment" when status is "Saving" and today >= cutoffDate.
+  cutoffDate: date("cutoff_date"),
   goalAmountCents: integer("goal_amount_cents").notNull(),
   currency: text("currency").notNull().default("USD"),
   status: text("status").notNull().default("Draft"),
@@ -429,6 +439,49 @@ export const refundRequestPlaceholders = pgTable("refund_request_placeholders", 
 export const refundRequestPlaceholdersRelations = relations(refundRequestPlaceholders, ({ one }) => ({
   jar: one(jars, { fields: [refundRequestPlaceholders.jarId], references: [jars.id] }),
   member: one(jarMembers, { fields: [refundRequestPlaceholders.memberId], references: [jarMembers.id] }),
+}));
+
+// ─── Reminder Sent Events ─────────────────────────────────────────────────────
+// Idempotency table: each row represents one logical reminder that has already
+// been processed (notification created + email attempted). The unique event_key
+// prevents duplicate delivery even if the processor runs multiple times per day.
+//
+// Key format examples:
+//   "contribution_due:${scheduleId}:${dueDateISO}"
+//   "contribution_missed:${scheduleId}:${dueDateISO}"
+//   "cutoff_upcoming_7d:${jarId}:${cutoffDateISO}:${userId}"
+//   "cutoff_upcoming_1d:${jarId}:${cutoffDateISO}:${userId}"
+//   "cutoff_reached:${jarId}:${cutoffDateISO}:${userId}"
+//   "agreement_required:${agreementId}:${userId}"
+
+export const reminderSentEvents = pgTable("reminder_sent_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventKey: text("event_key").notNull(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  jarId: uuid("jar_id").references(() => jars.id, { onDelete: "set null" }),
+  eventType: text("event_type").notNull(),
+  sentAt: timestamp("sent_at").notNull().defaultNow(),
+  // Email delivery state tracking (Phase 3 conformance)
+  // emailStatus: 'pending' | 'sending' | 'sent' | 'failed' | 'skipped_preference'
+  // - 'pending'            : newly inserted, email not yet attempted
+  // - 'sending'            : atomically claimed by a processor; email in-flight.
+  //                          A 'sending' row > 5 minutes old is treated as stale
+  //                          (process crash) and is re-claimable for retry.
+  // - 'sent'               : email delivered successfully; never retried
+  // - 'failed'             : last delivery attempt failed; retried on next run
+  // - 'skipped_preference' : user preference = disabled; permanently skipped
+  emailStatus: text("email_status").notNull().default("pending"),
+  emailSentAt: timestamp("email_sent_at"),
+  emailAttemptCount: integer("email_attempt_count").notNull().default(0),
+  emailLastAttemptAt: timestamp("email_last_attempt_at"),
+}, (t) => [
+  uniqueIndex("reminder_sent_events_key_idx").on(t.eventKey),
+  index("reminder_sent_events_user_idx").on(t.userId),
+]);
+
+export const reminderSentEventsRelations = relations(reminderSentEvents, ({ one }) => ({
+  user: one(users, { fields: [reminderSentEvents.userId], references: [users.id] }),
+  jar: one(jars, { fields: [reminderSentEvents.jarId], references: [jars.id] }),
 }));
 
 // ─── Type exports ─────────────────────────────────────────────────────────────

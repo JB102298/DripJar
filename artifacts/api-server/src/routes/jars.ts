@@ -13,6 +13,7 @@ import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
 import { calculateJarHealth } from "../lib/jar-health.js";
 import { logActivity } from "../lib/activity.js";
 import { notifyAllMembers } from "../lib/notifications.js";
+import { deriveJarPhase, toUTCDateString } from "../lib/phase.js";
 
 const router = Router();
 
@@ -70,6 +71,8 @@ async function buildJarSummary(jar: typeof jars.$inferSelect, userId: string) {
     .where(and(eq(jarMembers.jarId, jar.id), eq(jarMembers.userId, userId)))
     .limit(1);
 
+  const phase = deriveJarPhase(jar.status, jar.cutoffDate);
+
   let health = null;
   if (jar.launchedAt && jar.status === "Saving") {
     health = calculateJarHealth(
@@ -88,9 +91,11 @@ async function buildJarSummary(jar: typeof jars.$inferSelect, userId: string) {
     destination: jar.destination,
     coverImageUrl: jar.coverImageUrl,
     targetDate: jar.targetDate,
+    cutoffDate: jar.cutoffDate ?? null,
     goalAmountCents: jar.goalAmountCents,
     currency: jar.currency,
     status: jar.status,
+    phase,
     memberCount: Number(memberCount[0]?.count ?? 0),
     totalSavedCents,
     percentFunded,
@@ -141,6 +146,7 @@ router.post("/jars", requireAuth, async (req, res) => {
     startDate,
     endDate,
     targetDate,
+    cutoffDate,
     goalAmountCents,
     currency = "USD",
     approvalThreshold = 0.67,
@@ -153,6 +159,7 @@ router.post("/jars", requireAuth, async (req, res) => {
     startDate?: string;
     endDate?: string;
     targetDate?: string;
+    cutoffDate?: string;
     goalAmountCents?: number;
     currency?: string;
     approvalThreshold?: number;
@@ -166,6 +173,19 @@ router.post("/jars", requireAuth, async (req, res) => {
   if (goalAmountCents < 100) {
     res.status(400).json({ error: "BadRequest", message: "Goal must be at least $1.00" });
     return;
+  }
+
+  // Validate cutoffDate if provided
+  if (cutoffDate) {
+    const todayUTC = toUTCDateString(new Date());
+    if (cutoffDate <= todayUTC) {
+      res.status(400).json({ error: "BadRequest", message: "Cutoff date must be in the future" });
+      return;
+    }
+    if (cutoffDate >= targetDate) {
+      res.status(400).json({ error: "BadRequest", message: "Cutoff date must be before the target date" });
+      return;
+    }
   }
 
   // Generate slug
@@ -185,6 +205,7 @@ router.post("/jars", requireAuth, async (req, res) => {
       startDate: startDate ?? null,
       endDate: endDate ?? null,
       targetDate,
+      cutoffDate: cutoffDate ?? null,
       goalAmountCents,
       currency,
       status: "Draft",
@@ -247,7 +268,7 @@ router.get("/jars/:jarId", requireAuth, async (req, res) => {
     .where(and(eq(jarMembers.jarId, jarId), eq(jarMembers.status, "active")));
 
   let health = null;
-  if (jar.launchedAt && ["Saving", "CommitmentPending", "Committed"].includes(jar.status)) {
+  if (jar.launchedAt && jar.status === "Saving") {
     health = calculateJarHealth(
       jar.goalAmountCents,
       totalSavedCents,
@@ -255,6 +276,12 @@ router.get("/jars/:jarId", requireAuth, async (req, res) => {
       new Date(jar.targetDate),
     );
   }
+
+  const phase = deriveJarPhase(jar.status, jar.cutoffDate);
+  const daysUntilCutoff = jar.cutoffDate ? (() => {
+    const diff = new Date(jar.cutoffDate + "T00:00:00Z").getTime() - Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate());
+    return Math.round(diff / 86_400_000);
+  })() : null;
 
   res.json({
     id: jar.id,
@@ -268,9 +295,12 @@ router.get("/jars/:jarId", requireAuth, async (req, res) => {
     startDate: jar.startDate,
     endDate: jar.endDate,
     targetDate: jar.targetDate,
+    cutoffDate: jar.cutoffDate ?? null,
     goalAmountCents: jar.goalAmountCents,
     currency: jar.currency,
     status: jar.status,
+    phase,
+    daysUntilCutoff,
     approvalThreshold: Number(jar.approvalThreshold),
     memberCount: Number(memberCount[0]?.count ?? 0),
     totalSavedCents,
@@ -300,7 +330,7 @@ router.patch("/jars/:jarId", requireAuth, async (req, res) => {
   }
 
   const updates: Partial<typeof jar> = { updatedAt: new Date() };
-  const allowed = ["name", "description", "destination", "coverImageUrl", "startDate", "endDate", "targetDate", "goalAmountCents", "approvalThreshold"] as const;
+  const allowed = ["name", "description", "destination", "coverImageUrl", "startDate", "endDate", "targetDate", "goalAmountCents", "approvalThreshold", "cutoffDate"] as const;
 
   // Financially sensitive fields are only editable before launch — once the
   // jar is Saving, member targets/progress are based on the agreed goal.
@@ -313,6 +343,57 @@ router.patch("/jars/:jarId", requireAuth, async (req, res) => {
         message: `${key === "goalAmountCents" ? "The goal amount" : "The approval threshold"} can only be changed before the jar is launched`,
       });
       return;
+    }
+  }
+
+  // cutoffDate validation: must remain before targetDate; cannot be moved
+  // into the past once the jar has launched (extending it into the future is OK).
+  if (req.body["cutoffDate"] !== undefined) {
+    const newCutoff = req.body["cutoffDate"] as string | null;
+    const effectiveTarget = (req.body["targetDate"] as string | undefined) ?? jar.targetDate;
+    if (newCutoff) {
+      if (newCutoff >= effectiveTarget) {
+        res.status(400).json({ error: "BadRequest", message: "Cutoff date must be before the target date" });
+        return;
+      }
+      const todayUTC = toUTCDateString(new Date());
+      // After launch, cutoff cannot be set to a past date
+      if (!isPreLaunch && newCutoff < todayUTC) {
+        res.status(400).json({ error: "BadRequest", message: "Cutoff date cannot be moved into the past" });
+        return;
+      }
+      // Cannot change cutoff after the cutoff has already been reached
+      if (jar.cutoffDate && toUTCDateString(new Date()) >= jar.cutoffDate) {
+        res.status(400).json({ error: "BadRequest", message: "Cutoff date cannot be changed after it has been reached" });
+        return;
+      }
+
+      // Part 8 — Cutoff immutability after agreement acceptance:
+      // Once any active member has accepted the current agreement, the organizer
+      // cannot silently shift the cutoff date — that would retroactively change
+      // the terms they agreed to. To change terms, publish a new agreement version.
+      if (jar.cutoffDate && newCutoff !== jar.cutoffDate) {
+        const [currentAgreement] = await db
+          .select({ id: agreements.id })
+          .from(agreements)
+          .where(eq(agreements.jarId, jarId))
+          .orderBy(desc(agreements.createdAt))
+          .limit(1);
+        if (currentAgreement) {
+          const [anyAcceptance] = await db
+            .select({ id: agreementAcceptances.id })
+            .from(agreementAcceptances)
+            .where(eq(agreementAcceptances.agreementId, currentAgreement.id))
+            .limit(1);
+          if (anyAcceptance) {
+            res.status(400).json({
+              error: "BadRequest",
+              message: "Cutoff date cannot be changed after members have accepted the savings agreement. To change terms, publish a new agreement version.",
+            });
+            return;
+          }
+        }
+      }
     }
   }
 
@@ -331,8 +412,10 @@ router.patch("/jars/:jarId", requireAuth, async (req, res) => {
     await logActivity({
       jarId,
       userId,
-      eventType: "jar_updated",
-      description: `Jar settings updated (${changedKeys.join(", ")})`,
+      eventType: changedKeys.includes("cutoffDate") ? "cutoff_changed" : "jar_updated",
+      description: changedKeys.includes("cutoffDate")
+        ? `Cutoff date updated to ${String(req.body["cutoffDate"] ?? "removed")}`
+        : `Jar settings updated (${changedKeys.join(", ")})`,
     });
   }
 

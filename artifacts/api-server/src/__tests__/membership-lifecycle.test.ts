@@ -57,6 +57,19 @@ async function inviteAndAccept(orgToken: string, jarId: string, member: { email:
   return { invitationId: invRes.body.id as string, memberId: acceptRes.body.id as string };
 }
 
+/** Accept the current agreement for the jar as the given user. No-op if no agreement exists. */
+async function acceptCurrentAgreement(token: string, jarId: string) {
+  const ags = await request(app)
+    .get(`/api/jars/${jarId}/agreements`)
+    .set("Authorization", `Bearer ${token}`);
+  const agId = ags.body?.[0]?.id as string | undefined;
+  if (!agId) return;
+  await request(app)
+    .post(`/api/jars/${jarId}/agreements/${agId}/accept`)
+    .set("Authorization", `Bearer ${token}`)
+    .expect(200);
+}
+
 // ─── Invitation management ─────────────────────────────────────────────────
 
 describe("organizer invitation management", () => {
@@ -186,6 +199,9 @@ describe("leave jar", () => {
     const member = await registerUser();
     const jar = await createJar(organizer.accessToken);
     await inviteAndAccept(organizer.accessToken, jar.id, member);
+
+    // Phase 3: member must accept the jar agreement before creating a schedule
+    await acceptCurrentAgreement(member.accessToken, jar.id);
 
     // Member sets up a schedule first
     const sched = await request(app)

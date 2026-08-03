@@ -6,6 +6,7 @@ import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
 import { logActivity } from "../lib/activity.js";
 import { createNotification, notifyAllMembers } from "../lib/notifications.js";
 import { contributionLimiter } from "../lib/rate-limit.js";
+import { enforceAgreement } from "../lib/agreement-check.js";
 
 const router = Router();
 
@@ -97,6 +98,10 @@ router.post("/jars/:jarId/contributions", requireAuth, contributionLimiter, asyn
     res.status(403).json({ error: "Forbidden", message: "You are not an active member of this jar" });
     return;
   }
+
+  // Require current agreement acceptance before recording a contribution
+  const agreementOk = await enforceAgreement(jarId, userId, res);
+  if (!agreementOk) return;
 
   const { amountCents, contributionDate, milestoneId, note } = req.body as {
     amountCents?: number;

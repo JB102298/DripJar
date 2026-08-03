@@ -164,6 +164,40 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /auth/preferences:
+    get:
+      operationId: getAuthPreferences
+      tags: [auth]
+      summary: Get email notification preferences for the current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailPreferences"
+    patch:
+      operationId: updateAuthPreferences
+      tags: [auth]
+      summary: Update email notification preferences
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEmailPreferencesRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailPreferences"
+
   /auth/change-password:
     post:
       operationId: changePassword
@@ -1001,6 +1035,48 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Agreement"
+    post:
+      operationId: createJarAgreement
+      tags: [agreements]
+      summary: Create a new agreement version (organizer only; invalidates previous acceptances)
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgreementRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agreement"
+
+  /jars/{jarId}/agreements/status:
+    get:
+      operationId: getJarAgreementStatus
+      tags: [agreements]
+      summary: Get current agreement acceptance status for the caller
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgreementStatus"
 
   /jars/{jarId}/agreements/{agreementId}/accept:
     post:
@@ -1417,6 +1493,11 @@ components:
         targetDate:
           type: string
           format: date
+        cutoffDate:
+          type: string
+          format: date
+          nullable: true
+          description: "Organizer-set date when Saving phase ends and Commitment phase begins"
         goalAmountCents:
           type: integer
         currency:
@@ -1424,6 +1505,13 @@ components:
         status:
           type: string
           enum: [Draft, Inviting, Saving, CommitmentPending, Committed, FullyFunded, Completed, Cancelled]
+        phase:
+          type: string
+          enum: [Draft, Inviting, Saving, Commitment, Cancelled, Completed]
+          description: "Derived phase — Commitment when status=Saving and today>=cutoffDate"
+        daysUntilCutoff:
+          type: integer
+          nullable: true
         approvalThreshold:
           type: number
         memberCount:
@@ -1441,7 +1529,7 @@ components:
         updatedAt:
           type: string
           format: date-time
-      required: [id, organizerId, name, slug, category, targetDate, goalAmountCents, currency, status, approvalThreshold, memberCount, totalSavedCents, percentFunded, createdAt, updatedAt]
+      required: [id, organizerId, name, slug, category, targetDate, goalAmountCents, currency, status, phase, memberCount, totalSavedCents, percentFunded, createdAt, updatedAt]
 
     JarSummary:
       type: object
@@ -1463,12 +1551,19 @@ components:
         targetDate:
           type: string
           format: date
+        cutoffDate:
+          type: string
+          format: date
+          nullable: true
         goalAmountCents:
           type: integer
         currency:
           type: string
         status:
           type: string
+        phase:
+          type: string
+          enum: [Draft, Inviting, Saving, Commitment, Cancelled, Completed]
         memberCount:
           type: integer
         totalSavedCents:
@@ -1484,7 +1579,7 @@ components:
         health:
           $ref: "#/components/schemas/JarHealth"
           nullable: true
-      required: [id, organizerId, name, category, targetDate, goalAmountCents, currency, status, memberCount, totalSavedCents, percentFunded]
+      required: [id, organizerId, name, category, targetDate, goalAmountCents, currency, status, phase, memberCount, totalSavedCents, percentFunded]
 
     CreateJarRequest:
       type: object
@@ -1514,6 +1609,11 @@ components:
         targetDate:
           type: string
           format: date
+        cutoffDate:
+          type: string
+          format: date
+          nullable: true
+          description: "Must be before targetDate and in the future"
         goalAmountCents:
           type: integer
         currency:
@@ -1549,10 +1649,60 @@ components:
         targetDate:
           type: string
           format: date
+        cutoffDate:
+          type: string
+          format: date
+          nullable: true
         goalAmountCents:
           type: integer
         approvalThreshold:
           type: number
+
+    EmailPreferences:
+      type: object
+      properties:
+        emailPrefContributionReminders:
+          type: boolean
+        emailPrefCutoffReminders:
+          type: boolean
+        emailPrefLifecycle:
+          type: boolean
+      required: [emailPrefContributionReminders, emailPrefCutoffReminders, emailPrefLifecycle]
+
+    UpdateEmailPreferencesRequest:
+      type: object
+      properties:
+        emailPrefContributionReminders:
+          type: boolean
+        emailPrefCutoffReminders:
+          type: boolean
+        emailPrefLifecycle:
+          type: boolean
+
+    AgreementStatus:
+      type: object
+      properties:
+        agreementId:
+          type: string
+          nullable: true
+        version:
+          type: string
+          nullable: true
+        accepted:
+          type: boolean
+      required: [accepted]
+
+    CreateAgreementRequest:
+      type: object
+      properties:
+        version:
+          type: string
+        content:
+          type: string
+        effectiveDate:
+          type: string
+          format: date
+      required: [version, content, effectiveDate]
 
     CancelJarRequest:
       type: object

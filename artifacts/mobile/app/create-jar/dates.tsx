@@ -84,6 +84,27 @@ export default function CreateJarStep2() {
           )}
         </View>
 
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+        <View style={styles.inputGroup}>
+          <Text style={[styles.label, { color: colors.foreground }]}>Commitment Date (Optional)</Text>
+          <Text style={[styles.subLabel, { color: colors.mutedForeground }]}>
+            The date when contributions become committed to the jar's purpose. After this date, members
+            enter the Commitment phase and schedules can no longer be changed. Must be before the
+            Savings Target Date.
+          </Text>
+          <DateInput
+            value={state.cutoffDate ? parseLocal(state.cutoffDate) : undefined}
+            onChange={(d) => updateState({ cutoffDate: toLocalISO(d) })}
+            placeholder="Select commitment date (optional)"
+          />
+          {state.cutoffDate && targetDate && parseLocal(state.cutoffDate) >= targetDate && (
+            <Text style={[styles.errorText, { color: colors.destructive }]}>
+              Commitment date must be before the savings target date.
+            </Text>
+          )}
+        </View>
+
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16), backgroundColor: colors.background, borderTopColor: colors.border }]}>

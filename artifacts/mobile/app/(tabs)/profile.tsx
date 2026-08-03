@@ -1,10 +1,17 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Platform, Switch } from 'react-native';
+
+type PrefKey = 'emailPrefContributionReminders' | 'emailPrefCutoffReminders' | 'emailPrefLifecycle';
+const PREF_ITEMS: Array<{ key: PrefKey; label: string; sub: string; icon: string }> = [
+  { key: 'emailPrefContributionReminders', label: 'Contribution Reminders', sub: 'Due & missed contribution alerts', icon: 'repeat' },
+  { key: 'emailPrefCutoffReminders', label: 'Cutoff Reminders', sub: 'Approaching commitment phase', icon: 'calendar' },
+  { key: 'emailPrefLifecycle', label: 'Lifecycle Notifications', sub: 'Jar status changes & milestones', icon: 'bell' },
+];
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/auth-context';
-import { useGetDashboard, useSendVerification } from '@workspace/api-client-react';
+import { useGetDashboard, useSendVerification, useGetAuthPreferences, useUpdateAuthPreferences } from '@workspace/api-client-react';
 import { MemberAvatar } from '@/components/MemberAvatar';
 import { Feather } from '@expo/vector-icons';
 
@@ -16,7 +23,10 @@ export default function ProfileScreen() {
   
   const { data: dashboard } = useGetDashboard();
   const { mutateAsync: sendVerification, isPending: isSendingVerification } = useSendVerification();
+  const { data: emailPrefs } = useGetAuthPreferences();
+  const { mutateAsync: updatePrefs } = useUpdateAuthPreferences();
   const [verificationSent, setVerificationSent] = React.useState(false);
+  const [updatingPref, setUpdatingPref] = React.useState<string | null>(null);
 
   const handleResendVerification = async () => {
     try {
@@ -165,7 +175,46 @@ export default function ProfileScreen() {
           <SettingRow icon="user" title="Edit Profile" onPress={() => router.push('/(auth)/profile-setup')} />
           <SettingRow icon="lock" title="Change Password" onPress={() => router.push('/change-password')} />
           <SettingRow icon="credit-card" title="Payment Methods" placeholder />
-          <SettingRow icon="bell" title="Notifications" placeholder />
+        </View>
+      </View>
+
+      {/* Email notification preferences */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>Notifications</Text>
+        <View style={[styles.settingsGroup, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          {PREF_ITEMS.map(({ key, label, sub, icon }, idx) => (
+            <View
+              key={key}
+              style={[
+                styles.prefRow,
+                { borderBottomColor: colors.border },
+                idx === 2 && { borderBottomWidth: 0 },
+              ]}
+            >
+              <View style={styles.settingIconContainer}>
+                <Feather name={icon} size={20} color={colors.foreground} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.settingTitle, { color: colors.foreground }]}>{label}</Text>
+                <Text style={[styles.prefSub, { color: colors.mutedForeground }]}>{sub}</Text>
+              </View>
+              <Switch
+                value={emailPrefs ? emailPrefs[key] : true}
+                onValueChange={async (val) => {
+                  if (updatingPref) return;
+                  setUpdatingPref(key);
+                  try {
+                    await updatePrefs({ data: { [key]: val } });
+                  } finally {
+                    setUpdatingPref(null);
+                  }
+                }}
+                disabled={updatingPref === key}
+                trackColor={{ false: colors.muted, true: colors.primary }}
+                thumbColor="#fff"
+              />
+            </View>
+          ))}
         </View>
       </View>
 
@@ -306,5 +355,15 @@ const styles = StyleSheet.create({
   comingSoonText: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  prefRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  prefSub: {
+    fontSize: 12,
+    marginTop: 1,
   },
 });

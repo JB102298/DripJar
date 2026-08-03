@@ -282,8 +282,77 @@ export default function JarDetailScreen() {
     );
   };
 
+  const PHASE_COLORS: Record<string, { bg: string; text: string }> = {
+    Draft:      { bg: '#F3F4F6', text: '#6B7280' },
+    Inviting:   { bg: '#EFF6FF', text: '#2563EB' },
+    Saving:     { bg: '#ECFDF5', text: '#059669' },
+    Commitment: { bg: '#FEF3C7', text: '#D97706' },
+    Completed:  { bg: '#F0FDF4', text: '#16A34A' },
+    Cancelled:  { bg: '#FEF2F2', text: '#DC2626' },
+  };
+
+  const renderPhaseBadge = () => {
+    const phase = (jar as any)?.phase as string | undefined;
+    if (!phase) return null;
+    const style = PHASE_COLORS[phase] ?? { bg: colors.muted, text: colors.mutedForeground };
+    return (
+      <View style={[styles.phaseBadge, { backgroundColor: style.bg }]}>
+        <Feather
+          name={phase === 'Commitment' ? 'lock' : phase === 'Saving' ? 'trending-up' : 'info'}
+          size={12}
+          color={style.text}
+          style={{ marginRight: 4 }}
+        />
+        <Text style={[styles.phaseBadgeText, { color: style.text }]}>{phase} Phase</Text>
+      </View>
+    );
+  };
+
+  const renderCutoffBanner = () => {
+    const phase = (jar as any)?.phase as string | undefined;
+    const daysUntilCutoff = (jar as any)?.daysUntilCutoff as number | null | undefined;
+    const cutoffDate = (jar as any)?.cutoffDate as string | null | undefined;
+    if (!cutoffDate) return null;
+    if (phase === 'Commitment') {
+      return (
+        <View style={[styles.cutoffBanner, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
+          <Feather name="lock" size={14} color="#D97706" style={{ marginRight: 8 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.cutoffBannerTitle, { color: '#92400E' }]}>Commitment Phase Active</Text>
+            <Text style={[styles.cutoffBannerSub, { color: '#B45309' }]}>
+              Contribution schedules are now locked. Contributions are still welcome.
+            </Text>
+          </View>
+        </View>
+      );
+    }
+    if (daysUntilCutoff !== null && daysUntilCutoff !== undefined && daysUntilCutoff <= 7) {
+      return (
+        <View style={[styles.cutoffBanner, { backgroundColor: '#FFF7ED', borderColor: '#FED7AA' }]}>
+          <Feather name="clock" size={14} color="#EA580C" style={{ marginRight: 8 }} />
+          <Text style={[styles.cutoffBannerTitle, { color: '#9A3412' }]}>
+            Commitment phase in {daysUntilCutoff} day{daysUntilCutoff === 1 ? '' : 's'}
+          </Text>
+        </View>
+      );
+    }
+    if (daysUntilCutoff !== null && daysUntilCutoff !== undefined) {
+      return (
+        <View style={[styles.cutoffBanner, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Feather name="calendar" size={14} color={colors.mutedForeground} style={{ marginRight: 8 }} />
+          <Text style={[styles.cutoffBannerSub, { color: colors.mutedForeground }]}>
+            Commitment phase starts in {daysUntilCutoff} days ({cutoffDate})
+          </Text>
+        </View>
+      );
+    }
+    return null;
+  };
+
   const renderOverview = () => {
     if (!jar) return null;
+    const phase = (jar as any)?.phase as string | undefined;
+    const isCommitment = phase === 'Commitment';
     return (
       <View style={styles.tabContent}>
         <View style={styles.overviewTopRow}>
@@ -310,8 +379,11 @@ export default function JarDetailScreen() {
                 <Text style={[styles.daysLeftText, { color: colors.primary }]}>{jar.daysRemaining} days left</Text>
               </View>
             )}
+            {renderPhaseBadge()}
           </View>
         </View>
+
+        {renderCutoffBanner()}
 
         {health && (
           <View style={[styles.healthCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -320,7 +392,21 @@ export default function JarDetailScreen() {
           </View>
         )}
 
-        {renderScheduleCard()}
+        {isCommitment ? (
+          <View style={[styles.scheduleCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.scheduleCardHeader}>
+              <View style={styles.scheduleCardLeft}>
+                <Feather name="lock" size={16} color={colors.mutedForeground} style={{ marginRight: 8 }} />
+                <Text style={[styles.scheduleCardTitle, { color: colors.mutedForeground }]}>Schedule Locked</Text>
+              </View>
+            </View>
+            <Text style={[styles.scheduleEmptyText, { color: colors.mutedForeground }]}>
+              Contribution schedules cannot be changed during the Commitment phase.
+            </Text>
+          </View>
+        ) : (
+          renderScheduleCard()
+        )}
 
         <View style={[styles.actionRow, { marginTop: 24 }]}>
           <Pressable 
@@ -1173,6 +1259,39 @@ const styles = StyleSheet.create({
   },
   activityTime: {
     fontSize: 12,
+  },
+  // Phase badge in overview
+  phaseBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  phaseBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  // Cutoff/commitment banner
+  cutoffBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  cutoffBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  cutoffBannerSub: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 2,
   },
   agreementCard: {
     padding: 16,

@@ -6,6 +6,7 @@ export type NotificationType =
   | "member_joined"
   | "contribution_recorded"
   | "contribution_due"
+  | "contribution_missed"
   | "contribution_overdue"
   | "jar_halfway_funded"
   | "milestone_funded"
@@ -14,6 +15,9 @@ export type NotificationType =
   | "member_rejected_commitment"
   | "lock_date_approaching"
   | "goal_fully_funded"
+  | "cutoff_upcoming"
+  | "cutoff_reached"
+  | "agreement_required"
   | "general";
 
 export async function createNotification(params: {
