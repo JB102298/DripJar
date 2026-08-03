@@ -97,6 +97,93 @@ router.post("/jars/:jarId/invitations", requireAuth, invitationLimiter, async (r
   res.status(201).json(invitation);
 });
 
+// GET /jars/:jarId/invitations — organizer-only list of sent invitations.
+// Raw tokens are never included in the response.
+router.get("/jars/:jarId/invitations", requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const { jarId } = req.params as { jarId: string };
+
+  const jar = await db.select().from(jars).where(eq(jars.id, jarId)).limit(1);
+  if (!jar[0]) { res.status(404).json({ error: "NotFound", message: "Jar not found" }); return; }
+  if (jar[0].organizerId !== userId) {
+    res.status(403).json({ error: "Forbidden", message: "Only the organizer can view sent invitations" });
+    return;
+  }
+
+  const sent = await db
+    .select({
+      id: invitations.id,
+      jarId: invitations.jarId,
+      email: invitations.email,
+      role: invitations.role,
+      contributionTargetCents: invitations.contributionTargetCents,
+      status: invitations.status,
+      sentAt: invitations.sentAt,
+      expiresAt: invitations.expiresAt,
+      acceptedAt: invitations.acceptedAt,
+      revokedAt: invitations.revokedAt,
+    })
+    .from(invitations)
+    .where(eq(invitations.jarId, jarId))
+    .orderBy(desc(invitations.sentAt));
+
+  // Surface expiry without mutating rows: a pending-but-expired invitation
+  // is reported as "expired".
+  const now = new Date();
+  res.json(
+    sent.map((inv) =>
+      inv.status === "pending" && inv.expiresAt < now ? { ...inv, status: "expired" } : inv,
+    ),
+  );
+});
+
+// POST /jars/:jarId/invitations/:invitationId/revoke — organizer cancels a
+// pending invitation. The invite link stops working immediately.
+router.post("/jars/:jarId/invitations/:invitationId/revoke", requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const { jarId, invitationId } = req.params as { jarId: string; invitationId: string };
+
+  const jar = await db.select().from(jars).where(eq(jars.id, jarId)).limit(1);
+  if (!jar[0]) { res.status(404).json({ error: "NotFound", message: "Jar not found" }); return; }
+  if (jar[0].organizerId !== userId) {
+    res.status(403).json({ error: "Forbidden", message: "Only the organizer can revoke invitations" });
+    return;
+  }
+
+  const [inv] = await db
+    .select()
+    .from(invitations)
+    .where(and(eq(invitations.id, invitationId), eq(invitations.jarId, jarId)))
+    .limit(1);
+  if (!inv) { res.status(404).json({ error: "NotFound", message: "Invitation not found" }); return; }
+
+  if (inv.status !== "pending") {
+    res.status(400).json({ error: "BadRequest", message: `Only pending invitations can be revoked (this one is ${inv.status})` });
+    return;
+  }
+
+  // Conditional transition: only a still-pending row can be revoked, so a
+  // concurrent accept cannot leave the invitation both accepted and revoked.
+  const revoked = await db
+    .update(invitations)
+    .set({ status: "revoked", revokedAt: new Date() })
+    .where(and(eq(invitations.id, invitationId), eq(invitations.status, "pending")))
+    .returning({ id: invitations.id });
+  if (revoked.length === 0) {
+    res.status(400).json({ error: "BadRequest", message: "Invitation is no longer pending" });
+    return;
+  }
+
+  await logActivity({
+    jarId,
+    userId,
+    eventType: "invitation_revoked",
+    description: `Invitation to ${inv.email} was cancelled`,
+  });
+
+  res.json({ message: "Invitation revoked" });
+});
+
 // GET /invitations
 router.get("/invitations", requireAuth, async (req, res) => {
   const userEmail = (req as AuthenticatedRequest).userEmail;
@@ -204,32 +291,69 @@ router.post("/invitations/:invitationId/accept", requireAuth, async (req, res) =
     return;
   }
 
-  // Check if already a member
+  // Check for an existing membership row (unique per jar+user). Active
+  // members can't accept again; members who previously left or were removed
+  // are reactivated on the same row so their contribution history is kept.
   const existing = await db
     .select()
     .from(jarMembers)
     .where(and(eq(jarMembers.jarId, inv.jarId), eq(jarMembers.userId, userId)))
     .limit(1);
 
-  if (existing[0]) {
+  if (existing[0] && existing[0].status === "active") {
     res.status(409).json({ error: "Conflict", message: "You are already a member of this jar" });
     return;
   }
 
-  const [member] = await db.insert(jarMembers).values({
-    jarId: inv.jarId,
-    userId,
-    role: inv.role,
-    contributionTargetCents: inv.contributionTargetCents ?? 0,
-    status: "active",
-    joinedAt: new Date(),
-  }).returning();
+  // Transactional accept: the conditional pending→accepted transition claims
+  // the invitation first, so a concurrent revoke (or double accept) cannot
+  // both succeed; membership changes roll back if the claim fails.
+  let member;
+  try {
+    member = await db.transaction(async (tx) => {
+      const claimed = await tx
+        .update(invitations)
+        .set({ status: "accepted", acceptedAt: new Date() })
+        .where(and(eq(invitations.id, invitationId), eq(invitations.status, "pending")))
+        .returning({ id: invitations.id });
+      if (claimed.length === 0) {
+        throw Object.assign(new Error("Invitation is no longer pending"), { statusCode: 400 });
+      }
+
+      if (existing[0]) {
+        const [m] = await tx
+          .update(jarMembers)
+          .set({
+            status: "active",
+            role: inv.role,
+            contributionTargetCents: inv.contributionTargetCents ?? existing[0].contributionTargetCents,
+            joinedAt: new Date(),
+            leftAt: null,
+            removedAt: null,
+          })
+          .where(eq(jarMembers.id, existing[0].id))
+          .returning();
+        return m;
+      }
+      const [m] = await tx.insert(jarMembers).values({
+        jarId: inv.jarId,
+        userId,
+        role: inv.role,
+        contributionTargetCents: inv.contributionTargetCents ?? 0,
+        status: "active",
+        joinedAt: new Date(),
+      }).returning();
+      return m;
+    });
+  } catch (err) {
+    if ((err as { statusCode?: number }).statusCode === 400) {
+      res.status(400).json({ error: "BadRequest", message: "Invitation is no longer pending" });
+      return;
+    }
+    throw err;
+  }
 
   if (!member) { res.status(500).json({ error: "InternalError", message: "Failed to join jar" }); return; }
-
-  await db.update(invitations)
-    .set({ status: "accepted", acceptedAt: new Date() })
-    .where(eq(invitations.id, invitationId));
 
   await logActivity({
     jarId: inv.jarId,

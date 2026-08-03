@@ -293,14 +293,48 @@ router.patch("/jars/:jarId", requireAuth, async (req, res) => {
   if (!jar) { res.status(404).json({ error: "NotFound", message: "Jar not found" }); return; }
   if (!isOrganizer) { res.status(403).json({ error: "Forbidden", message: "Only organizer can edit the jar" }); return; }
 
+  // Cancelled/Completed jars are read-only.
+  if (["Cancelled", "Completed"].includes(jar.status)) {
+    res.status(400).json({ error: "BadRequest", message: "This jar can no longer be edited" });
+    return;
+  }
+
   const updates: Partial<typeof jar> = { updatedAt: new Date() };
   const allowed = ["name", "description", "destination", "coverImageUrl", "startDate", "endDate", "targetDate", "goalAmountCents", "approvalThreshold"] as const;
+
+  // Financially sensitive fields are only editable before launch — once the
+  // jar is Saving, member targets/progress are based on the agreed goal.
+  const preLaunchOnly = ["goalAmountCents", "approvalThreshold"] as const;
+  const isPreLaunch = ["Draft", "Inviting"].includes(jar.status);
+  for (const key of preLaunchOnly) {
+    if (req.body[key] !== undefined && !isPreLaunch) {
+      res.status(400).json({
+        error: "BadRequest",
+        message: `${key === "goalAmountCents" ? "The goal amount" : "The approval threshold"} can only be changed before the jar is launched`,
+      });
+      return;
+    }
+  }
+
+  const changedKeys: string[] = [];
   for (const key of allowed) {
-    if (req.body[key] !== undefined) (updates as Record<string, unknown>)[key] = req.body[key];
+    if (req.body[key] !== undefined && req.body[key] !== (jar as Record<string, unknown>)[key]) {
+      (updates as Record<string, unknown>)[key] = req.body[key];
+      changedKeys.push(key);
+    }
   }
 
   const [updated] = await db.update(jars).set(updates).where(eq(jars.id, jarId)).returning();
   if (!updated) { res.status(500).json({ error: "InternalError", message: "Failed to update jar" }); return; }
+
+  if (changedKeys.length > 0) {
+    await logActivity({
+      jarId,
+      userId,
+      eventType: "jar_updated",
+      description: `Jar settings updated (${changedKeys.join(", ")})`,
+    });
+  }
 
   res.json(await buildJarSummary(updated, userId));
 });
@@ -368,6 +402,21 @@ router.post("/jars/:jarId/cancel", requireAuth, async (req, res) => {
   if (!updated) { res.status(500).json({ error: "InternalError", message: "Failed to cancel jar" }); return; }
 
   await logActivity({ jarId, userId, eventType: "jar_cancelled", description: `${jar.name} was cancelled` });
+
+  // Notify all active members that the jar was cancelled
+  const activeMembers = await db
+    .select({ userId: jarMembers.userId })
+    .from(jarMembers)
+    .where(and(eq(jarMembers.jarId, jarId), eq(jarMembers.status, "active")));
+
+  await notifyAllMembers({
+    jarId,
+    memberUserIds: activeMembers.map((m) => m.userId),
+    type: "general",
+    title: `${jar.name} was cancelled`,
+    message: "The organizer cancelled this jar. No further contributions will be recorded.",
+    excludeUserId: userId,
+  });
 
   res.json(await buildJarSummary(updated, userId));
 });

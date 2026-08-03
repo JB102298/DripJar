@@ -16,6 +16,9 @@ export type ActivityEventType =
   | "jar_completed"
   | "jar_cancelled"
   | "member_left"
+  | "member_removed"
+  | "invitation_revoked"
+  | "jar_updated"
   | "agreement_accepted";
 
 export async function logActivity(params: {

@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/auth-context';
-import { useGetDashboard } from '@workspace/api-client-react';
+import { useGetDashboard, useSendVerification } from '@workspace/api-client-react';
 import { MemberAvatar } from '@/components/MemberAvatar';
 import { Feather } from '@expo/vector-icons';
 
@@ -15,6 +15,21 @@ export default function ProfileScreen() {
   const { profile, user, logout } = useAuth();
   
   const { data: dashboard } = useGetDashboard();
+  const { mutateAsync: sendVerification, isPending: isSendingVerification } = useSendVerification();
+  const [verificationSent, setVerificationSent] = React.useState(false);
+
+  const handleResendVerification = async () => {
+    try {
+      await sendVerification();
+      setVerificationSent(true);
+    } catch {
+      if (Platform.OS === 'web') {
+        window.alert('Could not send the verification email. Please try again later.');
+      } else {
+        Alert.alert('Error', 'Could not send the verification email. Please try again later.');
+      }
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert(
@@ -98,6 +113,34 @@ export default function ProfileScreen() {
         <Text style={[styles.email, { color: colors.mutedForeground }]}>
           {user?.email}
         </Text>
+        {user && !user.emailVerified ? (
+          <View style={styles.verifyRow}>
+            <View style={[styles.verifyBadge, { backgroundColor: colors.muted }]}>
+              <Feather name="alert-circle" size={13} color={colors.warning} />
+              <Text style={[styles.verifyBadgeText, { color: colors.mutedForeground }]}>
+                Email not verified
+              </Text>
+            </View>
+            {verificationSent ? (
+              <Text style={[styles.verifySentText, { color: colors.success }]}>
+                Verification email sent — check your inbox
+              </Text>
+            ) : (
+              <Pressable onPress={handleResendVerification} disabled={isSendingVerification}>
+                <Text style={[styles.verifyLink, { color: colors.primary }]}>
+                  {isSendingVerification ? 'Sending…' : 'Resend verification email'}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        ) : user?.emailVerified ? (
+          <View style={[styles.verifyBadge, { backgroundColor: colors.muted, marginTop: 8 }]}>
+            <Feather name="check-circle" size={13} color={colors.success} />
+            <Text style={[styles.verifyBadgeText, { color: colors.mutedForeground }]}>
+              Email verified
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={[styles.statsContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -120,6 +163,7 @@ export default function ProfileScreen() {
         <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>Account</Text>
         <View style={[styles.settingsGroup, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <SettingRow icon="user" title="Edit Profile" onPress={() => router.push('/(auth)/profile-setup')} />
+          <SettingRow icon="lock" title="Change Password" onPress={() => router.push('/change-password')} />
           <SettingRow icon="credit-card" title="Payment Methods" placeholder />
           <SettingRow icon="bell" title="Notifications" placeholder />
         </View>
@@ -174,6 +218,30 @@ const styles = StyleSheet.create({
   },
   email: {
     fontSize: 16,
+  },
+  verifyRow: {
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 6,
+  },
+  verifyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  verifyBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  verifyLink: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  verifySentText: {
+    fontSize: 13,
   },
   statsContainer: {
     flexDirection: 'row',

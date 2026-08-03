@@ -5,6 +5,7 @@ export function isPublicRoute(firstSegment: string | undefined): boolean {
   return (
     firstSegment === "(auth)" ||
     firstSegment === "invite" || // Invitation links work while signed out
-    firstSegment === "reset-password" // Password-reset email links work while signed out
+    firstSegment === "reset-password" || // Password-reset email links work while signed out
+    firstSegment === "verify-email" // Email-verification links work while signed out
   );
 }

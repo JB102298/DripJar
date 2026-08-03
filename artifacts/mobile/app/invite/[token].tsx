@@ -40,8 +40,13 @@ export default function InviteScreen() {
     if (!invite) return;
 
     if (!isAuthenticated) {
-      // Redirect to login; after auth they can come back and accept
-      router.push('/(auth)/login');
+      // Redirect to login carrying a return path so the user comes straight
+      // back to this invitation after signing in or registering. Only the
+      // in-app path is passed — the raw token never leaves navigation state.
+      router.push({
+        pathname: '/(auth)/login',
+        params: { returnTo: `/invite/${token}` },
+      });
       return;
     }
 

@@ -164,6 +164,69 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /auth/change-password:
+    post:
+      operationId: changePassword
+      tags: [auth]
+      summary: Change password (requires current password; revokes all sessions)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "401":
+          description: Current password incorrect or not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/send-verification:
+    post:
+      operationId: sendVerification
+      tags: [auth]
+      summary: Send or resend the email verification link
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /auth/verify-email:
+    post:
+      operationId: verifyEmail
+      tags: [auth]
+      summary: Verify email with a single-use token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyEmailRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid or expired token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # PROFILE
   /profile:
     get:
@@ -383,7 +446,53 @@ paths:
                 items:
                   $ref: "#/components/schemas/JarMember"
 
+  /jars/{jarId}/invitations/{invitationId}/revoke:
+    post:
+      operationId: revokeInvitation
+      tags: [invitations]
+      summary: Revoke a pending invitation (organizer only)
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: invitationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
   /jars/{jarId}/members/{memberId}:
+    delete:
+      operationId: removeJarMember
+      tags: [members]
+      summary: Remove a member from a jar (organizer only; history preserved)
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
     patch:
       operationId: updateJarMember
       tags: [members]
@@ -413,8 +522,46 @@ paths:
               schema:
                 $ref: "#/components/schemas/JarMember"
 
+  /jars/{jarId}/members/leave:
+    post:
+      operationId: leaveJar
+      tags: [members]
+      summary: Leave a jar (non-organizers only; history preserved)
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
   # INVITATIONS
   /jars/{jarId}/invitations:
+    get:
+      operationId: listJarInvitations
+      tags: [invitations]
+      summary: List invitations sent for a jar (organizer only; no tokens)
+      parameters:
+        - name: jarId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SentInvitation"
     post:
       operationId: createInvitation
       tags: [invitations]
@@ -1002,6 +1149,24 @@ components:
           type: string
       required: [message]
 
+    ChangePasswordRequest:
+      type: object
+      properties:
+        currentPassword:
+          type: string
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 72
+      required: [currentPassword, newPassword]
+
+    VerifyEmailRequest:
+      type: object
+      properties:
+        token:
+          type: string
+      required: [token]
+
     # AUTH
     RegisterRequest:
       type: object
@@ -1494,6 +1659,40 @@ components:
           type: string
           format: date-time
         acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required: [id, jarId, email, role, status, sentAt, expiresAt]
+
+    SentInvitation:
+      type: object
+      properties:
+        id:
+          type: string
+        jarId:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [member, viewer]
+        contributionTargetCents:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          enum: [pending, accepted, declined, expired, revoked]
+        sentAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+        revokedAt:
           type: string
           format: date-time
           nullable: true

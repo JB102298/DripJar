@@ -25,6 +25,7 @@ import type {
   AgreementAcceptance,
   AuthResponse,
   CancelJarRequest,
+  ChangePasswordRequest,
   CommitmentRequest,
   CommitmentVoteRequest,
   Contribution,
@@ -57,11 +58,13 @@ import type {
   RegisterRequest,
   ResetPasswordRequest,
   ReverseContributionRequest,
+  SentInvitation,
   UpdateJarMemberRequest,
   UpdateJarRequest,
   UpdateMilestoneRequest,
   UpdateProfileRequest,
-  UpdateScheduleRequest
+  UpdateScheduleRequest,
+  VerifyEmailRequest
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -598,6 +601,219 @@ export const useResetPassword = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getResetPasswordMutationOptions(options));
+    }
+
+export const getChangePasswordUrl = () => {
+
+
+
+
+  return `/api/auth/change-password`
+}
+
+/**
+ * @summary Change password (requires current password; revokes all sessions)
+ */
+export const changePassword = async (changePasswordRequest: ChangePasswordRequest, options?: Parameters<typeof customFetch>[1]): Promise<MessageResponse> => {
+
+  return customFetch<MessageResponse>(getChangePasswordUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(changePasswordRequest)
+  }
+);}
+
+
+
+
+
+export const getChangePasswordMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changePassword>>, TError,{data: BodyType<ChangePasswordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof changePassword>>, TError,{data: BodyType<ChangePasswordRequest>}, TContext> => {
+
+const mutationKey = ['changePassword'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof changePassword>>, {data: BodyType<ChangePasswordRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  changePassword(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ChangePasswordMutationResult = NonNullable<Awaited<ReturnType<typeof changePassword>>>
+    export type ChangePasswordMutationBody = BodyType<ChangePasswordRequest>
+    export type ChangePasswordMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Change password (requires current password; revokes all sessions)
+ */
+export const useChangePassword = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changePassword>>, TError,{data: BodyType<ChangePasswordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof changePassword>>,
+        TError,
+        {data: BodyType<ChangePasswordRequest>},
+        TContext
+      > => {
+      return useMutation(getChangePasswordMutationOptions(options));
+    }
+
+export const getSendVerificationUrl = () => {
+
+
+
+
+  return `/api/auth/send-verification`
+}
+
+/**
+ * @summary Send or resend the email verification link
+ */
+export const sendVerification = async ( options?: Parameters<typeof customFetch>[1]): Promise<MessageResponse> => {
+
+  return customFetch<MessageResponse>(getSendVerificationUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getSendVerificationMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendVerification>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendVerification>>, TError,void, TContext> => {
+
+const mutationKey = ['sendVerification'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendVerification>>, void> = () => {
+
+
+          return  sendVerification(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendVerificationMutationResult = NonNullable<Awaited<ReturnType<typeof sendVerification>>>
+
+    export type SendVerificationMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Send or resend the email verification link
+ */
+export const useSendVerification = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendVerification>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sendVerification>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getSendVerificationMutationOptions(options));
+    }
+
+export const getVerifyEmailUrl = () => {
+
+
+
+
+  return `/api/auth/verify-email`
+}
+
+/**
+ * @summary Verify email with a single-use token
+ */
+export const verifyEmail = async (verifyEmailRequest: VerifyEmailRequest, options?: Parameters<typeof customFetch>[1]): Promise<MessageResponse> => {
+
+  return customFetch<MessageResponse>(getVerifyEmailUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(verifyEmailRequest)
+  }
+);}
+
+
+
+
+
+export const getVerifyEmailMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyEmail>>, TError,{data: BodyType<VerifyEmailRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof verifyEmail>>, TError,{data: BodyType<VerifyEmailRequest>}, TContext> => {
+
+const mutationKey = ['verifyEmail'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifyEmail>>, {data: BodyType<VerifyEmailRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  verifyEmail(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifyEmailMutationResult = NonNullable<Awaited<ReturnType<typeof verifyEmail>>>
+    export type VerifyEmailMutationBody = BodyType<VerifyEmailRequest>
+    export type VerifyEmailMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Verify email with a single-use token
+ */
+export const useVerifyEmail = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyEmail>>, TError,{data: BodyType<VerifyEmailRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof verifyEmail>>,
+        TError,
+        {data: BodyType<VerifyEmailRequest>},
+        TContext
+      > => {
+      return useMutation(getVerifyEmailMutationOptions(options));
     }
 
 export const getGetProfileUrl = () => {
@@ -1426,6 +1642,152 @@ export function useListJarMembers<TData = Awaited<ReturnType<typeof listJarMembe
 
 
 
+export const getRevokeInvitationUrl = (jarId: string,
+    invitationId: string,) => {
+
+
+
+
+  return `/api/jars/${jarId}/invitations/${invitationId}/revoke`
+}
+
+/**
+ * @summary Revoke a pending invitation (organizer only)
+ */
+export const revokeInvitation = async (jarId: string,
+    invitationId: string, options?: Parameters<typeof customFetch>[1]): Promise<MessageResponse> => {
+
+  return customFetch<MessageResponse>(getRevokeInvitationUrl(jarId,invitationId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRevokeInvitationMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeInvitation>>, TError,{jarId: string;invitationId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof revokeInvitation>>, TError,{jarId: string;invitationId: string}, TContext> => {
+
+const mutationKey = ['revokeInvitation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokeInvitation>>, {jarId: string;invitationId: string}> = (props) => {
+          const {jarId,invitationId} = props ?? {};
+
+          return  revokeInvitation(jarId,invitationId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RevokeInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof revokeInvitation>>>
+
+    export type RevokeInvitationMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Revoke a pending invitation (organizer only)
+ */
+export const useRevokeInvitation = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeInvitation>>, TError,{jarId: string;invitationId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof revokeInvitation>>,
+        TError,
+        {jarId: string;invitationId: string},
+        TContext
+      > => {
+      return useMutation(getRevokeInvitationMutationOptions(options));
+    }
+
+export const getRemoveJarMemberUrl = (jarId: string,
+    memberId: string,) => {
+
+
+
+
+  return `/api/jars/${jarId}/members/${memberId}`
+}
+
+/**
+ * @summary Remove a member from a jar (organizer only; history preserved)
+ */
+export const removeJarMember = async (jarId: string,
+    memberId: string, options?: Parameters<typeof customFetch>[1]): Promise<MessageResponse> => {
+
+  return customFetch<MessageResponse>(getRemoveJarMemberUrl(jarId,memberId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getRemoveJarMemberMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeJarMember>>, TError,{jarId: string;memberId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof removeJarMember>>, TError,{jarId: string;memberId: string}, TContext> => {
+
+const mutationKey = ['removeJarMember'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeJarMember>>, {jarId: string;memberId: string}> = (props) => {
+          const {jarId,memberId} = props ?? {};
+
+          return  removeJarMember(jarId,memberId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveJarMemberMutationResult = NonNullable<Awaited<ReturnType<typeof removeJarMember>>>
+
+    export type RemoveJarMemberMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove a member from a jar (organizer only; history preserved)
+ */
+export const useRemoveJarMember = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeJarMember>>, TError,{jarId: string;memberId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof removeJarMember>>,
+        TError,
+        {jarId: string;memberId: string},
+        TContext
+      > => {
+      return useMutation(getRemoveJarMemberMutationOptions(options));
+    }
+
 export const getUpdateJarMemberUrl = (jarId: string,
     memberId: string,) => {
 
@@ -1499,6 +1861,154 @@ export const useUpdateJarMember = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getUpdateJarMemberMutationOptions(options));
     }
+
+export const getLeaveJarUrl = (jarId: string,) => {
+
+
+
+
+  return `/api/jars/${jarId}/members/leave`
+}
+
+/**
+ * @summary Leave a jar (non-organizers only; history preserved)
+ */
+export const leaveJar = async (jarId: string, options?: Parameters<typeof customFetch>[1]): Promise<MessageResponse> => {
+
+  return customFetch<MessageResponse>(getLeaveJarUrl(jarId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getLeaveJarMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof leaveJar>>, TError,{jarId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof leaveJar>>, TError,{jarId: string}, TContext> => {
+
+const mutationKey = ['leaveJar'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof leaveJar>>, {jarId: string}> = (props) => {
+          const {jarId} = props ?? {};
+
+          return  leaveJar(jarId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LeaveJarMutationResult = NonNullable<Awaited<ReturnType<typeof leaveJar>>>
+
+    export type LeaveJarMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Leave a jar (non-organizers only; history preserved)
+ */
+export const useLeaveJar = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof leaveJar>>, TError,{jarId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof leaveJar>>,
+        TError,
+        {jarId: string},
+        TContext
+      > => {
+      return useMutation(getLeaveJarMutationOptions(options));
+    }
+
+export const getListJarInvitationsUrl = (jarId: string,) => {
+
+
+
+
+  return `/api/jars/${jarId}/invitations`
+}
+
+/**
+ * @summary List invitations sent for a jar (organizer only; no tokens)
+ */
+export const listJarInvitations = async (jarId: string, options?: Parameters<typeof customFetch>[1]): Promise<SentInvitation[]> => {
+
+  return customFetch<SentInvitation[]>(getListJarInvitationsUrl(jarId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListJarInvitationsQueryKey = (jarId: string,) => {
+    return [
+    `/api/jars/${jarId}/invitations`
+    ] as const;
+    }
+
+
+export const getListJarInvitationsQueryOptions = <TData = Awaited<ReturnType<typeof listJarInvitations>>, TError = ErrorType<unknown>>(jarId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listJarInvitations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListJarInvitationsQueryKey(jarId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listJarInvitations>>> = ({ signal }) => listJarInvitations(jarId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: jarId !== null && jarId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listJarInvitations>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListJarInvitationsQueryResult = NonNullable<Awaited<ReturnType<typeof listJarInvitations>>>
+export type ListJarInvitationsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List invitations sent for a jar (organizer only; no tokens)
+ */
+
+export function useListJarInvitations<TData = Awaited<ReturnType<typeof listJarInvitations>>, TError = ErrorType<unknown>>(
+ jarId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listJarInvitations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListJarInvitationsQueryOptions(jarId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getCreateInvitationUrl = (jarId: string,) => {
 
@@ -2114,9 +2624,9 @@ export const getGetContributionScheduleUrl = (jarId: string,) => {
 /**
  * @summary Get my contribution schedule for a jar
  */
-export const getContributionSchedule = async (jarId: string, options?: Parameters<typeof customFetch>[1]): Promise<ContributionSchedule | null> => {
+export const getContributionSchedule = async (jarId: string, options?: Parameters<typeof customFetch>[1]): Promise<ContributionSchedule> => {
 
-  return customFetch<ContributionSchedule | null>(getGetContributionScheduleUrl(jarId),
+  return customFetch<ContributionSchedule>(getGetContributionScheduleUrl(jarId),
   {
     ...options,
     method: 'GET'

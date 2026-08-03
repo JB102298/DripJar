@@ -55,6 +55,10 @@ router.post("/jars/:jarId/schedule", requireAuth, async (req, res) => {
   const { jar, member } = await getMyMembership(jarId, userId);
   if (!jar) { res.status(404).json({ error: "NotFound", message: "Jar not found" }); return; }
   if (!member) { res.status(403).json({ error: "Forbidden", message: "You are not a member of this jar" }); return; }
+  if (["Cancelled", "Completed"].includes(jar.status)) {
+    res.status(400).json({ error: "BadRequest", message: "Schedules cannot be changed on a cancelled or completed jar" });
+    return;
+  }
 
   const { frequency, amountCents, startDate, preferredDay, endCondition = "targetDate" } = req.body as {
     frequency?: string; amountCents?: number; startDate?: string; preferredDay?: number; endCondition?: string;
@@ -95,6 +99,10 @@ router.patch("/jars/:jarId/schedule", requireAuth, async (req, res) => {
   const { jar, member } = await getMyMembership(jarId, userId);
   if (!jar) { res.status(404).json({ error: "NotFound", message: "Jar not found" }); return; }
   if (!member) { res.status(403).json({ error: "Forbidden", message: "Access denied" }); return; }
+  if (["Cancelled", "Completed"].includes(jar.status)) {
+    res.status(400).json({ error: "BadRequest", message: "Schedules cannot be changed on a cancelled or completed jar" });
+    return;
+  }
 
   const { frequency, amountCents, preferredDay, isPaused } = req.body as {
     frequency?: string; amountCents?: number; preferredDay?: number; isPaused?: boolean;

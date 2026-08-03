@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform, ActivityIndicator, ScrollView } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/auth-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { sanitizeReturnPath } from '@/lib/return-path';
 
 export default function RegisterScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { register } = useAuth();
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
+  const safeReturnTo = sanitizeReturnPath(returnTo);
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -36,7 +39,9 @@ export default function RegisterScreen() {
       setIsLoading(true);
       setError('');
       await register({ firstName, lastName, email, password });
-      router.replace('/(auth)/profile-setup');
+      // If the user arrived from an invitation, send them straight back to
+      // it after registering; profile setup can be completed later.
+      router.replace((safeReturnTo ?? '/(auth)/profile-setup') as any);
     } catch (e: any) {
       setError(e.message || 'Failed to create account. Please try again.');
     } finally {
@@ -149,7 +154,16 @@ export default function RegisterScreen() {
             </Text>
           </View>
 
-          <Pressable onPress={() => router.push('/(auth)/login')} style={styles.footerLink}>
+          <Pressable
+            onPress={() =>
+              router.push(
+                safeReturnTo
+                  ? { pathname: '/(auth)/login', params: { returnTo: safeReturnTo } }
+                  : '/(auth)/login',
+              )
+            }
+            style={styles.footerLink}
+          >
             <Text style={{ color: colors.mutedForeground }}>
               Already have an account? <Text style={{ color: colors.primary, fontWeight: 'bold' }}>Sign in</Text>
             </Text>

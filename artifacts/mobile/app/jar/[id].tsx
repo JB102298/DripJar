@@ -24,6 +24,12 @@ import {
   useListAgreements,
   useGetContributionSchedule,
   useCreateInvitation,
+  useListJarInvitations,
+  useRevokeInvitation,
+  useLeaveJar,
+  useRemoveJarMember,
+  useUpdateJar,
+  useCancelJar,
 } from '@workspace/api-client-react';
 import { ImageBackground } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -64,6 +70,141 @@ export default function JarDetailScreen() {
   const { data: mySchedule, refetch: refetchSchedule } = useGetContributionSchedule(id!, { query: { enabled: !!id && activeTab === 'Overview' } });
 
   const createInvitationMutation = useCreateInvitation();
+  const leaveJarMutation = useLeaveJar();
+  const removeMemberMutation = useRemoveJarMember();
+  const revokeInvitationMutation = useRevokeInvitation();
+  const updateJarMutation = useUpdateJar();
+  const cancelJarMutation = useCancelJar();
+
+  const isOrganizerUser = jar?.organizerId === user?.id;
+  // Cast matches the queryKey-less options shape used throughout this app
+  // (see pre-existing useGetJar/useListJarMembers calls above).
+  const { data: sentInvitations, refetch: refetchInvitations } = useListJarInvitations(id!, {
+    query: { enabled: !!id && isOrganizerUser && activeTab === 'Settings' } as never,
+  });
+
+  // Settings tab edit state
+  const [settingsName, setSettingsName] = useState('');
+  const [settingsDescription, setSettingsDescription] = useState('');
+  const [settingsDestination, setSettingsDestination] = useState('');
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState('');
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  React.useEffect(() => {
+    if (jar && !settingsLoaded) {
+      setSettingsName(jar.name ?? '');
+      setSettingsDescription(jar.description ?? '');
+      setSettingsDestination(jar.destination ?? '');
+      setSettingsLoaded(true);
+    }
+  }, [jar, settingsLoaded]);
+
+  const confirm = (title: string, message: string, onConfirm: () => void, confirmLabel = 'Confirm') => {
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${title}\n\n${message}`)) onConfirm();
+    } else {
+      Alert.alert(title, message, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: confirmLabel, style: 'destructive', onPress: onConfirm },
+      ]);
+    }
+  };
+
+  const notify = (title: string, message: string) => {
+    if (Platform.OS === 'web') window.alert(`${title}\n\n${message}`);
+    else Alert.alert(title, message);
+  };
+
+  const handleLeaveJar = () => {
+    confirm(
+      'Leave this jar?',
+      'You will lose access to this jar. Your contribution history will be preserved.',
+      async () => {
+        try {
+          await leaveJarMutation.mutateAsync({ jarId: id! });
+          router.replace('/(tabs)/jars');
+        } catch (e: any) {
+          notify('Could not leave jar', e?.message ?? 'Something went wrong. Please try again.');
+        }
+      },
+      'Leave Jar',
+    );
+  };
+
+  const handleRemoveMember = (memberId: string, name: string) => {
+    confirm(
+      `Remove ${name}?`,
+      `${name} will lose access to this jar. Their contribution history will be preserved.`,
+      async () => {
+        try {
+          await removeMemberMutation.mutateAsync({ jarId: id!, memberId });
+          await refetchMembers();
+        } catch (e: any) {
+          notify('Could not remove member', e?.message ?? 'Something went wrong. Please try again.');
+        }
+      },
+      'Remove',
+    );
+  };
+
+  const handleRevokeInvitation = (invitationId: string, email: string) => {
+    confirm(
+      'Cancel this invitation?',
+      `The invitation sent to ${email} will stop working immediately.`,
+      async () => {
+        try {
+          await revokeInvitationMutation.mutateAsync({ jarId: id!, invitationId });
+          await refetchInvitations();
+        } catch (e: any) {
+          notify('Could not cancel invitation', e?.message ?? 'Something went wrong. Please try again.');
+        }
+      },
+      'Cancel Invitation',
+    );
+  };
+
+  const handleSaveSettings = async () => {
+    if (!settingsName.trim()) {
+      setSettingsError('Jar name is required');
+      return;
+    }
+    setSettingsError('');
+    setSettingsSaving(true);
+    try {
+      await updateJarMutation.mutateAsync({
+        jarId: id!,
+        data: {
+          name: settingsName.trim(),
+          description: settingsDescription.trim() || undefined,
+          destination: settingsDestination.trim() || undefined,
+        },
+      });
+      await refetchJar();
+      notify('Saved', 'Jar settings have been updated.');
+    } catch (e: any) {
+      setSettingsError(e?.message ?? 'Could not save settings. Please try again.');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const handleCancelJar = () => {
+    confirm(
+      'Cancel this jar?',
+      'This permanently closes the jar for all members. No further contributions can be recorded. This cannot be undone.',
+      async () => {
+        try {
+          await cancelJarMutation.mutateAsync({ jarId: id! });
+          await refetchJar();
+          notify('Jar cancelled', 'This jar has been cancelled.');
+        } catch (e: any) {
+          notify('Could not cancel jar', e?.message ?? 'Something went wrong. Please try again.');
+        }
+      },
+      'Cancel Jar',
+    );
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -262,9 +403,28 @@ export default function JarDetailScreen() {
                 <Text style={[styles.memberPercent, { color: colors.primary }]}>{member.percentComplete}%</Text>
               </View>
             </View>
+            {isOrganizerUser && member.userId !== user?.id && (
+              <Pressable
+                onPress={() => handleRemoveMember(member.id, member.profile?.displayName || 'this member')}
+                style={styles.memberRemoveBtn}
+                testID={`remove-member-${member.id}`}
+              >
+                <Feather name="user-x" size={18} color={colors.destructive} />
+              </Pressable>
+            )}
           </View>
         ))}
         {members.length === 0 && !isOrganizer && <EmptyState icon="users" title="No members yet" />}
+        {!isOrganizerUser && (
+          <Pressable
+            onPress={handleLeaveJar}
+            style={[styles.leaveJarButton, { borderColor: colors.destructive }]}
+            testID="leave-jar-button"
+          >
+            <Feather name="log-out" size={16} color={colors.destructive} />
+            <Text style={[styles.leaveJarText, { color: colors.destructive }]}>Leave Jar</Text>
+          </Pressable>
+        )}
       </View>
     );
   };
@@ -350,9 +510,142 @@ export default function JarDetailScreen() {
   };
 
   const renderSettings = () => {
+    if (!isOrganizerUser) {
+      return (
+        <View style={styles.tabContent}>
+          <EmptyState icon="lock" title="Organizer only" description="Only the jar organizer can change settings." />
+          <Pressable
+            onPress={handleLeaveJar}
+            style={[styles.leaveJarButton, { borderColor: colors.destructive }]}
+            testID="leave-jar-button-settings"
+          >
+            <Feather name="log-out" size={16} color={colors.destructive} />
+            <Text style={[styles.leaveJarText, { color: colors.destructive }]}>Leave Jar</Text>
+          </Pressable>
+        </View>
+      );
+    }
+
+    const jarClosed = jar ? ['Cancelled', 'Completed'].includes(jar.status) : false;
+
     return (
       <View style={styles.tabContent}>
-        <Text style={{ color: colors.foreground, fontSize: 16 }}>Settings coming soon</Text>
+        {jarClosed && (
+          <View style={[styles.settingsNotice, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+            <Feather name="info" size={16} color={colors.mutedForeground} />
+            <Text style={[styles.settingsNoticeText, { color: colors.mutedForeground }]}>
+              This jar is {jar!.status.toLowerCase()} and can no longer be edited.
+            </Text>
+          </View>
+        )}
+
+        {/* Editable details */}
+        <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.settingsSectionTitle, { color: colors.foreground }]}>Jar Details</Text>
+
+          <Text style={[styles.settingsLabel, { color: colors.mutedForeground }]}>Name</Text>
+          <TextInput
+            style={[styles.settingsInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+            value={settingsName}
+            onChangeText={setSettingsName}
+            editable={!jarClosed}
+            testID="settings-name-input"
+          />
+
+          <Text style={[styles.settingsLabel, { color: colors.mutedForeground }]}>Destination</Text>
+          <TextInput
+            style={[styles.settingsInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+            value={settingsDestination}
+            onChangeText={setSettingsDestination}
+            editable={!jarClosed}
+            testID="settings-destination-input"
+          />
+
+          <Text style={[styles.settingsLabel, { color: colors.mutedForeground }]}>Description</Text>
+          <TextInput
+            style={[styles.settingsInput, styles.settingsInputMultiline, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+            value={settingsDescription}
+            onChangeText={setSettingsDescription}
+            multiline
+            editable={!jarClosed}
+            testID="settings-description-input"
+          />
+
+          <Text style={[styles.settingsHint, { color: colors.mutedForeground }]}>
+            The goal amount and approval threshold are locked once the jar is launched, so
+            everyone's targets stay consistent.
+          </Text>
+
+          {settingsError ? (
+            <Text style={{ color: colors.destructive, fontSize: 14, marginTop: 8 }}>{settingsError}</Text>
+          ) : null}
+
+          {!jarClosed && (
+            <Pressable
+              style={[styles.settingsSaveButton, { backgroundColor: colors.primary }]}
+              onPress={handleSaveSettings}
+              disabled={settingsSaving}
+              testID="settings-save-button"
+            >
+              <Text style={styles.settingsSaveText}>{settingsSaving ? 'Saving…' : 'Save Changes'}</Text>
+            </Pressable>
+          )}
+        </View>
+
+        {/* Sent invitations */}
+        <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.settingsSectionTitle, { color: colors.foreground }]}>Sent Invitations</Text>
+          {!sentInvitations ? (
+            <SkeletonLoader height={60} />
+          ) : sentInvitations.length === 0 ? (
+            <Text style={{ color: colors.mutedForeground, fontSize: 14 }}>No invitations sent yet.</Text>
+          ) : (
+            sentInvitations.map((inv) => (
+              <View key={inv.id} style={[styles.invitationRow, { borderBottomColor: colors.border }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.invitationEmail, { color: colors.foreground }]} numberOfLines={1}>
+                    {inv.email}
+                  </Text>
+                  <Text style={[styles.invitationMeta, { color: colors.mutedForeground }]}>
+                    {inv.status.charAt(0).toUpperCase() + inv.status.slice(1)}
+                    {inv.sentAt ? ` · Sent ${new Date(inv.sentAt).toLocaleDateString()}` : ''}
+                    {inv.status === 'pending' && inv.expiresAt
+                      ? ` · Expires ${new Date(inv.expiresAt).toLocaleDateString()}`
+                      : ''}
+                  </Text>
+                </View>
+                {inv.status === 'pending' && (
+                  <Pressable
+                    onPress={() => handleRevokeInvitation(inv.id, inv.email)}
+                    style={[styles.invitationCancelBtn, { borderColor: colors.destructive }]}
+                    testID={`revoke-invitation-${inv.id}`}
+                  >
+                    <Text style={{ color: colors.destructive, fontSize: 13, fontWeight: '600' }}>Cancel</Text>
+                  </Pressable>
+                )}
+              </View>
+            ))
+          )}
+        </View>
+
+        {/* Danger zone */}
+        {!jarClosed && (
+          <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.destructive }]}>
+            <Text style={[styles.settingsSectionTitle, { color: colors.destructive }]}>Danger Zone</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 14, marginBottom: 16 }}>
+              Cancelling the jar permanently closes it for all members. Contribution history is
+              preserved, but no further contributions can be recorded.
+            </Text>
+            <Pressable
+              style={[styles.cancelJarButton, { borderColor: colors.destructive }]}
+              onPress={handleCancelJar}
+              testID="cancel-jar-button"
+            >
+              <Feather name="x-circle" size={16} color={colors.destructive} />
+              <Text style={{ color: colors.destructive, fontSize: 15, fontWeight: '600' }}>Cancel Jar</Text>
+            </Pressable>
+          </View>
+        )}
       </View>
     );
   };
@@ -496,6 +789,113 @@ export default function JarDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  memberRemoveBtn: {
+    padding: 10,
+  },
+  leaveJarButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    height: 48,
+    marginTop: 16,
+  },
+  leaveJarText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  settingsCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    marginBottom: 16,
+  },
+  settingsSectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  settingsLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 6,
+    marginTop: 8,
+  },
+  settingsInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    marginBottom: 4,
+  },
+  settingsInputMultiline: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  settingsHint: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  settingsSaveButton: {
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+  },
+  settingsSaveText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  settingsNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  settingsNoticeText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  invitationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+  },
+  invitationEmail: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  invitationMeta: {
+    fontSize: 12,
+  },
+  invitationCancelBtn: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  cancelJarButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    height: 48,
+  },
   container: { flex: 1 },
   headerImageContainer: {
     width: '100%',

@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/auth-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { sanitizeReturnPath } from '@/lib/return-path';
 
 export default function LoginScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { login } = useAuth();
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
+  const safeReturnTo = sanitizeReturnPath(returnTo);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -27,7 +30,7 @@ export default function LoginScreen() {
       setIsLoading(true);
       setError('');
       await login({ email, password });
-      router.replace('/(tabs)');
+      router.replace((safeReturnTo ?? '/(tabs)') as any);
     } catch (e: any) {
       setError(e.message || 'Failed to sign in. Please check your credentials.');
     } finally {
@@ -105,7 +108,16 @@ export default function LoginScreen() {
           </Pressable>
         </View>
 
-        <Pressable onPress={() => router.push('/(auth)/register')} style={styles.footerLink}>
+        <Pressable
+          onPress={() =>
+            router.push(
+              safeReturnTo
+                ? { pathname: '/(auth)/register', params: { returnTo: safeReturnTo } }
+                : '/(auth)/register',
+            )
+          }
+          style={styles.footerLink}
+        >
           <Text style={{ color: colors.mutedForeground }}>
             Don't have an account? <Text style={{ color: colors.primary, fontWeight: 'bold' }}>Sign up</Text>
           </Text>

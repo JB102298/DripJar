@@ -86,6 +86,36 @@ export const refreshTokenLimiter = createLimiter({
   },
 });
 
+/** Change password: 10 per hour per IP */
+export const changePasswordLimiter = createLimiter({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  message: {
+    error: "TooManyRequests",
+    message: "Too many password change attempts. Please try again in an hour.",
+  },
+});
+
+/** Send/resend verification email: 5 per hour per IP */
+export const sendVerificationLimiter = createLimiter({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  message: {
+    error: "TooManyRequests",
+    message: "Too many verification emails requested. Please try again in an hour.",
+  },
+});
+
+/** Verify email token: 10 per hour per IP */
+export const verifyEmailLimiter = createLimiter({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  message: {
+    error: "TooManyRequests",
+    message: "Too many verification attempts. Please try again in an hour.",
+  },
+});
+
 /** Invitation lookup/acceptance: 30 per 15 min per IP */
 export const invitationLimiter = createLimiter({
   windowMs: 15 * 60 * 1000,

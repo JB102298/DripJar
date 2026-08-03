@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
 import { db } from "@workspace/db";
 import { users, profiles, refreshSessions } from "@workspace/db";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, gt, isNull } from "drizzle-orm";
 import {
   requireAuth,
   signAccessToken,
@@ -19,6 +19,8 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   refreshTokenSchema,
+  changePasswordSchema,
+  verifyEmailSchema,
 } from "../lib/validation.js";
 import {
   loginLimiter,
@@ -26,9 +28,46 @@ import {
   forgotPasswordLimiter,
   resetPasswordLimiter,
   refreshTokenLimiter,
+  changePasswordLimiter,
+  sendVerificationLimiter,
+  verifyEmailLimiter,
 } from "../lib/rate-limit.js";
 import { logger } from "../lib/logger.js";
-import { sendPasswordResetEmail } from "../lib/email.js";
+import { sendPasswordResetEmail, sendVerificationEmail } from "../lib/email.js";
+
+// ─── Helper: issue + store an email verification token ───────────────────────
+//
+// Generates a cryptographically random token, stores ONLY its hash with a
+// 24-hour expiry, and sends the raw token to the user's email. Never throws.
+// Returns the raw token so dev-only exposure can be gated by the caller.
+
+const VERIFICATION_TOKEN_TTL_MS = 24 * 3600 * 1000;
+
+async function issueVerificationToken(userId: string, email: string): Promise<string> {
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const tokenHash = hashToken(rawToken);
+  const expiresAt = new Date(Date.now() + VERIFICATION_TOKEN_TTL_MS);
+
+  await db
+    .update(users)
+    .set({ verificationTokenHash: tokenHash, verificationTokenExpiresAt: expiresAt })
+    .where(eq(users.id, userId));
+
+  try {
+    await sendVerificationEmail({ toEmail: email, token: rawToken });
+  } catch (err) {
+    logger.error({ err }, "Verification email delivery failed");
+  }
+
+  return rawToken;
+}
+
+function devShowVerificationToken(): boolean {
+  return (
+    process.env["NODE_ENV"] !== "production" &&
+    process.env["DEV_SHOW_VERIFICATION_TOKEN"] === "true"
+  );
+}
 
 const router = Router();
 
@@ -145,6 +184,10 @@ router.post(
       result.newUser.email,
       req,
     );
+
+    // Send the verification email (non-blocking for registration success —
+    // any failure is logged inside issueVerificationToken / email lib).
+    await issueVerificationToken(result.newUser.id, result.newUser.email);
 
     res.status(201).json({
       token: accessToken,
@@ -488,6 +531,154 @@ router.post(
     });
 
     res.json({ message: "Password reset successfully. Please log in with your new password." });
+  },
+);
+
+// ─── POST /auth/change-password ──────────────────────────────────────────────
+//
+// Requires the current password. On success ALL refresh sessions are revoked
+// (matching the reset-password precedent) — every device, including the one
+// making this request, must sign in again with the new password. The client
+// logs the user out after a successful change.
+
+router.post(
+  "/auth/change-password",
+  requireAuth,
+  changePasswordLimiter,
+  validate(changePasswordSchema),
+  async (req, res) => {
+    const { currentPassword, newPassword } = req.body as {
+      currentPassword: string;
+      newPassword: string;
+    };
+    const userId = (req as AuthenticatedRequest).userId;
+
+    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!user) {
+      res.status(404).json({ error: "NotFound", message: "User not found" });
+      return;
+    }
+
+    if (!user.passwordHash) {
+      res.status(400).json({ error: "BadRequest", message: "Password login is not enabled for this account" });
+      return;
+    }
+
+    const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!valid) {
+      res.status(401).json({ error: "Unauthorized", message: "Current password is incorrect" });
+      return;
+    }
+
+    if (currentPassword === newPassword) {
+      res.status(400).json({
+        error: "BadRequest",
+        message: "New password must be different from the current password",
+      });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    // Transaction: update password + revoke ALL refresh sessions
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({ passwordHash }).where(eq(users.id, userId));
+
+      await tx
+        .update(refreshSessions)
+        .set({ revokedAt: new Date(), revokeReason: "password_change" })
+        .where(and(eq(refreshSessions.userId, userId), isNull(refreshSessions.revokedAt)));
+    });
+
+    res.json({
+      message: "Password changed successfully. Please sign in again with your new password.",
+    });
+  },
+);
+
+// ─── POST /auth/send-verification ────────────────────────────────────────────
+//
+// (Re)sends a verification email to the signed-in user. Generic response
+// regardless of state; already-verified users get a distinct success message
+// (no enumeration risk — the caller is authenticated as this user).
+
+router.post(
+  "/auth/send-verification",
+  requireAuth,
+  sendVerificationLimiter,
+  async (req, res) => {
+    const userId = (req as AuthenticatedRequest).userId;
+
+    const [user] = await db
+      .select({ id: users.id, email: users.email, emailVerified: users.emailVerified })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!user) {
+      res.status(404).json({ error: "NotFound", message: "User not found" });
+      return;
+    }
+
+    if (user.emailVerified) {
+      res.json({ message: "Your email is already verified." });
+      return;
+    }
+
+    const rawToken = await issueVerificationToken(user.id, user.email);
+
+    // DEV ONLY: expose the raw token for manual testing. Hard-gated on
+    // non-production execution — DEV_SHOW_VERIFICATION_TOKEN can never
+    // expose a token when NODE_ENV=production.
+    if (devShowVerificationToken()) {
+      logger.info({ hint: "dev-only verification token preview" }, "Verification email requested");
+      res.json({ message: "Verification email sent.", _dev_token: rawToken });
+      return;
+    }
+
+    res.json({ message: "Verification email sent." });
+  },
+);
+
+// ─── POST /auth/verify-email ─────────────────────────────────────────────────
+//
+// Public route: consumes a single-use verification token. The stored hash is
+// cleared on success so the token cannot be replayed.
+
+router.post(
+  "/auth/verify-email",
+  verifyEmailLimiter,
+  validate(verifyEmailSchema),
+  async (req, res) => {
+    const { token: rawToken } = req.body as { token: string };
+    const tokenHash = hashToken(rawToken);
+
+    // Atomic single-use consumption: the conditional UPDATE both validates
+    // (hash match + unexpired) and clears the token in one statement, so
+    // concurrent requests with the same token cannot both succeed.
+    const consumed = await db
+      .update(users)
+      .set({
+        emailVerified: true,
+        verificationTokenHash: null,
+        verificationTokenExpiresAt: null,
+      })
+      .where(
+        and(
+          eq(users.verificationTokenHash, tokenHash),
+          gt(users.verificationTokenExpiresAt, new Date()),
+        ),
+      )
+      .returning({ id: users.id });
+
+    if (consumed.length === 0) {
+      res
+        .status(400)
+        .json({ error: "BadRequest", message: "Invalid or expired verification link" });
+      return;
+    }
+
+    res.json({ message: "Email verified successfully." });
   },
 );
 

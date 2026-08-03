@@ -22,6 +22,8 @@ export const users = pgTable("users", {
   emailVerified: boolean("email_verified").notNull().default(false),
   resetTokenHash: text("reset_token_hash"),
   resetTokenExpiresAt: timestamp("reset_token_expires_at"),
+  verificationTokenHash: text("verification_token_hash"),
+  verificationTokenExpiresAt: timestamp("verification_token_expires_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   lastLoginAt: timestamp("last_login_at"),
@@ -136,6 +138,8 @@ export const jarMembers = pgTable("jar_members", {
   contributionTargetCents: integer("contribution_target_cents").notNull().default(0),
   status: text("status").notNull().default("active"),
   joinedAt: timestamp("joined_at"),
+  leftAt: timestamp("left_at"),
+  removedAt: timestamp("removed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("jar_members_jar_user_idx").on(t.jarId, t.userId),
@@ -164,6 +168,7 @@ export const invitations = pgTable("invitations", {
   sentAt: timestamp("sent_at").notNull().defaultNow(),
   expiresAt: timestamp("expires_at").notNull(),
   acceptedAt: timestamp("accepted_at"),
+  revokedAt: timestamp("revoked_at"),
   invitedByUserId: uuid("invited_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [

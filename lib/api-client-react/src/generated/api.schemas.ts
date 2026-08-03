@@ -18,6 +18,19 @@ export interface MessageResponse {
   message: string;
 }
 
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  /**
+     * @minLength 8
+     * @maxLength 72
+     */
+  newPassword: string;
+}
+
+export interface VerifyEmailRequest {
+  token: string;
+}
+
 export interface RegisterRequest {
   email: string;
   /** @minLength 8 */
@@ -62,9 +75,8 @@ export interface Profile {
 }
 
 export interface AuthResponse {
-  token: string;
   user: User;
-  profile: Profile | null;
+  profile: Profile;
 }
 
 export interface UpdateProfileRequest {
@@ -126,7 +138,6 @@ export interface PersonalProgress {
   nextScheduledAmountCents?: number | null;
   estimatedCompletionDate?: string | null;
   isOnTrack: boolean;
-  hasMissedScheduledContribution?: boolean;
 }
 
 export type MemberProgressSummaryStatus = typeof MemberProgressSummaryStatus[keyof typeof MemberProgressSummaryStatus];
@@ -266,9 +277,6 @@ export interface Jar {
   totalSavedCents: number;
   percentFunded: number;
   daysRemaining?: number | null;
-  health?: JarHealth | null;
-  userRole?: string | null;
-  launchedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -413,6 +421,38 @@ export interface Invitation {
   sentAt: string;
   expiresAt: string;
   acceptedAt?: string | null;
+}
+
+export type SentInvitationRole = typeof SentInvitationRole[keyof typeof SentInvitationRole];
+
+
+export const SentInvitationRole = {
+  member: 'member',
+  viewer: 'viewer',
+} as const;
+
+export type SentInvitationStatus = typeof SentInvitationStatus[keyof typeof SentInvitationStatus];
+
+
+export const SentInvitationStatus = {
+  pending: 'pending',
+  accepted: 'accepted',
+  declined: 'declined',
+  expired: 'expired',
+  revoked: 'revoked',
+} as const;
+
+export interface SentInvitation {
+  id: string;
+  jarId: string;
+  email: string;
+  role: SentInvitationRole;
+  contributionTargetCents?: number | null;
+  status: SentInvitationStatus;
+  sentAt: string;
+  expiresAt: string;
+  acceptedAt?: string | null;
+  revokedAt?: string | null;
 }
 
 export interface InvitationWithJar {

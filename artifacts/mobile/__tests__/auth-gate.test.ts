@@ -22,6 +22,10 @@ describe("isPublicRoute (signed-out navigation gate)", () => {
     expect(isPublicRoute("reset-password")).toBe(true);
   });
 
+  it("allows email-verification links", () => {
+    expect(isPublicRoute("verify-email")).toBe(true);
+  });
+
   it("redirects everything else", () => {
     expect(isPublicRoute("(tabs)")).toBe(false);
     expect(isPublicRoute("jar")).toBe(false);

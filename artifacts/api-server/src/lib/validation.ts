@@ -46,6 +46,15 @@ export const resetPasswordSchema = z.object({
   password,
 }).strict();
 
+export const changePasswordSchema = z.object({
+  currentPassword: z.string({ required_error: "Current password is required" }).min(1, "Current password is required"),
+  newPassword: password,
+}).strict();
+
+export const verifyEmailSchema = z.object({
+  token: z.string({ required_error: "Verification token is required" }).min(1, "Verification token is required"),
+}).strict();
+
 export const refreshTokenSchema = z.object({
   refreshToken: z.string({ required_error: "Refresh token is required" }).min(1, "Refresh token is required"),
 }).strict();
