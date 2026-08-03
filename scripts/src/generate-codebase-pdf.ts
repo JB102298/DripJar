@@ -275,7 +275,7 @@ const PAGE_W = doc.page.width - MARGIN * 2;
 
 const generatedAt = new Date().toUTCString();
 
-doc.font(FONT_TITLE).fontSize(SZ_TITLE).fillColor("#111").text("TripJar", { align: "center" });
+doc.font(FONT_TITLE).fontSize(SZ_TITLE).fillColor("#111").text("M3Jar", { align: "center" });
 doc.moveDown(0.3);
 doc.font(FONT_HEADING).fontSize(SZ_SUBTITLE).fillColor("#444")
    .text("Complete Codebase Report", { align: "center" });
@@ -423,8 +423,8 @@ for (const entry of tocEntries) {
 // ─── Footer: page numbers ─────────────────────────────────────────────────────
 
 const footerText = commitHash !== "(git unavailable)"
-  ? `TripJar Codebase Report  •  commit ${commitHash}  •  generated ${generatedAt}`
-  : `TripJar Codebase Report  •  generated ${generatedAt}`;
+  ? `M3Jar Codebase Report  •  commit ${commitHash}  •  generated ${generatedAt}`
+  : `M3Jar Codebase Report  •  generated ${generatedAt}`;
 
 for (let i = 0; i < totalPages; i++) {
   doc.switchToPage(i);

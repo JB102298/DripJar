@@ -54,7 +54,7 @@ export default function RegisterScreen() {
           <View style={styles.header}>
             <View style={styles.logoRow}>
               <Feather name="archive" size={32} color={colors.primary} />
-              <Text style={[styles.brandName, { color: colors.primary }]}>TripJar</Text>
+              <Text style={[styles.brandName, { color: colors.primary }]}>M3Jar</Text>
             </View>
             <Text style={[styles.title, { color: colors.foreground }]}>Create your account</Text>
           </View>
@@ -145,7 +145,7 @@ export default function RegisterScreen() {
             </Pressable>
             
             <Text style={[styles.termsText, { color: colors.mutedForeground }]}>
-              By creating an account, you agree to the TripJar Terms of Service and Privacy Policy.
+              By creating an account, you agree to the M3Jar Terms of Service and Privacy Policy.
             </Text>
           </View>
 

@@ -67,7 +67,7 @@ router.post("/jars/:jarId/invitations", requireAuth, invitationLimiter, async (r
 
   // Send invitation email (non-blocking — errors are logged but don't fail the request)
   const inviterProfile = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
-  const inviterName = inviterProfile[0]?.displayName ?? "A TripJar member";
+  const inviterName = inviterProfile[0]?.displayName ?? "An M3Jar member";
   sendInvitationEmail({
     toEmail: email.toLowerCase(),
     jarName: jar[0].name,

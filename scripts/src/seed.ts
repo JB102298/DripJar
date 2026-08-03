@@ -1,5 +1,5 @@
 /**
- * TripJar Seed Script
+ * M3Jar Seed Script
  * Creates realistic demo data: Jordan Barrett's Hawaii 2027 jar
  * Run: pnpm --filter @workspace/scripts run seed
  */
@@ -99,7 +99,7 @@ async function createUser(data: {
 }
 
 async function main() {
-  console.log("🌱 Seeding TripJar demo data...\n");
+  console.log("🌱 Seeding M3Jar demo data...\n");
 
   await clearSeedData();
 
@@ -439,10 +439,10 @@ async function main() {
   process.exit(0);
 }
 
-const AGREEMENT_TEXT = `TripJar Savings Agreement — Hawaii 2027
+const AGREEMENT_TEXT = `M3Jar Savings Agreement — Hawaii 2027
 
 1. SAVING PHASE
-All contributions recorded in TripJar during the Saving Phase are simulated transactions. No real money is transferred through this application. This agreement establishes the agreed principles for how the group will manage real funds outside of this platform.
+All contributions recorded in M3Jar during the Saving Phase are simulated transactions. No real money is transferred through this application. This agreement establishes the agreed principles for how the group will manage real funds outside of this platform.
 
 2. REFUND POLICY
 During the Saving Phase, any member may withdraw from the jar and request a refund of amounts they have contributed to the group fund, minus any amounts already paid to third-party vendors on behalf of the group.

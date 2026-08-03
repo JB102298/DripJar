@@ -29,8 +29,8 @@ export default function WelcomeScreen() {
               <Feather name="archive" size={48} color="#FFFFFF" />
               <Feather name="send" size={32} color="#FFFFFF" style={{ marginLeft: -12, marginTop: -20 }} />
             </View>
-            <Text style={styles.brandName}>TripJar</Text>
-            <Text style={styles.tagline}>Save Together. Travel Together.</Text>
+            <Text style={styles.brandName}>M3Jar</Text>
+            <Text style={styles.tagline}>Making Meaningful Moments Happen</Text>
           </View>
 
           <View style={styles.actionContainer}>

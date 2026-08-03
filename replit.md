@@ -1,6 +1,6 @@
-# TripJar
+# M3Jar
 
-A mobile-first collaborative group savings app for shared travel — family vacations, cruises, honeymoons, and group trips. Members contribute toward a shared jar, track progress against milestones, and coordinate through in-app notifications and schedules.
+Making Meaningful Moments Happen. A mobile-first collaborative group savings app for shared travel — family vacations, cruises, honeymoons, and group trips. Members contribute toward a shared jar, track progress against milestones, and coordinate through in-app notifications and schedules.
 
 ## Run & Operate
 

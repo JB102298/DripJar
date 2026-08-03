@@ -44,7 +44,7 @@ export default function LoginScreen() {
         <View style={styles.header}>
           <View style={styles.logoRow}>
             <Feather name="archive" size={32} color={colors.primary} />
-            <Text style={[styles.brandName, { color: colors.primary }]}>TripJar</Text>
+            <Text style={[styles.brandName, { color: colors.primary }]}>M3Jar</Text>
           </View>
           <Text style={[styles.title, { color: colors.foreground }]}>Welcome back</Text>
         </View>
