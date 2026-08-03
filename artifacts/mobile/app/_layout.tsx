@@ -16,6 +16,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { AuthProvider, useAuth } from "@/contexts/auth-context";
 import { CreateJarProvider } from "@/contexts/create-jar-context";
 import { setBaseUrl } from "@workspace/api-client-react";
+import { isPublicRoute } from "@/lib/auth-gate";
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -36,11 +37,8 @@ function RootLayoutNav() {
 
     const inAuthGroup = segments[0] === "(auth)";
 
-    if (
-      !isAuthenticated &&
-      !inAuthGroup &&
-      segments[0] !== "invite" // Allow invite token access maybe? Or redirect to auth.
-    ) {
+    if (!isAuthenticated && !isPublicRoute(segments[0])) {
+      // (see lib/auth-gate.ts for the public-route rules)
       router.replace("/(auth)");
     } else if (isAuthenticated && inAuthGroup) {
       router.replace("/(tabs)");
@@ -61,6 +59,7 @@ function RootLayoutNav() {
         name="invite/[token]"
         options={{ headerShown: false, presentation: "modal" }}
       />
+      <Stack.Screen name="reset-password/[token]" options={{ headerShown: false }} />
       <Stack.Screen
         name="contribution/[jarId]"
         options={{ headerShown: false, presentation: "modal" }}

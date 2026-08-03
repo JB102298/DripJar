@@ -28,6 +28,7 @@ import {
   refreshTokenLimiter,
 } from "../lib/rate-limit.js";
 import { logger } from "../lib/logger.js";
+import { sendPasswordResetEmail } from "../lib/email.js";
 
 const router = Router();
 
@@ -413,9 +414,23 @@ router.post(
         .set({ resetTokenHash: tokenHash, resetTokenExpiresAt: expiresAt })
         .where(eq(users.id, user.id));
 
-      // In production: send email with link containing rawToken
-      // rawToken is NEVER logged in production
-      if (process.env["DEV_SHOW_RESET_TOKEN"] === "true") {
+      // Attempt email delivery. sendPasswordResetEmail never throws and never
+      // logs the raw token in production — and as defense-in-depth, any
+      // unexpected failure is swallowed here so delivery problems can never
+      // alter the generic response below (anti-enumeration).
+      try {
+        await sendPasswordResetEmail({ toEmail: email, token: rawToken });
+      } catch (err) {
+        logger.error({ err }, "Password reset email delivery failed");
+      }
+
+      // DEV ONLY: expose the raw token in the response for manual testing.
+      // Hard-gated on non-production execution — DEV_SHOW_RESET_TOKEN can
+      // never expose a token when NODE_ENV=production.
+      if (
+        process.env["NODE_ENV"] !== "production" &&
+        process.env["DEV_SHOW_RESET_TOKEN"] === "true"
+      ) {
         logger.info({ hint: "dev-only reset token preview" }, "Password reset requested");
         res.json({
           message: "If an account exists with this email, you will receive reset instructions.",

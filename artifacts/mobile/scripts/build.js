@@ -57,16 +57,19 @@ function stripProtocol(domain) {
 }
 
 function getDeploymentDomain() {
+  // Explicit override wins: setting EXPO_PUBLIC_DOMAIN=m3jar.com for a
+  // production build makes the web bundle call the same-origin custom domain
+  // instead of the platform-provided deployment hostname.
+  if (process.env.EXPO_PUBLIC_DOMAIN) {
+    return stripProtocol(process.env.EXPO_PUBLIC_DOMAIN);
+  }
+
   if (process.env.REPLIT_INTERNAL_APP_DOMAIN) {
     return stripProtocol(process.env.REPLIT_INTERNAL_APP_DOMAIN);
   }
 
   if (process.env.REPLIT_DEV_DOMAIN) {
     return stripProtocol(process.env.REPLIT_DEV_DOMAIN);
-  }
-
-  if (process.env.EXPO_PUBLIC_DOMAIN) {
-    return stripProtocol(process.env.EXPO_PUBLIC_DOMAIN);
   }
 
   console.error(

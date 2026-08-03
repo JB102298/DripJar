@@ -12,13 +12,29 @@ app.set("trust proxy", 1);
 
 // ─── Security headers ─────────────────────────────────────────────────────────
 
-app.use(
-  helmet({
+// CSP: enabled in production only. This service is an API-only origin (all
+// routes serve JSON under /api; the Expo web app is served by a separate
+// static server), so a restrictive policy is safe and cannot break the web
+// app's own resources. Development keeps CSP disabled so Replit previews and
+// Expo dev tooling continue to work unchanged.
+export function buildHelmetOptions(isProduction: boolean): Parameters<typeof helmet>[0] {
+  return {
     // Allow Expo/React Native web previews to load resources
     crossOriginEmbedderPolicy: false,
-    contentSecurityPolicy: false, // CSP managed separately if needed
-  }),
-);
+    contentSecurityPolicy: isProduction
+      ? {
+          directives: {
+            defaultSrc: ["'none'"],
+            frameAncestors: ["'none'"],
+            baseUri: ["'none'"],
+            formAction: ["'none'"],
+          },
+        }
+      : false,
+  };
+}
+
+app.use(helmet(buildHelmetOptions(process.env["NODE_ENV"] === "production")));
 app.disable("x-powered-by");
 
 // ─── Request logging ──────────────────────────────────────────────────────────
