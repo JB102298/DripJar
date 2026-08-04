@@ -3,34 +3,71 @@
  *
  * Proves that the Stripe webhook handler preserves exactly-once financial
  * state under high concurrent load with a real PostgreSQL database.
- * No DB layer is mocked; only Stripe network operations are stubbed.
+ * No DB layer is mocked; Stripe network operations are stubbed.
  *
- * Scenario A  — 50 concurrent deliveries of the same event ID
- *   Asserts: exactly-once ledger posting, exactly-once contributions row,
- *   FT providerStatus/ledgerPostingStatus, no duplicate stripeWebhookEvents row.
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ SCENARIO A — 20 concurrent deliveries of the same event ID             │
+ * │                                                                         │
+ * │  Mocked  : getStripeClient() → stub for paymentIntents / customers      │
+ * │            charges.retrieve (reconcileActualFee, best-effort only)      │
+ * │  REAL    : stripe.webhooks.constructEvent() — full HMAC-SHA256          │
+ * │            signature verification using a test secret.                  │
+ * │            Every request travels through POST /api/webhooks/stripe,     │
+ * │            express.raw(), and the full webhook dispatch pipeline.       │
+ * │            All DB operations use the live PostgreSQL test database.     │
+ * │                                                                         │
+ * │  Asserts : 1 stripe_webhook_events row (unique constraint held)         │
+ * │            event finishes processed                                      │
+ * │            1 contribution (Stripe-backed)                               │
+ * │            1 financial_transaction posted                               │
+ * │            1 contribution ledger_transaction                            │
+ * │            balanced ledger (sum debits = sum credits)                   │
+ * │            EXT_PAY_CLR debit  = totalQuotedCents         (exactly once) │
+ * │            CTRB_REFUNDABLE CR = requestedPrincipalCents  (exactly once) │
+ * │            DJ_FEE_REVENUE CR  = dripJarFeeCents          (exactly once) │
+ * │            PROC_FEE_CLR CR    = processingFeeCents       (exactly once) │
+ * │            no event row stuck in processing                             │
+ * └─────────────────────────────────────────────────────────────────────────┘
  *
- * Scenario B  — 50 concurrent requests split between two different event IDs
- *   that both refer to the same PaymentIntent (e.g. Stripe retries with new
- *   event IDs).  The FOR UPDATE guard must prevent double-posting even when
- *   both events race to post the ledger.
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ SCENARIO B — two different event IDs for the same succeeded PI          │
+ * │                                                                         │
+ * │  Mocked  : stripe.webhooks.constructEvent() (counter-based dispatch)   │
+ * │  REAL    : all DB transaction / ledger / FOR UPDATE logic               │
+ * │  Purpose : FOR UPDATE guard prevents double-posting when two event IDs  │
+ * │            race to post the same PI (e.g. Stripe retry with new ID).   │
+ * └─────────────────────────────────────────────────────────────────────────┘
  *
- * Scenario C  — 25 `payment_intent.processing` + 25 `payment_intent.succeeded`
- *   requests for the same PI delivered concurrently.  Verifies that the
- *   processing event (handled by the default "ignore" path) cannot regress
- *   the FT providerStatus back from "succeeded".
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ SCENARIO C — processing vs succeeded events concurrent                  │
+ * │                                                                         │
+ * │  Mocked  : stripe.webhooks.constructEvent() (counter-based dispatch)   │
+ * │  REAL    : all DB transaction / ledger / FOR UPDATE logic               │
+ * │  Purpose : payment_intent.processing (default-ignore path) cannot       │
+ * │            regress FT.providerStatus after succeeded posts.             │
+ * └─────────────────────────────────────────────────────────────────────────┘
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import request from "supertest";
+import { createHmac } from "node:crypto";
+import Stripe from "stripe";
 import app from "../app.js";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import {
   jarMembers,
   financialTransactions,
   stripeWebhookEvents,
   contributions,
+  ledgerTransactions,
+  ledgerEntries,
+  ledgerAccounts,
 } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
+
+// ─── Real Stripe instance for signature verification (Scenario A only) ────────
+// Only webhooks.constructEvent is used — no network calls.
+const _stripeForSigVerification = new Stripe("sk_test_signature_verify_only");
 
 const BASE = "/api";
 
@@ -56,36 +93,113 @@ const mockGetOrCreateStripeCustomer = vi.mocked(getOrCreateStripeCustomer);
 
 let _piCounter = 0;
 
+/** Shared PI mock implementation used by both factories. */
+function _makePiCreate() {
+  return vi.fn().mockImplementation(async () => {
+    const id = `pi_stress_${++_piCounter}_${Date.now()}`;
+    return {
+      id,
+      client_secret: `${id}_secret`,
+      amount: 21_246,
+      currency: "usd",
+      status: "requires_payment_method",
+      latest_charge: null,
+    };
+  });
+}
+
+/**
+ * Mock Stripe client for Scenarios B & C.
+ * webhooks.constructEvent is a vi.fn() configured per-scenario.
+ */
 function buildMockStripe() {
   return {
-    paymentIntents: {
-      create: vi.fn().mockImplementation(async () => {
-        const id = `pi_stress_${++_piCounter}_${Date.now()}`;
-        return {
-          id,
-          client_secret: `${id}_secret`,
-          amount: 21_246,
-          currency: "usd",
-          status: "requires_payment_method",
-          latest_charge: null,
-        };
-      }),
-      retrieve: vi.fn(),
-    },
-    customerSessions: {
-      create: vi.fn().mockResolvedValue({ client_secret: "cuss_stress_secret" }),
-    },
-    customers: {
-      create: vi.fn().mockResolvedValue({ id: "cus_stress_mock" }),
-    },
-    webhooks: {
-      // constructEvent is configured per-scenario below
-      constructEvent: vi.fn(),
-    },
-    charges: {
-      retrieve: vi.fn().mockRejectedValue(new Error("Not available in test mode")),
-    },
+    paymentIntents: { create: _makePiCreate(), retrieve: vi.fn() },
+    customerSessions: { create: vi.fn().mockResolvedValue({ client_secret: "cuss_stress_secret" }) },
+    customers: { create: vi.fn().mockResolvedValue({ id: "cus_stress_mock" }) },
+    webhooks: { constructEvent: vi.fn() },
+    charges: { retrieve: vi.fn().mockRejectedValue(new Error("Not available in test mode")) },
   } as unknown as ReturnType<typeof getStripeClient>;
+}
+
+/**
+ * Mock Stripe client for Scenario A.
+ * webhooks.constructEvent is the REAL Stripe SDK implementation —
+ * full HMAC-SHA256 signature verification runs on every request.
+ * Only Stripe network calls (PI create, charges.retrieve) are stubbed.
+ */
+function buildMockStripeWithRealSig() {
+  return {
+    paymentIntents: { create: _makePiCreate(), retrieve: vi.fn() },
+    customerSessions: { create: vi.fn().mockResolvedValue({ client_secret: "cuss_stress_secret" }) },
+    customers: { create: vi.fn().mockResolvedValue({ id: "cus_stress_mock" }) },
+    webhooks: {
+      constructEvent: (rawBody: Buffer | string, sig: string, secret: string): Stripe.Event =>
+        _stripeForSigVerification.webhooks.constructEvent(rawBody, sig, secret),
+    },
+    charges: { retrieve: vi.fn().mockRejectedValue(new Error("Not available in test mode")) },
+  } as unknown as ReturnType<typeof getStripeClient>;
+}
+
+// ─── Pool health helper (Scenario A) ─────────────────────────────────────────
+
+/**
+ * Polls the pg connection pool until at least `minIdle` connections are
+ * idle, or `maxWaitMs` elapses.  Prevents Scenario A's 20 concurrent
+ * requests from timing out when an earlier test file (e.g. phase3-automation)
+ * has timed-out HTTP handlers still holding pool connections in the background.
+ *
+ * With singleFork:true all test files share one process and one DB pool.
+ * A 30-second test timeout can leave in-flight Express handlers — and their
+ * open pg connections — running beyond the failed test.  Waiting here gives
+ * those handlers time to finish before we saturate the pool with 20 new
+ * concurrent requests.
+ */
+async function waitForPoolConnections(
+  minIdle = 5,
+  maxWaitMs = 20_000,
+): Promise<void> {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    if (pool.idleCount >= minIdle) return;
+    await new Promise<void>((r) => setTimeout(r, 500));
+  }
+}
+
+// ─── Signature helpers (Scenario A) ──────────────────────────────────────────
+
+/**
+ * Generate a valid Stripe webhook signature for the given payload and secret.
+ * Uses the same HMAC-SHA256 algorithm Stripe uses in production:
+ *   signed_payload = timestamp + "." + payload
+ *   signature      = HMAC-SHA256(signed_payload, secret)
+ *   header         = "t=" + timestamp + ",v1=" + signature
+ */
+function generateStripeSignature(payload: string, secret: string): string {
+  const ts = Math.floor(Date.now() / 1000);
+  const sig = createHmac("sha256", secret)
+    .update(`${ts}.${payload}`)
+    .digest("hex");
+  return `t=${ts},v1=${sig}`;
+}
+
+/**
+ * Send a webhook request to POST /api/webhooks/stripe with a REAL Stripe
+ * HMAC-SHA256 signature so the production constructEvent path is exercised.
+ * Used exclusively by Scenario A.
+ */
+function sendWebhookWithRealSig(event: unknown, secret: string) {
+  const payload = JSON.stringify(event);
+  // NOTE: send the payload as a plain string, NOT a Buffer.
+  // supertest/superagent with Content-Type:application/json would otherwise
+  // JSON-serialize the Buffer object itself (producing garbage bytes).
+  // express.raw({ type:"application/json" }) stores the incoming string body
+  // as a raw Buffer, so constructEvent receives the correct byte sequence.
+  return request(app)
+    .post(`${BASE}/webhooks/stripe`)
+    .set("Content-Type", "application/json")
+    .set("stripe-signature", generateStripeSignature(payload, secret))
+    .send(payload);
 }
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
@@ -205,119 +319,225 @@ function sendWebhookWith(event: unknown) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCENARIO A — 50 concurrent deliveries of the same event ID
+// SCENARIO A — 20 concurrent deliveries of the same event ID
+//   Real HMAC-SHA256 Stripe signature verification on every request.
+//   Full signed-HTTP path: express.raw → stripe-signature header →
+//   stripe.webhooks.constructEvent → production webhook dispatch.
 // ─────────────────────────────────────────────────────────────────────────────
 
+const SCENARIO_A_SECRET = "whsec_test_stress_a_realhmac";
+
 describe(
-  "Webhook stress — Scenario A: 50 concurrent same-event-ID deliveries",
+  "Webhook stress — Scenario A: 20 concurrent same-event-ID deliveries (real signature)",
   () => {
-    let mockStripe: ReturnType<typeof buildMockStripe>;
+    // Scenario A uses buildMockStripeWithRealSig so constructEvent is NOT mocked.
+    let mockStripe: ReturnType<typeof buildMockStripeWithRealSig>;
     let ft: typeof financialTransactions.$inferSelect;
 
     beforeAll(async () => {
-      mockStripe = buildMockStripe();
-      mockGetStripeClient.mockReturnValue(mockStripe);
+      // Wait for any background DB connections from earlier test files to become
+      // idle before setting up and launching 20 concurrent webhook requests.
+      // With singleFork:true, phase3-automation runs just before this file;
+      // a timed-out phase3 handler can hold pool connections for up to ~30s.
+      await waitForPoolConnections(5, 20_000);
+
+      mockStripe = buildMockStripeWithRealSig();
+      mockGetStripeClient.mockReturnValue(
+        mockStripe as unknown as ReturnType<typeof getStripeClient>,
+      );
       mockGetOrCreateStripeCustomer.mockResolvedValue("cus_stress_mock");
-      process.env["STRIPE_WEBHOOK_SECRET"] = "whsec_test_stress_a";
+      process.env["STRIPE_WEBHOOK_SECRET"] = SCENARIO_A_SECRET;
 
       const user = await register("a");
       const jar = await createJar(user.token);
       await launchJar(user.token, jar.id);
       ft = await createQuoteAndPi(user.token, jar.id);
-    }, 60_000);
+    }, 90_000);
 
     afterAll(() => {
       delete process.env["STRIPE_WEBHOOK_SECRET"];
     });
 
-    it("all 10 return 200 and exactly-once financial state holds", { timeout: 120_000 }, async () => {
-      const event = buildSuccessEvent(ft);
+    it(
+      "all 20 return 200, signature verified, exactly-once financial + balanced ledger",
+      { timeout: 120_000 },
+      async () => {
+        const event = buildSuccessEvent(ft);
 
-      // Single constructEvent mock — all 10 concurrent calls return the same event
-      (mockStripe.webhooks.constructEvent as ReturnType<typeof vi.fn>).mockReturnValue(event);
-
-      const responses = await Promise.all(
-        Array.from({ length: 10 }).map(() => sendWebhookWith(event)),
-      );
-
-      // (1) All 50 requests returned 200
-      const statuses = responses.map((r) => r.status);
-      expect(statuses.every((s) => s === 200)).toBe(true);
-
-      // (2) Exactly 1 stripeWebhookEvents row for this event ID
-      const eventRows = await db
-        .select()
-        .from(stripeWebhookEvents)
-        .where(eq(stripeWebhookEvents.stripeEventId, event.id));
-      expect(eventRows).toHaveLength(1);
-
-      // (3) That row is marked processed
-      expect(eventRows[0]!.processingStatus).toBe("processed");
-      expect(eventRows[0]!.processedAt).toBeTruthy();
-      expect(eventRows[0]!.processingStatus).not.toBe("failed");
-
-      // (4) FT providerStatus = succeeded
-      const [updatedFt] = await db
-        .select()
-        .from(financialTransactions)
-        .where(eq(financialTransactions.id, ft.id));
-      expect(updatedFt!.providerStatus).toBe("succeeded");
-
-      // (5) FT ledgerPostingStatus = posted
-      expect(updatedFt!.ledgerPostingStatus).toBe("posted");
-
-      // (6) FT has a ledgerId (ledger_transactions FK set)
-      expect(updatedFt!.ledgerId).toBeTruthy();
-
-      // (7) FT updatedAt was written
-      expect(updatedFt!.updatedAt).toBeTruthy();
-
-      // (8) The event row is linked to the FT
-      expect(eventRows[0]!.financialTransactionId).toBe(ft.id);
-
-      // (9) Exactly 1 contributions row for this PI
-      const contribs = await db
-        .select()
-        .from(contributions)
-        .where(
-          and(
-            eq(contributions.jarId, ft.jarId),
-            eq(contributions.memberId, ft.memberId),
-            eq(contributions.externalPaymentId, ft.providerTransactionId!),
+        // constructEvent is NOT mocked — real HMAC-SHA256 verification runs.
+        // Each request carries a freshly-computed signature via sendWebhookWithRealSig.
+        const responses = await Promise.all(
+          Array.from({ length: 20 }).map(() =>
+            sendWebhookWithRealSig(event, SCENARIO_A_SECRET),
           ),
         );
-      expect(contribs).toHaveLength(1);
 
-      // (10) Contribution amount equals requestedPrincipalCents
-      expect(contribs[0]!.amountCents).toBe(Number(ft.requestedPrincipalCents));
+        // ── HTTP responses ────────────────────────────────────────────────────
+        // (1) All 20 requests returned 200
+        const statuses = responses.map((r) => r.status);
+        expect(
+          statuses.every((s) => s === 200),
+          `Non-200 statuses: ${statuses.filter((s) => s !== 200).join(", ")}`,
+        ).toBe(true);
 
-      // (11) Contribution status is stripe_test
-      expect(contribs[0]!.status).toBe("stripe_test");
+        // (2) Response bodies: at least one normal success OR already_processed
+        const bodies = responses.map((r) => r.body as Record<string, unknown>);
+        const hasValidBody =
+          bodies.some((b) => b["received"] === true && !b["status"]) ||
+          bodies.some((b) => b["status"] === "already_processed");
+        expect(hasValidBody, "at least one 200 with received:true body").toBe(true);
 
-      // (12) Contribution sourceType is stripe_test
-      expect(contribs[0]!.sourceType).toBe("stripe_test");
+        // ── stripe_webhook_events ─────────────────────────────────────────────
+        // (3) Exactly 1 row for this event ID (unique constraint held under 20-way concurrency)
+        const eventRows = await db
+          .select()
+          .from(stripeWebhookEvents)
+          .where(eq(stripeWebhookEvents.stripeEventId, event.id));
+        expect(eventRows, "exactly 1 stripe_webhook_events row").toHaveLength(1);
 
-      // (13) No second stripeWebhookEvents row was ever created (unique constraint held)
-      const allForEvent = await db
-        .select()
-        .from(stripeWebhookEvents)
-        .where(eq(stripeWebhookEvents.stripeEventId, event.id));
-      expect(allForEvent).toHaveLength(1);
+        // (4) Event row finishes in 'processed' state — never stuck in 'processing'
+        expect(eventRows[0]!.processingStatus, "event finishes processed").toBe("processed");
+        expect(eventRows[0]!.processedAt, "processedAt is set").toBeTruthy();
+        expect(eventRows[0]!.processingStatus, "not in failed state").not.toBe("failed");
 
-      // (14) Response bodies include at least one normal success OR already_processed
-      const bodies = responses.map((r) => r.body as Record<string, unknown>);
-      const atLeastOneNormalOrDedup =
-        bodies.some((b) => b["received"] === true && !b["status"]) ||
-        bodies.some((b) => b["status"] === "already_processed");
-      expect(atLeastOneNormalOrDedup).toBe(true);
+        // (5) Event row is linked to the FT
+        expect(
+          eventRows[0]!.financialTransactionId,
+          "event linked to financial_transaction",
+        ).toBe(ft.id);
 
-      // (15) No contributions rows beyond the single expected one exist for this PI
-      const allContribsForPi = await db
-        .select()
-        .from(contributions)
-        .where(eq(contributions.externalPaymentId, ft.providerTransactionId!));
-      expect(allContribsForPi).toHaveLength(1);
-    });
+        // ── financial_transaction ─────────────────────────────────────────────
+        const [updatedFt] = await db
+          .select()
+          .from(financialTransactions)
+          .where(eq(financialTransactions.id, ft.id));
+
+        // (6) FT providerStatus = succeeded
+        expect(updatedFt!.providerStatus, "FT providerStatus").toBe("succeeded");
+
+        // (7) FT ledgerPostingStatus = posted (exactly once)
+        expect(updatedFt!.ledgerPostingStatus, "FT ledgerPostingStatus").toBe("posted");
+
+        // (8) FT has a ledgerId
+        expect(updatedFt!.ledgerId, "FT has ledgerId").toBeTruthy();
+
+        // ── contributions ─────────────────────────────────────────────────────
+        const contribs = await db
+          .select()
+          .from(contributions)
+          .where(
+            and(
+              eq(contributions.jarId, ft.jarId),
+              eq(contributions.memberId, ft.memberId),
+              eq(contributions.externalPaymentId, ft.providerTransactionId!),
+            ),
+          );
+
+        // (9) Exactly 1 Stripe-backed contribution row (not 2, not 0)
+        expect(contribs, "exactly 1 contribution").toHaveLength(1);
+
+        // (10) Contribution amount = requestedPrincipalCents (principal posted exactly once)
+        expect(
+          contribs[0]!.amountCents,
+          "contribution principal amount",
+        ).toBe(Number(ft.requestedPrincipalCents));
+
+        // (11) Contribution status and sourceType
+        expect(contribs[0]!.status).toBe("stripe_test");
+        expect(contribs[0]!.sourceType).toBe("stripe_test");
+
+        // (12) No second contributions row for this PI anywhere in the DB
+        const allContribsForPi = await db
+          .select()
+          .from(contributions)
+          .where(eq(contributions.externalPaymentId, ft.providerTransactionId!));
+        expect(allContribsForPi, "no duplicate contributions for this PI").toHaveLength(1);
+
+        // ── ledger_transactions ───────────────────────────────────────────────
+        // (13) Exactly 1 contribution ledger_transaction linked via FT.ledgerId
+        const [ledgerTxRow] = await db
+          .select()
+          .from(ledgerTransactions)
+          .where(eq(ledgerTransactions.id, updatedFt!.ledgerId!));
+        expect(ledgerTxRow, "exactly 1 contribution ledger_transaction").toBeDefined();
+
+        // ── ledger_entries — balanced double-entry ────────────────────────────
+        const entries = await db
+          .select({
+            entryType: ledgerEntries.entryType,
+            amountCents: ledgerEntries.amountCents,
+            accountCode: ledgerAccounts.code,
+          })
+          .from(ledgerEntries)
+          .innerJoin(ledgerAccounts, eq(ledgerEntries.accountId, ledgerAccounts.id))
+          .where(eq(ledgerEntries.ledgerTransactionId, updatedFt!.ledgerId!));
+
+        // (14) Balanced ledger: sum(debits) === sum(credits)
+        const debitSum = entries
+          .filter((e) => e.entryType === "debit")
+          .reduce((s, e) => s + Number(e.amountCents), 0);
+        const creditSum = entries
+          .filter((e) => e.entryType === "credit")
+          .reduce((s, e) => s + Number(e.amountCents), 0);
+        expect(debitSum, "balanced ledger: debits").toBe(creditSum);
+        expect(debitSum, "total debits equal totalQuotedCents").toBe(
+          Number(ft.totalQuotedCents),
+        );
+
+        // (15) EXT_PAY_CLR debit = totalQuotedCents (customer charged exactly once)
+        const extPayDebits = entries.filter(
+          (e) => e.accountCode === "EXT_PAY_CLR" && e.entryType === "debit",
+        );
+        expect(extPayDebits, "EXT_PAY_CLR debit exactly once").toHaveLength(1);
+        expect(Number(extPayDebits[0]!.amountCents), "EXT_PAY_CLR amount").toBe(
+          Number(ft.totalQuotedCents),
+        );
+
+        // (16) CTRB_REFUNDABLE credit = principalCents (member principal credited exactly once)
+        const principalCredits = entries.filter(
+          (e) => e.accountCode === "CTRB_REFUNDABLE" && e.entryType === "credit",
+        );
+        expect(principalCredits, "CTRB_REFUNDABLE credit exactly once").toHaveLength(1);
+        expect(
+          Number(principalCredits[0]!.amountCents),
+          "CTRB_REFUNDABLE amount = requestedPrincipalCents",
+        ).toBe(Number(ft.requestedPrincipalCents));
+
+        // (17) DJ_FEE_REVENUE credit = dripJarFeeCents (DripJar fee credited exactly once)
+        const feeCredits = entries.filter(
+          (e) => e.accountCode === "DJ_FEE_REVENUE" && e.entryType === "credit",
+        );
+        expect(feeCredits, "DJ_FEE_REVENUE credit exactly once").toHaveLength(1);
+        const expectedFee =
+          Number(ft.totalQuotedCents) -
+          Number(ft.requestedPrincipalCents) -
+          Number(ft.processingFeeEstimatedCents);
+        expect(Number(feeCredits[0]!.amountCents), "DJ_FEE_REVENUE amount").toBe(
+          expectedFee,
+        );
+
+        // (18) PROC_FEE_CLR credit = processingFeeEstimatedCents (if non-zero)
+        if (Number(ft.processingFeeEstimatedCents) > 0) {
+          const procFeeCredits = entries.filter(
+            (e) => e.accountCode === "PROC_FEE_CLR" && e.entryType === "credit",
+          );
+          expect(
+            procFeeCredits,
+            "PROC_FEE_CLR credit exactly once",
+          ).toHaveLength(1);
+          expect(
+            Number(procFeeCredits[0]!.amountCents),
+            "PROC_FEE_CLR amount = processingFeeEstimatedCents",
+          ).toBe(Number(ft.processingFeeEstimatedCents));
+        }
+
+        // (19) No event row stuck in 'processing' (impossible intermediate state)
+        expect(
+          eventRows[0]!.processingStatus,
+          "no impossible processing state",
+        ).not.toBe("processing");
+      },
+    );
   },
 );
 
