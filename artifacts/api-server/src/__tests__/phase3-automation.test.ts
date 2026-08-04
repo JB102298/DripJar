@@ -383,7 +383,18 @@ describe("Email notification preferences", () => {
 describe("Reminder processor idempotency", () => {
   const originalToken = process.env["INTERNAL_REMINDER_TOKEN"];
 
-  beforeAll(() => { process.env["INTERNAL_REMINDER_TOKEN"] = INTERNAL_TOKEN; });
+  beforeAll(async () => {
+    process.env["INTERNAL_REMINDER_TOKEN"] = INTERNAL_TOKEN;
+    // Flush all accumulated reminder events (from previous test runs or earlier
+    // describe blocks) to terminal state before the idempotency tests start.
+    // In NODE_ENV=test the processor returns vacuous-success for every email,
+    // so a single run drains every pending/failed row to 'sent' or
+    // 'skipped_preference'. This ensures the deduplication assertions below are
+    // not polluted by pre-existing pending events.
+    await request(app)
+      .post(`${BASE}/internal/process-reminders`)
+      .set("X-Internal-Token", INTERNAL_TOKEN);
+  });
   afterAll(() => {
     if (originalToken !== undefined) process.env["INTERNAL_REMINDER_TOKEN"] = originalToken;
     else delete process.env["INTERNAL_REMINDER_TOKEN"];
@@ -567,7 +578,15 @@ import { eq as _eq } from "drizzle-orm";
 describe("Email delivery state tracking (Part 4)", () => {
   const originalToken = process.env["INTERNAL_REMINDER_TOKEN"];
 
-  beforeAll(() => { process.env["INTERNAL_REMINDER_TOKEN"] = INTERNAL_TOKEN; });
+  beforeAll(async () => {
+    process.env["INTERNAL_REMINDER_TOKEN"] = INTERNAL_TOKEN;
+    // Same flush strategy as "Reminder processor idempotency" above: drain all
+    // accumulated pending/failed rows to terminal state before the dedup
+    // assertion tests run, so cross-run DB state does not contaminate them.
+    await request(app)
+      .post(`${BASE}/internal/process-reminders`)
+      .set("X-Internal-Token", INTERNAL_TOKEN);
+  });
   afterAll(() => {
     if (originalToken !== undefined) process.env["INTERNAL_REMINDER_TOKEN"] = originalToken;
     else delete process.env["INTERNAL_REMINDER_TOKEN"];
