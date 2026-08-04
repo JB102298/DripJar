@@ -11,3 +11,4 @@
 - [Concurrency test lessons](concurrency-test-lessons.md) — vi.hoisted for mocks, arrow-fn constructor pitfall, parallel vitest files share DB (no HTTP processor in concurrency tests), atomic claim pattern
 - [Drizzle journal registration](drizzle-journal-registration.md) — hand-written SQL migrations must be added to meta/_journal.json or drizzle-kit silently skips them (exits 0, tables never created)
 - [Reminder test isolation](reminder-test-isolation.md) — dedup tests need a beforeAll flush call; @types/pg in api-server devDependencies for concurrency test typecheck
+- [Stripe migration lesson](stripe-migration-lesson.md) — drizzle-kit reports success without applying; apply SQL directly; ft_provider_status_check must be expanded; mock PI IDs must be unique per test
