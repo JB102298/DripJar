@@ -57,6 +57,13 @@
       "when": 1785784000000,
       "tag": "0007_phase3_corrections",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785811500000,
+      "tag": "0008_phase4a_financial_ledger",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,7 @@ import {
   pgTable,
   text,
   integer,
+  bigint,
   boolean,
   timestamp,
   numeric,
@@ -484,6 +485,202 @@ export const reminderSentEventsRelations = relations(reminderSentEvents, ({ one 
   jar: one(jars, { fields: [reminderSentEvents.jarId], references: [jars.id] }),
 }));
 
+// ─── Ledger Accounts (Chart of Accounts) ─────────────────────────────────────
+//
+// System-seeded accounts. Codes and their semantics are fixed at schema level:
+//
+//  Code              Type       Normal balance  Meaning
+//  ─────────────────────────────────────────────────────────────────────────────
+//  EXT_PAY_CLR       asset      debit           Total customer charge clearing
+//  CTRB_REFUNDABLE   liability  credit          Contributor refundable principal
+//  CTRB_COMMITTED    liability  credit          Committed principal (locked)
+//  DJ_FEE_REVENUE    revenue    credit          DripJar 3% service fee earned
+//  PROC_FEE_CLR      liability  credit          Processing-fee pass-through
+//  REFUND_CLR        asset      debit           Refund outflow clearing
+//  PAYOUT_CLR        asset      debit           Future payout destination clearing
+//
+// Debit/credit convention:
+//   Assets/Expenses  → debit increases, credit decreases
+//   Liabilities/Equity/Revenue → credit increases, debit decreases
+//
+// Ledger entries are immutable once posted. Corrections use compensating entries.
+
+export const ledgerAccounts = pgTable("ledger_accounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  // 'asset' | 'liability' | 'revenue' | 'expense' | 'equity'
+  accountType: text("account_type").notNull(),
+  // 'debit' | 'credit' — normal/positive balance direction
+  normalBalance: text("normal_balance").notNull(),
+  currency: text("currency").notNull().default("USD"),
+  description: text("description"),
+  isSystemAccount: boolean("is_system_account").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("ledger_accounts_code_idx").on(t.code),
+]);
+
+// ─── Financial Transactions ───────────────────────────────────────────────────
+//
+// One row per financial event (contribution, refund, commitment_transfer, …).
+// Captures all fee components at the time of the event so historical records
+// are stable even if rates change later.
+//
+// Transaction types:
+//   contribution         – initial drip of principal into a jar
+//   refund               – pre-commit principal return to contributor
+//   commitment_transfer  – moves refundable → committed principal
+//   payout               – future: committed → organizer bank or card
+//   card_spend           – future: DripJar Card charge
+//   adjustment           – manual correction
+//   reversal             – explicit compensating reversal
+//
+// Provider fields (providerType, providerTransactionId, providerStatus) are
+// NULL/not_applicable in Phase 4A. They will be populated by Phase 4B (Stripe).
+//
+// Fund destination abstraction:
+//   fundDestinationType = NULL          (not yet routed)
+//                       = 'organizer_bank_payout' (future)
+//                       = 'dripjar_card'          (future)
+//
+// Money columns use BIGINT to accommodate platform-wide ledger aggregation
+// without integer overflow ($21M INTEGER ceiling is too narrow for aggregates).
+// Individual transaction amounts are bounded by jar goals (INTEGER), but
+// storing them as BIGINT here keeps the ledger future-safe and avoids any
+// type mismatch when summing across millions of transactions.
+
+export const financialTransactions = pgTable("financial_transactions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jarId: uuid("jar_id").notNull().references(() => jars.id, { onDelete: "restrict" }),
+  memberId: uuid("member_id").notNull().references(() => jarMembers.id, { onDelete: "restrict" }),
+  // 'contribution'|'refund'|'commitment_transfer'|'payout'|'card_spend'|'adjustment'|'reversal'
+  transactionType: text("transaction_type").notNull(),
+  currency: text("currency").notNull().default("USD"),
+  // Principal the contributor intends to drip into the jar
+  requestedPrincipalCents: bigint("requested_principal_cents", { mode: "number" }).notNull(),
+  // DripJar 3% service fee computed at transaction time (non-refundable)
+  dripJarFeeCents: bigint("dripjar_fee_cents", { mode: "number" }).notNull(),
+  // Rate stored so historical records are stable if rate changes
+  dripJarFeeRateBps: integer("dripjar_fee_rate_bps").notNull(),
+  // Provider fee estimate shown to customer before confirmation
+  processingFeeEstimatedCents: bigint("processing_fee_estimated_cents", { mode: "number" }).notNull().default(0),
+  // Actual provider fee from reconciliation (Phase 4B+); null until confirmed
+  processingFeeActualCents: bigint("processing_fee_actual_cents", { mode: "number" }),
+  // Total quoted to customer = principal + DripJar fee + estimated processing fee
+  totalQuotedCents: bigint("total_quoted_cents", { mode: "number" }).notNull(),
+  // Payment provider (null Phase 4A; 'stripe' Phase 4B+)
+  providerType: text("provider_type"),
+  providerTransactionId: text("provider_transaction_id"),
+  // 'not_applicable'|'pending'|'succeeded'|'failed'
+  providerStatus: text("provider_status").notNull().default("not_applicable"),
+  // 'pending'|'posted'|'failed'
+  ledgerPostingStatus: text("ledger_posting_status").notNull().default("pending"),
+  // Set once ledger entries are posted
+  ledgerId: uuid("ledger_id"),
+  // Future payout routing: null | 'organizer_bank_payout' | 'dripjar_card'
+  fundDestinationType: text("fund_destination_type"),
+  // Caller-provided deduplication key; unique constraint prevents double-posts
+  idempotencyKey: text("idempotency_key").notNull(),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("financial_transactions_idempotency_key_idx").on(t.idempotencyKey),
+  index("financial_transactions_jar_idx").on(t.jarId),
+  index("financial_transactions_member_idx").on(t.memberId),
+  index("financial_transactions_ledger_idx").on(t.ledgerId),
+]);
+
+export const financialTransactionsRelations = relations(financialTransactions, ({ one }) => ({
+  jar: one(jars, { fields: [financialTransactions.jarId], references: [jars.id] }),
+  member: one(jarMembers, { fields: [financialTransactions.memberId], references: [jarMembers.id] }),
+  ledgerTransaction: one(ledgerTransactions, {
+    fields: [financialTransactions.ledgerId],
+    references: [ledgerTransactions.id],
+  }),
+}));
+
+// ─── Ledger Transactions ──────────────────────────────────────────────────────
+//
+// Groups a balanced set of ledger entries. Immutable once postedAt is set.
+// financialTransactionId is nullable so system/adjustment entries can exist
+// without a parent financial_transaction.
+
+export const ledgerTransactions = pgTable("ledger_transactions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  financialTransactionId: uuid("financial_transaction_id")
+    .references(() => financialTransactions.id, { onDelete: "restrict" }),
+  description: text("description").notNull(),
+  currency: text("currency").notNull().default("USD"),
+  // Set at creation and never changed — enforced at application layer.
+  // Any correction requires a new compensating ledger transaction.
+  postedAt: timestamp("posted_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("ledger_transactions_financial_tx_idx").on(t.financialTransactionId),
+]);
+
+export const ledgerTransactionsRelations = relations(ledgerTransactions, ({ one, many }) => ({
+  financialTransaction: one(financialTransactions, {
+    fields: [ledgerTransactions.financialTransactionId],
+    references: [financialTransactions.id],
+  }),
+  entries: many(ledgerEntries),
+}));
+
+// ─── Ledger Entries ───────────────────────────────────────────────────────────
+//
+// Individual debit/credit lines. IMMUTABLE after insert — there are no update
+// or delete endpoints for posted entries. Corrections use new compensating
+// ledger_transactions with reversing entries.
+//
+// amountCents must be > 0. Negative balances are modelled via entry_type
+// ('debit' vs 'credit'), not via negative amounts.
+//
+// Uses BIGINT for amountCents to support large-scale platform aggregation.
+
+export const ledgerEntries = pgTable("ledger_entries", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ledgerTransactionId: uuid("ledger_transaction_id")
+    .notNull()
+    .references(() => ledgerTransactions.id, { onDelete: "restrict" }),
+  accountId: uuid("account_id")
+    .notNull()
+    .references(() => ledgerAccounts.id, { onDelete: "restrict" }),
+  // 'debit' | 'credit'
+  entryType: text("entry_type").notNull(),
+  // Positive amount only; direction encoded in entryType
+  amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+  currency: text("currency").notNull().default("USD"),
+  memo: text("memo"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("ledger_entries_tx_idx").on(t.ledgerTransactionId),
+  index("ledger_entries_account_idx").on(t.accountId),
+]);
+
+export const ledgerEntriesRelations = relations(ledgerEntries, ({ one }) => ({
+  ledgerTransaction: one(ledgerTransactions, {
+    fields: [ledgerEntries.ledgerTransactionId],
+    references: [ledgerTransactions.id],
+  }),
+  account: one(ledgerAccounts, {
+    fields: [ledgerEntries.accountId],
+    references: [ledgerAccounts.id],
+  }),
+}));
+
+// ─── Add financial_transactions to existing relation maps ─────────────────────
+
+export const jarsFinancialRelations = relations(jars, ({ many: _many }) => ({
+  financialTransactions: _many(financialTransactions),
+}));
+
+export const jarMembersFinancialRelations = relations(jarMembers, ({ many: _many }) => ({
+  financialTransactions: _many(financialTransactions),
+}));
+
 // ─── Type exports ─────────────────────────────────────────────────────────────
 
 export type User = typeof users.$inferSelect;
@@ -518,3 +715,11 @@ export type ActivityEvent = typeof activityEvents.$inferSelect;
 export type NewActivityEvent = typeof activityEvents.$inferInsert;
 export type PaymentMethodPlaceholder = typeof paymentMethodPlaceholders.$inferSelect;
 export type RefundRequestPlaceholder = typeof refundRequestPlaceholders.$inferSelect;
+export type LedgerAccount = typeof ledgerAccounts.$inferSelect;
+export type NewLedgerAccount = typeof ledgerAccounts.$inferInsert;
+export type FinancialTransaction = typeof financialTransactions.$inferSelect;
+export type NewFinancialTransaction = typeof financialTransactions.$inferInsert;
+export type LedgerTransaction = typeof ledgerTransactions.$inferSelect;
+export type NewLedgerTransaction = typeof ledgerTransactions.$inferInsert;
+export type LedgerEntry = typeof ledgerEntries.$inferSelect;
+export type NewLedgerEntry = typeof ledgerEntries.$inferInsert;

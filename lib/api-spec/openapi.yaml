@@ -22,8 +22,50 @@ tags:
   - name: notifications
   - name: activity
   - name: dashboard
+  - name: finance
 
 paths:
+
+  # FINANCE
+  /finance/quote:
+    post:
+      operationId: getFinancialQuote
+      tags: [finance]
+      summary: Get a server-authoritative financial quote for a contribution
+      description: >
+        Returns a server-computed breakdown of all charges for a drip of the
+        given principal. The client provides only principalCents — all fee
+        components are computed server-side and cannot be overridden.
+        Supplying any fee field (dripJarFeeCents, totalChargeCents, etc.)
+        in the request body is rejected with 400.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinancialQuoteRequest"
+      responses:
+        "200":
+          description: Financial quote
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinancialQuote"
+        "400":
+          description: Invalid input or tampered fee field
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /healthz:
     get:
       operationId: healthCheck
@@ -2315,3 +2357,63 @@ components:
           type: string
           format: date-time
       required: [id, jarId, eventType, description, createdAt]
+
+    # FINANCE
+    FinancialQuote:
+      type: object
+      description: >
+        Server-authoritative financial quote for a drip. All fee components are
+        computed server-side. Clients supply only principalCents.
+      properties:
+        principalCents:
+          type: integer
+          description: Intended contribution principal in integer cents.
+          example: 20000
+        dripJarFeeCents:
+          type: integer
+          description: DripJar 3% service fee (non-refundable, server-computed).
+          example: 600
+        estimatedProcessingFeeCents:
+          type: integer
+          description: >
+            Provider processing-fee estimate. 0 in Phase 4A; populated in Phase
+            4B when a live payment provider is integrated.
+          example: 0
+        totalChargeCents:
+          type: integer
+          description: Total charged to the customer (principal + DripJar fee + processing fee).
+          example: 20600
+        currency:
+          type: string
+          description: ISO 4217 currency code.
+          example: USD
+        feeRateBps:
+          type: integer
+          description: DripJar fee rate in basis points at time of quote (300 = 3%).
+          example: 300
+      required:
+        - principalCents
+        - dripJarFeeCents
+        - estimatedProcessingFeeCents
+        - totalChargeCents
+        - currency
+        - feeRateBps
+
+    FinancialQuoteRequest:
+      type: object
+      description: >
+        Input for a financial quote. Only principalCents is accepted from the
+        client. Supplying any fee component (dripJarFeeCents, totalChargeCents,
+        feeRateBps, processingFeeEstimatedCents) is rejected with 400.
+      properties:
+        principalCents:
+          type: integer
+          minimum: 1
+          description: Intended contribution principal in integer cents (minimum 1).
+          example: 20000
+        currency:
+          type: string
+          description: ISO 4217 currency code (optional, defaults to USD).
+          example: USD
+      required:
+        - principalCents
