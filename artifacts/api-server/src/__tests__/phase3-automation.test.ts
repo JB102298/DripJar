@@ -437,18 +437,19 @@ describe("Reminder processor idempotency", () => {
       + r1.body.cutoffUpcoming7dSent + r1.body.cutoffUpcoming1dSent
       + r1.body.cutoffReachedSent + r1.body.agreementRequiredSent;
 
-    // Second run immediately after — all events should be skipped
+    // Second run immediately after — everything r1 sent must be skipped.
+    // Note: vitest runs test files in parallel, so other workers may create new
+    // reminder-eligible events between r1 and r2. Those are legitimately new and
+    // will be processed by r2 — that is not a deduplication failure.
+    // The invariant we verify: skippedDuplicate in r2 >= firstSent (r1's sends
+    // were not re-sent).
     const r2 = await request(app)
       .post(`${BASE}/internal/process-reminders`)
       .set("X-Internal-Token", INTERNAL_TOKEN);
     expect(r2.status).toBe(200);
-    const secondSent = r2.body.contributionDueSent + r2.body.contributionMissedSent
-      + r2.body.cutoffUpcoming7dSent + r2.body.cutoffUpcoming1dSent
-      + r2.body.cutoffReachedSent + r2.body.agreementRequiredSent;
-    expect(secondSent).toBe(0); // all already processed
-    // skippedDuplicate should account for what was skipped
+    // If r1 sent anything, r2 must have skipped at least that many as duplicates
     if (firstSent > 0) {
-      expect(r2.body.skippedDuplicate).toBeGreaterThanOrEqual(0);
+      expect(r2.body.skippedDuplicate).toBeGreaterThanOrEqual(firstSent);
     }
   });
 });
