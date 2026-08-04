@@ -1,0 +1,428 @@
+Perform a FULL READ-ONLY M3Jar implementation audit.
+
+Do not modify files.
+Do not commit.
+Do not push.
+Do not change environment variables, secrets, databases, deployment settings, DNS, Resend, Expo/EAS, or any external service.
+Do not publish.
+
+GOAL
+
+Give me a complete, current-state assessment of the M3Jar codebase so we can define the remaining development phases from the actual implementation.
+
+Treat the current repository as the source of truth.
+
+CURRENT CONTEXT
+
+- Brand is M3Jar.
+- Domain is m3jar.com.
+- Production publishing is intentionally paused.
+- Resend/domain infrastructure has been prepared, but the app is NOT being launched yet.
+- We previously completed a substantial authentication/security/foundation phase.
+- We now need to understand exactly which product features are complete, partial, stubbed, mocked, or missing.
+
+M3JAR PRODUCT INTENT
+
+M3Jar is a collaborative group savings application for shared goals such as trips, weddings, honeymoons, and similar events.
+
+Core product concept:
+
+- An organizer creates a Jar.
+- Organizer defines:
+  - goal/event
+  - total cost
+  - event/trip date
+  - number of participants
+  - deadlines/milestones where applicable
+- M3Jar calculates:
+  - per-person contribution amount
+  - weekly/monthly savings requirements
+  - progress toward the group goal
+- Organizer invites contributors by email.
+- Invitee creates an account and joins the Jar.
+- Each participant has their own contribution/progress tracking.
+- Contributions must eventually represent REAL deposited funds, not simply “mark as saved.”
+- Planned payments can be weekly/monthly and eventually support autopay.
+- Funds can be withdrawn before the agreed non-refundable cutoff date.
+- At cutoff, funds become non-refundable according to the group agreement.
+- Organizer can eventually use the collected funds to pay for the trip/event.
+- Users should receive transactional notifications/emails for important events.
+- M3Jar plans to monetize through a fee when funds are withdrawn/used for the trip.
+- Stripe/bank-link/payment infrastructure is intended for real-money functionality.
+
+AUDIT THE ENTIRE REPOSITORY
+
+Inspect:
+
+- mobile application
+- API server
+- database/schema/migrations
+- scripts
+- tests
+- authentication
+- invitations
+- jars/groups
+- members
+- agreements
+- contribution schedules
+- contributions
+- notifications/activity
+- withdrawals
+- payment/provider integration
+- Stripe or payment placeholders
+- frontend screens/routes
+- backend routes/services
+- email flows
+- validation
+- security
+- state management
+- API client
+- Expo/native/web configuration
+- production/deployment code where relevant
+
+Do not assume a feature is complete just because a table, route, or screen exists.
+
+Trace features end-to-end.
+
+For each major feature, determine whether it is:
+
+COMPLETE
+PARTIAL
+STUB/MOCK
+NOT IMPLEMENTED
+
+PART 1 — AUTHENTICATION AND ACCOUNT SYSTEM
+
+Audit:
+
+- registration
+- login
+- access tokens
+- refresh tokens
+- logout
+- logout-all
+- password reset
+- email verification
+- account/profile management
+- password change
+- session management
+- SecureStore/token persistence
+- protected/public navigation
+
+Report both backend and frontend state.
+
+PART 2 — JAR CREATION AND MANAGEMENT
+
+Audit whether users can actually:
+
+- create a Jar
+- name/describe it
+- set total target amount
+- set event/trip date
+- define participant count
+- calculate per-person responsibility
+- edit Jar settings
+- delete/archive a Jar
+- view Jar details
+- see Jar progress
+- distinguish organizer/member permissions
+
+Trace database → API → frontend.
+
+PART 3 — INVITATIONS AND MEMBERSHIP
+
+Audit:
+
+- create invitation
+- email invitation
+- invite token security/expiry
+- accept invitation
+- account creation from invitation
+- join existing Jar
+- duplicate invite behavior
+- organizer/member roles
+- remove member
+- leave Jar
+- invite status
+- frontend invitation UX
+
+PART 4 — CONTRIBUTION PLANNING
+
+Audit whether M3Jar currently supports:
+
+- required amount per person
+- weekly target calculations
+- monthly target calculations
+- due dates
+- payment schedules
+- recurring contribution plans
+- progress tracking
+- contribution history
+- missed/upcoming payment logic
+- changing schedules
+- organizer visibility into participant progress
+
+Clearly separate calculation/display logic from real financial transactions.
+
+PART 5 — REAL MONEY / PAYMENTS
+
+This is critical.
+
+Determine exactly what exists today for:
+
+- Stripe SDK/packages
+- Stripe Connect
+- Stripe Financial Connections
+- bank account linking
+- ACH
+- cards
+- PaymentIntents
+- SetupIntents
+- customers
+- payment methods
+- autopay
+- scheduled payments
+- webhooks
+- ledger/accounting
+- balances
+- deposits
+- withdrawals
+- refunds
+- payout to organizer/vendor
+- M3Jar fees
+- idempotency
+- reconciliation
+
+Identify any fake/mock “contribution” mechanism that currently records money without actually moving funds.
+
+Be explicit about what M3Jar can and cannot safely do with real money today.
+
+PART 6 — CUTOFF / AGREEMENT SYSTEM
+
+Audit:
+
+- group agreement
+- agreement acceptance
+- non-refundable cutoff date
+- whether every member must agree
+- versioning/re-acceptance
+- enforcement at API level
+- withdrawal rules before cutoff
+- restrictions after cutoff
+- leaving funds in Jar
+- organizer controls
+- frontend UX
+
+PART 7 — WITHDRAWALS / USE OF FUNDS
+
+Audit:
+
+- participant withdrawal
+- organizer withdrawal/payment
+- before-cutoff withdrawal
+- after-cutoff restrictions
+- withdrawal fees
+- group payout/use-of-funds flow
+- bank destination
+- Stripe/payout provider integration
+- accounting records
+- frontend flow
+
+PART 8 — NOTIFICATIONS / ACTIVITY
+
+Audit:
+
+- in-app notifications
+- activity feed
+- invitation emails
+- password-reset email
+- payment reminders
+- upcoming deadline reminders
+- successful contribution notifications
+- failed payment notifications
+- cutoff reminders
+- member join/leave events
+- organizer alerts
+- push notifications
+- email preferences
+
+PART 9 — MOBILE / WEB USER EXPERIENCE
+
+List every meaningful current screen/route.
+
+For each one, report:
+
+- implemented or placeholder
+- connected to real API or mocked data
+- major missing actions
+- navigation issues
+- signed-in/signed-out accessibility
+
+Identify what a brand-new user can actually accomplish today from registration onward.
+
+PART 10 — DATABASE MODEL
+
+List the current database tables and what they appear to support.
+
+For each important table:
+
+- purpose
+- major relationships
+- whether it is actively used by runtime code
+- whether it supports an implemented feature or only planned functionality
+
+Flag:
+
+- orphaned schema
+- unused tables
+- missing constraints
+- risky nullable fields
+- money stored using unsafe numeric types
+- missing idempotency/transaction protections
+- lifecycle-state gaps
+
+PART 11 — API SURFACE
+
+List current API route groups/endpoints by functional area.
+
+Mark each endpoint as:
+
+- complete
+- partial
+- development-only
+- unused by frontend
+- potentially obsolete
+
+Identify API capabilities that exist without UI and UI that exists without API support.
+
+PART 12 — TEST COVERAGE
+
+Report:
+
+- current API test count/results
+- current mobile test count/results
+- important functionality with strong coverage
+- important functionality with little/no coverage
+- known typecheck failures
+- known build issues
+- security/concurrency tests
+
+Do not fix anything.
+
+PART 13 — SECURITY / FINANCIAL RISK
+
+Rank findings:
+
+CRITICAL
+HIGH
+MEDIUM
+LOW
+
+Pay special attention to anything that would be unsafe once real money is introduced:
+
+- authorization
+- ownership checks
+- race conditions
+- duplicate transactions
+- replay
+- idempotency
+- database transactions
+- balance calculation
+- webhook verification
+- insufficient funds behavior
+- withdrawal race conditions
+- payment amount manipulation
+- trusting frontend-calculated amounts
+- logging of sensitive financial data
+- PCI/security boundary issues
+
+PART 14 — MVP GAP ANALYSIS
+
+Based on the product intent above, identify:
+
+A. What is already genuinely complete.
+B. What is partially implemented.
+C. What is represented only by schema/stubs/mock data.
+D. What is entirely missing.
+
+Do not inflate completion percentages.
+
+PART 15 — RECOMMENDED DEVELOPMENT PHASES
+
+Using the ACTUAL current implementation, propose the remaining development phases.
+
+Do not force an arbitrary number of phases.
+
+Each proposed phase should:
+
+- have one coherent engineering objective
+- be independently testable
+- avoid mixing unrelated risky changes
+- include backend + frontend where appropriate
+- identify dependencies on earlier phases
+- include a clear definition of done
+
+Real-money infrastructure should be isolated into carefully staged phases rather than bundled casually into general feature work.
+
+Suggested areas to consider, but use your audit to decide the actual structure:
+
+- Core Jar lifecycle
+- Invitations/membership
+- Contribution planning
+- Agreement/cutoff mechanics
+- Notifications
+- Payment architecture
+- Stripe sandbox integration
+- Real contribution ledger
+- Withdrawals/payouts
+- Financial hardening/webhooks/idempotency
+- UX polish
+- release readiness
+
+PART 16 — CURRENT USER JOURNEY
+
+Describe step-by-step what happens TODAY if a new user:
+
+1. opens M3Jar
+2. registers
+3. creates a Jar
+4. invites someone
+5. invitee joins
+6. tries to create a contribution schedule
+7. tries to deposit real money
+8. tries to withdraw money
+9. reaches the cutoff date
+
+For every step, state whether it actually works end-to-end.
+
+PART 17 — FINAL REPORT
+
+Return the report in this structure:
+
+1. Executive summary
+2. Current architecture
+3. Authentication status
+4. Jar lifecycle status
+5. Invitations/membership status
+6. Contribution planning status
+7. Real-money/payment status
+8. Agreement/cutoff status
+9. Withdrawal/payout status
+10. Notifications/activity status
+11. Frontend screen/route inventory
+12. Database/schema inventory
+13. API inventory
+14. Test/build/typecheck status
+15. Security/financial risk findings
+16. MVP gap analysis
+17. Current end-to-end user journey
+18. Recommended remaining development phases
+19. Recommended immediate next phase
+20. Files/modules likely involved in that next phase
+21. Explicit confirmation the audit was read-only and nothing changed
+
+Be detailed and evidence-based.
+
+If code appears inconsistent or partially implemented, say so explicitly instead of guessing.
+
+Do not make any changes.

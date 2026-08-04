@@ -1,0 +1,184 @@
+Before I accept Task #29, amend the plan with these Phase 4B architectural corrections.
+
+Do not begin implementation yet.
+
+1. PROCESSING-FEE GROSS-UP
+
+The current Part C fee calculation is not sufficient.
+
+Do NOT calculate the customer processing fee only from:
+
+principal + DripJar fee
+
+and then simply add that result to the charge.
+
+Stripe assesses its percentage against the FINAL Stripe charge amount, which includes any processing-fee amount DripJar adds.
+
+DripJar's intended rule is:
+
+- Jar principal must remain fully intact
+- DripJar 3% service fee is separate
+- customer pays the estimated provider processing cost separately
+- processing cost must not reduce Jar principal
+
+Define:
+
+baseCents =
+  principalCents + dripJarFeeCents
+
+totalChargeCents =
+  baseCents + processingFeeEstimatedCents
+
+processingFeeEstimatedCents must be the MINIMUM integer-cent amount such that:
+
+processingFeeEstimatedCents >=
+  computeStripeFeeOnCharge(totalChargeCents, paymentMethodType)
+
+Use integer-cent arithmetic and explicit rounding.
+
+For cards:
+
+providerFee(total) =
+  half-up(total * 290 / 10_000) + 30 cents
+
+For ACH:
+
+providerFee(total) =
+  min(
+    half-up(total * 80 / 10_000),
+    500 cents
+  )
+
+The implementation should solve/gross-up the fee deterministically.
+
+Do not use floating-point dollars.
+
+Add tests including the $200 principal example:
+
+Principal: $200.00
+DripJar fee: $6.00
+
+CARD:
+Processing estimate should be approximately $6.46
+Total approximately $212.46
+
+Verify using the actual integer algorithm rather than hard-coding those numbers.
+
+ACH:
+Processing estimate should be approximately $1.66
+Total approximately $207.66
+
+Again verify through the actual algorithm.
+
+Also test:
+- ACH cap boundary
+- card fixed-fee behavior
+- very small payments
+- rounding boundaries
+- large safe values
+
+processingFeeActualCents remains separate from the original estimate so future reconciliation can show variance.
+
+Do not mutate principal or DripJar fee during reconciliation.
+
+2. PAYMENTINTENT RETRY / IDEMPOTENCY
+
+Resolve the contradiction between Parts D and E.
+
+Desired behavior:
+
+If a quote is still valid and no PaymentIntent exists:
+- create exactly one PaymentIntent
+
+If the same authenticated member retries the same quote and a PaymentIntent already exists with providerStatus such as:
+- provider_created
+- processing
+
+return/reuse the existing PaymentIntent rather than creating another one.
+
+Do NOT reject a harmless client retry merely because the first request already created the provider object.
+
+Do NOT create a second Stripe PaymentIntent.
+
+Use:
+- DB providerTransactionId
+- stable Stripe idempotency key
+- transactional state checks
+
+If the prior attempt is definitively:
+- failed
+- cancelled
+- succeeded
+
+do not silently create another PaymentIntent from that same consumed quote.
+
+Require an appropriate new quote/new attempt where applicable.
+
+Add concurrency tests proving two simultaneous confirmation requests result in exactly one authoritative Stripe PaymentIntent.
+
+3. DO NOT ENABLE FUTURE PAYMENT-METHOD REUSE IN PHASE 4B
+
+Remove:
+
+setup_future_usage = "off_session"
+
+from the Phase 4B PaymentIntent design.
+
+Also do not add SetupIntents or AutoDrip behavior.
+
+Phase 4B is one-time TEST MODE Drips only.
+
+Saving/reusing bank accounts or cards for future AutoDrips belongs to a later dedicated phase where consent, mandate behavior, retry policy, and off-session payment rules will be designed intentionally.
+
+Stripe Customer linkage can still exist in 4B for PaymentSheet/customer association.
+
+For ACH PaymentSheet:
+- explicitly configure delayed payment method support
+- configure required app return/deep-link behavior if required by the current Stripe React Native SDK
+- PaymentSheet completion must never cause Jar credit
+- payment_intent.processing must remain pending
+- only verified payment_intent.succeeded may post principal
+
+4. MINIMIZE PROVIDER IDENTIFIERS RETURNED TO CLIENT
+
+The mobile client does not need Stripe's PaymentIntent ID as an authoritative identifier.
+
+Prefer returning:
+
+- internal financialTransactionId
+- PaymentIntent client secret
+- Customer/CustomerSession client information strictly required by PaymentSheet
+
+Do not expose providerTransactionId unless the current Stripe SDK specifically requires it.
+
+The client should poll using DripJar's internal financialTransactionId.
+
+If the current Stripe React Native SDK supports/recommends CustomerSession for PaymentSheet, prefer that over introducing an older ephemeral-key architecture. Follow the SDK version actually installed rather than assuming either approach.
+
+5. KEEP EVERYTHING ELSE IN TASK #29
+
+All existing requirements remain:
+
+- Test Mode only
+- webhook raw-body verification
+- signature authentication
+- durable Stripe event store
+- exactly-once ledger posting
+- provider ID cross-checking
+- server-authoritative amounts
+- no ledger posting on PaymentSheet completion
+- no refunds
+- no commitment flow
+- no Connect
+- no payouts
+- no Issuing
+- no Jar Goals
+- no AutoDrip
+- full security review
+- PDF as absolute final task
+
+Update Task #29 with these corrections.
+
+Then return ONLY a concise summary of what changed in the task plan.
+
+Do not start implementation until I accept the updated task.

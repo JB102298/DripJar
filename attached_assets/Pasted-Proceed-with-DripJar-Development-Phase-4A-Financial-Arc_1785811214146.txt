@@ -1,0 +1,710 @@
+Proceed with DripJar Development Phase 4A: Financial Architecture and Double-Entry Ledger Foundation.
+
+This is a FINANCIAL FOUNDATION phase.
+
+Do NOT:
+- integrate Stripe yet
+- add Stripe SDKs
+- create PaymentIntents
+- create webhooks
+- accept real or test provider payments
+- configure live or test payment-provider secrets
+- publish or deploy
+- touch production database
+- touch DNS, Resend, Cloudflare, registrar settings
+- implement DripJar Card / Stripe Issuing
+- push until final review
+
+Current branch:
+main
+
+Expected starting HEAD:
+65de175 Add M3Jar cutoff and reminder automation
+
+IMPORTANT WORKTREE NOTE
+
+There may be unrelated local changes in:
+- .replit
+- .agents/memory/
+- attached_assets/
+
+Do NOT modify, revert, stage, commit, or absorb those unrelated files.
+
+GOAL
+
+Build the accounting foundation DripJar will use for real financial activity later.
+
+This phase must establish:
+
+1. An auditable double-entry ledger.
+2. A financial transaction model that separates:
+   - Jar contribution principal
+   - DripJar 3% service fee
+   - payment-processing fee
+   - total customer charge
+3. Contributor-level refundable / committed / refunded principal accounting.
+4. Immutable ledger history with compensating entries instead of editing money history.
+5. Server-owned fee calculation.
+6. Destination abstraction for future organizer bank payout vs DripJar Card.
+7. Financial invariants and concurrency protections.
+8. ZERO payment-provider calls in this phase.
+
+BUSINESS RULES
+
+Treat these as fixed product rules for Phase 4A:
+
+A. A contributor chooses how much principal they want to Drip into the Jar.
+
+Example:
+Jar contribution principal = $200.00
+
+B. DripJar charges a 3% service fee on that principal.
+
+$200.00 × 3% = $6.00
+
+C. Payment-processing fees are separate.
+
+The future provider fee must NOT reduce Jar principal.
+
+D. Customer-facing conceptual total:
+
+Jar contribution principal
++ DripJar fee
++ payment-processing fee
+=
+total customer charge
+
+E. The full intended principal counts toward the Jar.
+
+If the user Drips $200 principal, the Jar receives/credits $200 principal.
+
+F. DripJar's 3% fee is non-refundable.
+
+G. Future payment-processing fees are non-refundable from DripJar.
+
+H. Contribution principal remains refundable until that contributor explicitly commits it.
+
+I. After explicit commitment, committed principal becomes non-refundable under the Jar agreement.
+
+J. Reaching the cutoff date by itself does NOT commit real funds.
+
+K. Every contributor commits their own principal individually.
+
+L. Organizer cannot commit another contributor's funds.
+
+M. All money values use integer cents only.
+
+PART 1 — AUDIT EXISTING MONEY MODEL
+
+Before editing, inspect:
+
+- contributions table
+- contribution schedules
+- jars
+- jar_members
+- agreements
+- agreement_acceptances
+- commitment-related tables
+- payment_method_placeholders
+- refund_request_placeholders
+- all money fields
+- current progress calculations
+- current simulated contribution logic
+- current reversal logic
+- existing transaction/locking patterns
+
+Determine:
+
+1. Which existing tables can be preserved.
+2. Which should become legacy/simulated-only.
+3. Which placeholder tables should be replaced.
+4. Which existing progress APIs depend directly on contributions rows.
+5. What must change later so ledger-backed principal becomes authoritative.
+
+Do not delete existing dev/demo contribution history.
+
+PART 2 — FINANCIAL TRANSACTION MODEL
+
+Create a durable financial transaction model.
+
+Use an appropriate table name such as:
+
+financial_transactions
+
+or a better equivalent based on the current schema.
+
+Each financial transaction should support at minimum:
+
+- id
+- jarId
+- memberId / contributor identity
+- transaction type
+- currency
+- requestedPrincipalCents
+- dripJarFeeCents
+- processingFeeEstimatedCents
+- processingFeeActualCents nullable
+- totalQuotedCents
+- provider type nullable/future
+- provider transaction id nullable/future
+- provider status
+- ledger posting status
+- idempotency key
+- createdAt
+- updatedAt
+
+Transaction types should be designed to support future events such as:
+
+- contribution
+- refund
+- commitment transfer
+- payout
+- card spend
+- adjustment/reversal
+
+Do not implement provider-specific behavior yet.
+
+PART 3 — DOUBLE-ENTRY LEDGER
+
+Implement a proper immutable double-entry ledger.
+
+Preferred architecture:
+
+ledger_accounts
+ledger_transactions
+ledger_entries
+
+or equivalent.
+
+Requirements:
+
+1. Every posted financial transaction must balance.
+2. Sum of debits and credits for a ledger transaction must net to zero.
+3. Ledger entries cannot be mutated after posting.
+4. Corrections must use reversing/compensating entries.
+5. No delete endpoint for posted ledger entries.
+6. Use integer cents only.
+7. Store currency explicitly.
+8. Link ledger transactions to financial_transactions where applicable.
+9. Include timestamps and immutable references.
+
+Design account types sufficient for DripJar's future model.
+
+At minimum consider accounts representing:
+
+- external payment clearing
+- contributor refundable principal
+- Jar committed principal
+- DripJar service-fee revenue
+- processing-fee pass-through / clearing
+- refund clearing
+- future payout/card clearing
+
+Choose coherent accounting semantics and document them.
+
+PART 4 — PRINCIPAL STATE MODEL
+
+We need contributor-level principal to exist in three economically meaningful states:
+
+- refundable
+- committed
+- refunded
+
+These values must be derivable from ledger activity.
+
+Do NOT make three independently editable balance columns that can drift.
+
+You may add cached/materialized values only if they can always be recomputed from immutable entries.
+
+Required invariant:
+
+successful contributed principal
+=
+refundable principal
++ committed principal
++ refunded principal
+
+subject to any explicitly documented future outflow states.
+
+For Phase 4A, no real provider payment exists yet, so build/test ledger primitives with internal fixtures only.
+
+PART 5 — 3% DRIPJAR FEE ENGINE
+
+Implement a central server-owned fee engine.
+
+Current DripJar service fee rate:
+
+3%
+
+Requirements:
+
+1. Client cannot specify or override the fee percentage.
+2. Use integer arithmetic.
+3. Define rounding explicitly.
+4. Prefer deterministic half-up or equivalent standard cent rounding.
+5. Store the fee amount used on the transaction so historical transactions do not change if rate changes later.
+6. Centralize the rate/configuration so it can be changed in future versions without rewriting every route.
+
+Examples to test:
+
+$200.00 → $6.00
+$100.00 → $3.00
+$1.00 → correct rounded 3% result
+odd-cent boundary cases
+large-value cases
+
+PART 6 — PROCESSING-FEE PLACEHOLDER MODEL
+
+Do NOT integrate Stripe in Phase 4A.
+
+However, the architecture must support the future processing fee.
+
+Represent both:
+
+processingFeeEstimatedCents
+processingFeeActualCents
+
+or equivalent.
+
+Rules:
+
+1. Estimated provider fee is what can eventually be shown before confirmation.
+2. Actual provider fee may later come from provider reconciliation.
+3. Difference between estimate and actual must remain auditable.
+4. Provider fee never changes the credited Jar principal.
+5. Provider fee is not DripJar revenue.
+6. Do not invent Stripe-specific live pricing logic in this phase.
+
+For tests, use deterministic fixture values only.
+
+PART 7 — FINANCIAL QUOTE ENGINE
+
+Implement a provider-neutral quote function/service.
+
+Input:
+principalCents
+
+Server output:
+
+principalCents
+dripJarFeeCents
+estimatedProcessingFeeCents
+totalChargeCents
+currency
+
+Formula:
+
+totalCharge
+=
+principal
++ DripJar fee
++ estimated processing fee
+
+Requirements:
+
+- server-owned
+- deterministic
+- integer cents
+- client cannot override fee components
+- quote can later be reused by Stripe Phase 4B
+- no provider call
+
+Add tests proving tampered client fee values would be ignored/rejected if any route accepts a quote request.
+
+PART 8 — LEDGER POSTING EXAMPLE
+
+Implement internal/test-only ledger posting primitives capable of representing this future $200 Drip:
+
+Principal:
+$200.00
+
+DripJar fee:
+$6.00
+
+Processing fee example:
+$1.60
+
+Total:
+$207.60
+
+The resulting ledger must clearly distinguish:
+
+- $200 attributable to contributor/Jar principal
+- $6 attributable to DripJar fee revenue
+- $1.60 attributable to processor-fee clearing/pass-through
+- $207.60 external/customer charge clearing
+
+Do not fake a real payment.
+
+This is an accounting fixture only.
+
+Return the exact journal entry example in the final report.
+
+PART 9 — REFUND ACCOUNTING PRIMITIVES
+
+Implement ledger primitives for FUTURE pre-commit refunds.
+
+Do not call any payment provider.
+
+Required accounting behavior:
+
+If contributor has:
+
+$200 refundable principal
+
+and requests a full principal refund:
+
+- refundable principal decreases by $200
+- refunded principal increases by $200
+- original DripJar fee remains earned/non-refundable
+- processing fee remains non-refundable
+- transaction history remains intact
+
+Use a compensating/refund ledger transaction.
+
+Do not mutate the original contribution entries.
+
+Add tests.
+
+PART 10 — COMMITMENT ACCOUNTING PRIMITIVES
+
+Implement ledger primitives for explicit fund commitment.
+
+Again, no UI/provider call yet unless necessary for internal tests.
+
+Accounting behavior:
+
+Contributor has:
+$200 refundable principal
+
+After explicit commitment:
+$200 moves from refundable principal
+to committed principal
+
+Total contributed principal remains unchanged.
+
+Requirements:
+
+1. Idempotent.
+2. Cannot commit more than refundable principal.
+3. Cannot commit another member's funds.
+4. Cannot commit refunded principal.
+5. Repeated request cannot double-move funds.
+6. Use transaction/locking patterns appropriate for future concurrent requests.
+7. Preserve link to Jar/member/agreement context where architecture requires it.
+
+Do not yet implement the final customer-facing Commit My Funds UX if that belongs more naturally in Phase 4C.
+
+PART 11 — FUTURE DESTINATION ABSTRACTION
+
+Design a destination abstraction for committed funds.
+
+We want future support for:
+
+- organizer_bank_payout
+- dripjar_card
+
+Do NOT implement either destination.
+
+Create only the minimum domain/schema abstraction required so adding either later does not require redesigning the ledger.
+
+Possible model:
+
+fund_destination_type
+
+or a future financial_destinations table.
+
+Do not over-engineer.
+
+PART 12 — SIMULATED CONTRIBUTION COMPATIBILITY
+
+Existing contributions use:
+
+status = simulated
+source_type = manual
+
+Preserve them.
+
+Define explicit rules:
+
+1. Historical simulated contributions remain visible for dev/demo.
+2. They must NOT accidentally create financial ledger balances.
+3. Ledger-backed financial balances are separate from simulated progress.
+4. Future Stripe-backed Drips will become ledger-authoritative.
+5. APIs must clearly distinguish simulated vs financial-backed contribution data.
+
+Do not delete or migrate old simulated values into fake money ledger entries.
+
+PART 13 — FINANCIAL BALANCE SERVICE
+
+Create a canonical server-side financial-balance service.
+
+For a Jar/member, it should be able to derive:
+
+- total contributed principal
+- refundable principal
+- committed principal
+- refunded principal
+- DripJar fees earned
+- estimated processing fees
+- actual processing fees where present
+- total customer charges represented
+
+For Jar-level view:
+
+- total funded principal
+- total refundable
+- total committed
+- total refunded
+- total DripJar revenue associated with the Jar
+
+Do not trust frontend math.
+
+PART 14 — ADMIN / DEVELOPER TRANSPARENCY
+
+Add an internal/read-only financial inspection capability suitable for development/testing.
+
+For a financial transaction, return:
+
+- transaction id
+- Jar
+- contributor
+- principal
+- DripJar fee
+- estimated processing fee
+- actual processing fee
+- total
+- financial status
+- ledger posting status
+- ledger transaction id
+- timestamps
+- derived refundable/committed/refunded state
+
+Do NOT expose:
+
+- payment credentials
+- bank/card data
+- secrets
+- future raw provider tokens
+
+This can be internal/dev-only for now.
+
+PART 15 — AUTHORIZATION MODEL
+
+Implement/prepare server-side rules proving:
+
+- contributor can only act on their own principal
+- organizer cannot commit someone else's principal
+- organizer cannot create/refund arbitrary financial balances
+- left/removed members do not gain new financial permissions
+- historical money records remain readable/auditable where appropriate
+- client cannot choose ledger accounts
+- client cannot choose DripJar fee rate
+- client cannot arbitrarily post ledger entries
+
+Public routes must never accept arbitrary ledger account IDs or debit/credit instructions.
+
+PART 16 — CONCURRENCY / IDEMPOTENCY
+
+Financial primitives must be safe under repeated requests.
+
+Introduce:
+
+- unique idempotency keys where appropriate
+- DB transactions
+- unique constraints
+- row-level locking if required
+
+Test:
+
+1. same financial transaction/idempotency request twice
+2. concurrent commitment attempts
+3. concurrent refund-accounting attempts
+4. refund and commitment racing against the same refundable principal
+5. duplicate ledger-post attempt
+
+Exactly one economically valid result must survive.
+
+No negative balances.
+
+PART 17 — LEDGER INVARIANTS
+
+Add extensive invariant tests.
+
+At minimum prove:
+
+1. Every ledger transaction balances.
+2. Posted ledger entries are immutable.
+3. Reversal uses new entries.
+4. Contribution principal is separate from DripJar fee.
+5. Processing fee is separate from both.
+6. Total charge reconciles to all components.
+7. Refundable + committed + refunded reconciles to contributed principal.
+8. Refund cannot exceed refundable principal.
+9. Commitment cannot exceed refundable principal.
+10. Duplicate posting cannot increase balances.
+11. Concurrent refund/commit cannot overspend refundable principal.
+12. DripJar revenue does not disappear when principal is refunded.
+13. Simulated contributions never appear in financial ledger balances.
+14. No account can violate defined balance rules.
+
+PART 18 — MONEY TYPE / SCALE REVIEW
+
+Audit every relevant monetary column.
+
+Requirements:
+
+- integer cents only
+- no JS floating-point math for stored financial amounts
+- safe bounds for PostgreSQL integer type
+- evaluate whether current integer fields should remain INTEGER or move to BIGINT for long-term safety
+
+Do not casually migrate every field.
+
+If BIGINT is warranted, explain exactly why and handle TypeScript serialization safely.
+
+PART 19 — DATABASE MIGRATION
+
+Create explicit numbered Drizzle migration(s).
+
+Requirements:
+
+1. Migrations are authoritative.
+2. Do not use drizzle-kit push for production strategy.
+3. Idempotent where appropriate.
+4. Preserve existing dev data.
+5. Verify migration against current dev DB.
+6. Verify full migration chain against a fresh DB.
+7. Verify drizzle schema diff clean.
+8. Do not touch production DB.
+
+PART 20 — OPENAPI / CLIENT
+
+Only expose public APIs needed for Phase 4A.
+
+If a quote endpoint is added, update OpenAPI and regenerate client.
+
+Do not expose raw ledger-posting endpoints publicly.
+
+Internal financial-inspection endpoints should remain internal and excluded from generated public client if appropriate.
+
+PART 21 — TESTING
+
+Run:
+
+- complete API test suite
+- complete mobile test suite
+- API typecheck
+- mobile typecheck
+- API production build
+- web/mobile build if feasible without publishing
+
+No new typecheck errors.
+
+Pre-existing errors must be reported separately.
+
+PART 22 — SECURITY / ARCHITECTURE REVIEW
+
+Perform a separate financial architecture review after implementation.
+
+Specifically search for:
+
+- money creation out of thin air
+- unbalanced ledger transactions
+- mutable posted entries
+- fee manipulation
+- client-controlled financial calculations
+- refund races
+- commitment races
+- negative principal balances
+- integer overflow
+- privilege escalation
+- accidental simulated-money/real-money mixing
+- ledger APIs exposed publicly
+- missing transaction boundaries
+
+Fix severe findings before committing.
+
+PART 23 — OUT OF SCOPE FOR 4A
+
+Do NOT implement:
+
+- Stripe SDK
+- PaymentIntents
+- SetupIntents
+- ACH
+- cards
+- Financial Connections
+- webhooks
+- Stripe Customers
+- Stripe Connect
+- live money
+- Stripe Test Mode calls
+- provider refunds
+- customer-facing refund UI
+- final Commit My Funds UI
+- Jar Goals
+- DripJar Card / Issuing
+- organizer bank payout
+- real payout destination
+- production reconciliation
+- autopay
+- deployment/publishing
+
+Those belong to later Phase 4 sub-phases.
+
+PART 24 — COMMIT
+
+If validation passes, create ONE commit:
+
+Commit title:
+Add DripJar financial ledger foundation
+
+Commit body:
+- Add immutable double-entry ledger architecture
+- Separate Jar principal, DripJar fees, and processing fees
+- Add server-authoritative financial quote engine
+- Add refundable, committed, and refunded principal accounting
+- Add provider-neutral financial transaction model
+- Add future payout/card destination abstraction
+- Preserve simulated contribution history separately
+- Add financial concurrency and invariant coverage
+
+Do NOT push.
+
+FINAL REPORT
+
+Return:
+
+1. Files changed
+2. Schema/tables added
+3. Migration details
+4. Existing money-model audit findings
+5. Ledger account model
+6. Debit/credit conventions
+7. Exact $200 Drip journal-entry example
+8. 3% fee calculation/rounding rules
+9. Processing-fee estimate/actual representation
+10. Financial quote engine
+11. Refundable/committed/refunded accounting model
+12. Refund accounting example
+13. Commitment accounting example
+14. Destination abstraction
+15. Simulated-contribution separation
+16. Financial balance service
+17. Internal/admin transparency implementation
+18. Authorization model
+19. Concurrency/idempotency protections
+20. Ledger invariant test results
+21. Money-type/overflow findings
+22. API tests/results
+23. Mobile tests/results
+24. Typecheck results
+25. Build results
+26. Fresh-DB migration verification
+27. Security/architecture review findings/fixes
+28. Remaining work for Phase 4B
+29. Final commit hash
+30. Confirmation nothing was pushed
+31. Confirmation no Stripe/provider integration was added
+32. Confirmation no production/external services were changed

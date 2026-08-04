@@ -71,6 +71,20 @@
       "when": 1785862200000,
       "tag": "0009_ledger_tx_fk_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1754350000000,
+      "tag": "0010_phase4b_stripe_customer",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1754350060000,
+      "tag": "0011_phase4b_stripe_events",
+      "breakpoints": true
     }
   ]
 }

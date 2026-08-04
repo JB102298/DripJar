@@ -1,0 +1,313 @@
+DO NOT PUSH commit 62e27e4 yet.
+
+Perform a focused Phase 3 conformance review and correction pass.
+
+Current HEAD:
+62e27e4 Add M3Jar cutoff and reminder automation
+
+Do not publish.
+Do not touch production infrastructure.
+Do not touch Stripe.
+Do not touch DNS/Resend configuration/secrets.
+Do not modify unrelated .replit, .agents/memory, or attached_assets files.
+
+GOAL
+
+Verify and correct several Phase 3 behaviors that are unclear or potentially inconsistent with the original specification.
+
+PART 1 — PHASE MODEL AMBIGUITY
+
+The final report describes Inviting and Saving using effectively the same condition.
+
+Inspect the actual current Jar statuses and phase.ts implementation.
+
+Define ONE deterministic mapping with no overlapping phases.
+
+At minimum distinguish:
+
+- Draft
+- Inviting, only if the actual persisted Jar lifecycle supports a meaningful Inviting state
+- Saving
+- Commitment
+- Cancelled
+- Completed
+
+If Inviting is not genuinely represented by the persisted model, do not fabricate it as a duplicate derived phase. Simplify the public phase model instead.
+
+Requirements:
+
+1. Every Jar must resolve to exactly one phase.
+2. No two phases may share the same condition.
+3. Before cutoff, an active savings Jar should clearly resolve to Saving.
+4. At/after cutoff, an otherwise-active Jar resolves to Commitment.
+5. Cancelled/Completed override derived time phases.
+6. Update tests and API/mobile representations accordingly.
+
+Report the exact final truth table.
+
+PART 2 — REMINDER EMAIL ENVIRONMENT GUARD
+
+The final report states:
+
+"All follow the same pattern: check process.env.TEST_EMAIL_RECIPIENT and skip if not set."
+
+This sounds potentially dangerous.
+
+Inspect the actual code and verify:
+
+- Production reminder email delivery MUST NOT depend on TEST_EMAIL_RECIPIENT being set.
+- TEST_EMAIL_RECIPIENT must only affect NODE_ENV=test behavior.
+- In production:
+  - real recipient comes from the authenticated/profile data selected by the server
+  - RESEND_API_KEY controls provider availability
+  - absence of TEST_EMAIL_RECIPIENT must have no effect
+
+If the current implementation would skip production reminder email when TEST_EMAIL_RECIPIENT is absent, fix it immediately.
+
+Add tests proving:
+- production path ignores TEST_EMAIL_RECIPIENT
+- test execution cannot send to a real arbitrary user address
+
+PART 3 — HTML + TEXT EMAILS
+
+Original Phase 3 requirements specified HTML + plain-text reminder emails.
+
+The final report says reminder emails are plain-text Resend payloads.
+
+Update all Phase 3 reminder emails to include BOTH:
+
+- text
+- html
+
+Use the existing M3Jar transactional email styling/patterns.
+
+Do not redesign unrelated emails.
+
+PART 4 — EMAIL DELIVERY VS DEDUPLICATION
+
+Audit reminder processing order.
+
+We must not permanently lose an email because:
+
+1. reminder_sent_events is inserted
+2. Resend temporarily fails
+3. subsequent processor runs see the dedup row and never retry
+
+Separate logical notification deduplication from email-delivery success.
+
+Design the smallest reliable solution.
+
+Acceptable approaches include adding delivery-state fields such as:
+
+- email_status
+- email_attempt_count
+- email_last_attempt_at
+- email_sent_at
+
+or an equivalent dedicated delivery record.
+
+Requirements:
+
+- in-app notification remains idempotent
+- successful email is never sent twice for the same logical event
+- failed email can be retried safely
+- user preference = disabled should be recorded as intentionally skipped, not endlessly retried
+- repeated concurrent processor calls remain safe
+- no in-memory-only retry state
+
+Add tests:
+- first email attempt fails
+- second processor run retries
+- successful retry is recorded
+- third run does not send again
+- preference-disabled event never attempts delivery
+
+PART 5 — SCHEDULE OBLIGATION / CONTRIBUTION SATISFACTION
+
+The Phase 3 specification required:
+
+- actual simulated contribution records to affect due/missed state
+- definition of how contributions satisfy scheduled obligations
+- prevention of one contribution being counted against multiple periods
+
+The final report does not demonstrate this clearly and describes missed-payment precision as approximate.
+
+Inspect and strengthen the algorithm.
+
+Use a deterministic server-owned accounting rule.
+
+A preferred approach for the simulated system is cumulative obligation accounting:
+
+requiredThroughDate
+minus
+eligibleContributionsThroughDate
+=
+outstandingScheduledAmount
+
+This naturally prevents the same contribution cents from being counted twice.
+
+If another approach is better for the existing schema, explain and implement it.
+
+Requirements:
+
+1. A contribution cannot satisfy the same cents of obligation more than once.
+2. Partial contributions are handled correctly.
+3. Overpayments are handled deterministically.
+4. Weekly, biweekly, monthly, and twice-monthly schedules are supported.
+5. Missed state reflects actual unsatisfied obligations, not merely that a calendar due date passed.
+6. Removed/left members and inactive schedules do not accrue new obligations.
+7. Cancelled Jars do not accrue new obligations.
+8. Commitment behavior follows the chosen Phase 3 rules.
+
+Add explicit tests such as:
+
+- $100 scheduled, $0 contributed → missed
+- $100 scheduled, $100 contributed → satisfied
+- $100 scheduled, $50 contributed → partially outstanding/missed
+- two $100 periods and one $100 contribution → only one period satisfied
+- two $100 periods and one $200 contribution → both satisfied
+- contribution posted before/after applicable period boundaries
+- inactive membership exclusion
+
+Do not introduce a real-money ledger yet.
+
+PART 6 — CUTOFF TIME SEMANTICS
+
+The current implementation uses DATE and local-process timezone helpers.
+
+We need deterministic server behavior before this eventually controls financial rights.
+
+Audit the implementation and choose a single explicit convention.
+
+Preferred current model:
+
+- cutoffDate remains a calendar DATE
+- server-side comparisons use UTC calendar-date arithmetic
+- no dependence on the host machine's local timezone
+- user-facing display may render the date in the user's local presentation layer without changing the stored calendar date
+
+Do not introduce a full timezone model unless genuinely required.
+
+If there is a strong reason UTC calendar-date arithmetic is wrong for this product, explain it before choosing another model.
+
+Tests must be deterministic regardless of the machine/process timezone.
+
+Add timezone tests running the same cutoff logic under different TZ settings if feasible.
+
+PART 7 — AGREEMENT VS COMMITMENT SEMANTICS
+
+Clarify the exact relationship between agreement acceptance and cutoff.
+
+Because Commitment is time-derived, time itself cannot be prevented from advancing.
+
+Define explicit behavior.
+
+Recommended Phase 3 semantics:
+
+- cutoff time determines Saving → Commitment
+- an unaccepted current agreement does NOT stop time/phase progression
+- an unaccepted member remains flagged agreement_required
+- agreement-required members cannot perform protected actions such as contribution/schedule mutations
+- future real-money commitment of funds will require explicit agreement enforcement during the financial phases
+
+If the existing product logic supports a stronger all-members-accepted readiness gate, report it separately, but do not create a contradictory state where the calendar says Commitment and the Jar claims Saving solely because a member did not sign.
+
+Update API/UI text so this distinction is clear.
+
+PART 8 — CUTOFF CHANGE + AGREEMENT VERSION
+
+Audit what happens when an organizer changes cutoffDate.
+
+Changing the date governing Commitment materially changes the agreement terms.
+
+Determine whether a cutoff change should require a new agreement version/re-acceptance.
+
+For Phase 3, preferred safe behavior:
+
+- once members have accepted an agreement, organizer cannot silently move the cutoff in a way that changes those accepted terms
+- either:
+  A. cutoff changes automatically create/require a new agreement version, or
+  B. cutoff becomes immutable after an agreement has been accepted / Jar reaches the appropriate lifecycle point
+
+Choose the smallest coherent solution based on current architecture.
+
+Do not allow silent material-term changes.
+
+Add tests.
+
+PART 9 — REMINDER ENDPOINT CONSISTENCY
+
+The prior implementation used an internal reminder-processing endpoint.
+
+The final report references POST /reminders/process.
+
+Verify:
+
+- route is clearly internal-only
+- normal authenticated users cannot invoke it
+- INTERNAL_REMINDER_TOKEN uses constant-time/safe comparison if appropriate
+- endpoint is not unintentionally exposed through generated public client/UI
+- no caller can supply arbitrary email recipients, user IDs, or Jar IDs to trigger email
+
+Correct route organization if needed.
+
+PART 10 — TESTS / VALIDATION
+
+After corrections run:
+
+- complete API suite
+- complete mobile suite
+- API typecheck
+- mobile typecheck
+- API production build
+- mobile/web production build if feasible without publishing
+
+No new TypeScript errors.
+
+Perform another architecture/security review focused on:
+
+- missed-payment correctness
+- duplicate emails
+- failed-email retries
+- phase ambiguity
+- cutoff timezone determinism
+- agreement/cutoff term changes
+
+PART 11 — COMMIT HANDLING
+
+The current Phase 3 commit 62e27e4 has NOT been pushed.
+
+Do not create an unrelated second feature commit if avoidable.
+
+After the corrections are complete and validated, amend the existing Phase 3 commit so Phase 3 remains one coherent commit:
+
+Add M3Jar cutoff and reminder automation
+
+Preserve the existing intended commit body, updating it only if necessary to accurately describe the final implementation.
+
+Do NOT push.
+
+FINAL REPORT
+
+Return:
+
+1. Exact final phase truth table
+2. TEST_EMAIL_RECIPIENT behavior in test vs production
+3. Reminder HTML/text implementation
+4. Email retry/deduplication behavior
+5. Final contribution-satisfaction algorithm
+6. Examples demonstrating no double counting
+7. Final cutoff/timezone convention
+8. Agreement vs Commitment semantics
+9. Cutoff-change/re-acceptance behavior
+10. Internal reminder endpoint security
+11. Schema/migration changes made during correction
+12. API test result
+13. Mobile test result
+14. Typecheck result
+15. Build result
+16. Architecture/security review findings
+17. Final amended commit hash
+18. Confirmation nothing was pushed
+19. Confirmation unrelated local files were excluded
+20. Confirmation no production or external services were touched

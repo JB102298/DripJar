@@ -1,0 +1,323 @@
+Proceed with M3Jar Phase 3A: production email/reset-flow implementation and production security hardening.
+
+This is a CODE-ONLY task.
+
+Do NOT:
+
+* publish or deploy
+* change Replit production environment variables
+* change secrets
+* create/configure Resend
+* change DNS
+* attach m3jar.com
+* change registrar settings
+* touch Cloudflare
+* push until final review
+
+Current branch:
+main
+
+Expected starting commit:
+f7f34c1 Finalize M3Jar repository and mobile identity
+
+GOAL
+
+Prepare the application code so that M3Jar can safely enter production infrastructure setup afterward.
+
+This phase must:
+
+1. Replace the remaining production-facing TripJar email fallbacks.
+2. Implement real password-reset email delivery.
+3. Add the password-reset user interface/route.
+4. Preserve secure development behavior.
+5. Harden production CSP without breaking development.
+6. Ensure the production web build can operate same-origin at https://m3jar.com.
+7. Add/extend automated tests for all new behavior.
+
+PART 1 — EMAIL FALLBACK MIGRATION
+
+In artifacts/api-server/src/lib/email.ts:
+
+Change the production fallbacks:
+
+APP_BASE_URL fallback:
+https://tripjar.app
+→
+https://m3jar.com
+
+EMAIL_FROM fallback:
+M3Jar noreply@updates.tripjar.app
+→
+M3Jar noreply@updates.m3jar.com
+
+Environment variables must continue to override these defaults.
+
+Do not add real API keys or secrets.
+
+PART 2 — PASSWORD RESET EMAIL
+
+Implement a production-quality password reset email helper in email.ts.
+
+Recommended function:
+sendPasswordResetEmail(…)
+
+Use the same Resend client abstraction/pattern already used for invitation emails.
+
+Reset URL format:
+
+{APP_BASE_URL}/reset-password/{rawToken}
+
+Requirements:
+
+* Do not log or expose hashed token values.
+* The email must contain the raw reset token only inside the reset URL sent to the intended recipient.
+* HTML email should use M3Jar branding.
+* Include a clear expiration statement matching the backend’s actual 1-hour expiration.
+* Include a plain-text email alternative if the Resend implementation supports text + html together.
+* The link should be clearly presented both as a button and as a fallback URL.
+* Do not imply the password has already changed.
+* Tell the recipient to ignore the email if they did not request a reset.
+
+Also inspect the existing invitation email.
+
+If straightforward and low-risk, add a plain-text alternative to the invitation email too.
+
+Do not perform unrelated email redesign.
+
+PART 3 — WIRE FORGOT-PASSWORD TO EMAIL DELIVERY
+
+In artifacts/api-server/src/routes/auth.ts:
+
+Wire the existing POST /auth/forgot-password flow to sendPasswordResetEmail().
+
+Preserve all existing security properties:
+
+* anti-enumeration behavior
+* identical client response whether the email exists or not
+* SHA-256 token storage
+* 1-hour expiration
+* existing rate limits
+* no raw token persistence
+* existing session revocation behavior during successful reset
+
+IMPORTANT:
+
+Email delivery failure must NOT reveal whether an account exists.
+
+Determine the safest handling pattern based on the existing route.
+
+Preferred behavior:
+
+* Generate/store reset token for a valid user.
+* Attempt email delivery.
+* Log an operational email-delivery error without including the raw token in production logs.
+* Return the same generic response regardless.
+
+DEV TOKEN HANDLING
+
+The current project has development-only reset-token behavior.
+
+Preserve the ability to test the reset flow in development, but make the boundary explicit:
+
+* DEV_SHOW_RESET_TOKEN may expose the raw reset token only when the application is running in a non-production environment.
+* If NODE_ENV=production, DEV_SHOW_RESET_TOKEN must never cause the token to be returned.
+* Do not log raw reset tokens in production.
+* If raw-token logging remains in development for convenience, gate it explicitly on non-production execution.
+
+Add tests covering this production guard.
+
+PART 4 — RESET PASSWORD FRONTEND ROUTE
+
+Add a reset-password route/screen in the Expo application that supports:
+
+https://m3jar.com/reset-password/{token}
+
+Follow the current Expo Router conventions in the project.
+
+Requirements:
+
+* Read the token from the URL route.
+* Allow user to enter:
+    * new password
+    * confirm new password
+* Validate confirmation client-side.
+* Follow the backend password-policy requirements exactly.
+* POST to:
+    /api/auth/reset-password
+    using the project’s existing API client/base URL conventions.
+* Provide loading state.
+* Provide clear invalid/expired token messaging.
+* Provide successful-reset confirmation.
+* On success, provide a way back to the login screen.
+* Do not automatically log the user in unless the existing auth architecture explicitly expects that behavior.
+* Never persist the reset token in SecureStore, AsyncStorage, logs, analytics, or application state longer than necessary.
+* Do not include the raw reset token in error messages.
+
+Ensure the route works for Expo web.
+
+Inspect whether any mobile deep-link configuration is necessary because the scheme is now m3jar.
+
+For this phase, prioritize the HTTPS web reset URL. Do not introduce unnecessary native deep-link complexity unless the existing routing requires it.
+
+PART 5 — PRODUCTION SAME-ORIGIN API CONFIGURATION
+
+Inspect scripts/build.js and the mobile API base-url construction.
+
+Goal:
+
+When the production web application is built for m3jar.com, browser API requests should resolve to the same m3jar.com origin.
+
+Avoid permanently depending on the .replit.app deployment hostname.
+
+Make the smallest safe change required so that setting:
+
+EXPO_PUBLIC_DOMAIN=m3jar.com
+
+during the production build causes the application to use:
+
+https://m3jar.com
+
+as its web/API base URL.
+
+Development behavior using REPLIT_DEV_DOMAIN must continue working.
+
+Do not hardcode m3jar.com in places that would unnecessarily break local development.
+
+Add or update tests if feasible.
+
+PART 6 — CONTENT SECURITY POLICY
+
+The audit found Helmet CSP disabled for development-preview compatibility.
+
+Inspect the current Express/Helmet setup.
+
+Enable a sensible Content Security Policy in production only.
+
+Requirements:
+
+* Development/Replit preview behavior must continue working.
+* Production should not globally disable CSP.
+* Policy must support the actual Expo web application resources required by this project.
+* Do not guess overly restrictive directives that break the application.
+* Prefer an explicit production CSP derived from the current application’s actual resource needs.
+* Keep crossOriginEmbedderPolicy behavior unchanged unless there is a specific reason to modify it.
+
+Document the resulting production-vs-development behavior in code comments only where necessary.
+
+Add tests confirming CSP is enabled in production behavior and not unexpectedly applied in the development configuration if the test architecture supports environment switching safely.
+
+PART 7 — TESTING
+
+Add appropriate automated coverage for:
+
+1. Password-reset email URL generation.
+2. M3Jar sender/base-url fallback behavior.
+3. Forgot-password still prevents account enumeration.
+4. Email delivery failures do not alter the generic forgot-password response.
+5. DEV_SHOW_RESET_TOKEN cannot expose a reset token when NODE_ENV=production.
+6. Successful password reset still:
+    * requires a valid token
+    * invalidates the reset token
+    * revokes refresh sessions
+7. Reset-password screen:
+    * password mismatch
+    * API error / invalid token
+    * success path
+8. Any production CSP configuration added.
+9. Invitation email behavior if modified.
+
+Run:
+
+* Complete API test suite
+* Complete mobile test suite
+* Typecheck
+* Any build validation relevant to Expo web
+* Production build if it can be performed locally without publishing
+
+The two known pre-existing typecheck failures from the prior phase must not be silently mixed into this task.
+
+If they still exist unchanged, report them as pre-existing.
+
+Do not fix them in this phase unless one of your changes directly interacts with them and requires a minimal correction.
+
+PART 8 — SECURITY REVIEW
+
+After implementation, inspect specifically for accidental raw reset-token leakage.
+
+Search:
+
+* console.log
+* console.error
+* logger calls
+* API responses
+* email logs
+* test helpers
+* frontend logging
+
+Verify that production execution cannot expose the raw password reset token anywhere except the email URL sent to the intended recipient.
+
+Development-only exposure may remain only behind explicit non-production guards.
+
+PART 9 — REPOSITORY SEARCH
+
+Search the repository again for:
+
+TripJar
+tripjar
+TRIPJAR
+
+Expected intentional remnants after this phase should be limited to:
+
+* SecureStore compatibility keys:
+    tripjar_access_token
+    tripjar_refresh_token
+* their associated tests
+* historical attached assets / agent memory
+
+The old tripjar.app and updates.tripjar.app production email fallbacks must be gone.
+
+Report every remaining occurrence and why it remains.
+
+PART 10 — COMMIT
+
+Inspect the full git diff before committing.
+
+Do not include unrelated changes.
+
+If validation is satisfactory, create one commit:
+
+Commit title:
+Prepare M3Jar production email and password reset flow
+
+Commit body:
+
+* Migrate production email URL and sender defaults to m3jar.com
+* Add transactional password-reset email delivery
+* Add reset-password web flow
+* Prevent production reset-token exposure
+* Prepare same-origin m3jar.com API behavior
+* Enable production Content Security Policy
+* Add automated coverage for reset and email behavior
+
+Do NOT push.
+
+FINAL REPORT
+
+Return:
+
+1. Files changed
+2. Email implementation changes
+3. Forgot-password backend changes
+4. Reset-password UI/route implementation
+5. Development reset-token behavior
+6. Production token-leak protections
+7. Same-origin production API behavior
+8. CSP changes and resulting policy
+9. Tests run and exact results
+10. Production/web build result
+11. Typecheck result, clearly separating pre-existing failures
+12. Remaining TripJar/tripjar references and reasons
+13. Git diff scope review result
+14. Commit hash
+15. Confirmation nothing was pushed
+16. Confirmation no DNS, Resend, Replit production configuration, deployment, domain, secret, or external service was modified

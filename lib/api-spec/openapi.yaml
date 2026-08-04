@@ -66,6 +66,118 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  # DRIPS — Stripe test-mode payment flow (Phase 4B)
+  /jars/{jarId}/drips/payment-intent:
+    post:
+      operationId: createDripPaymentIntent
+      tags: [drips]
+      summary: Create (or return existing) Stripe PaymentIntent for a persisted quote
+      description: >
+        Idempotent: if the quote is already in 'provider_created' or 'processing'
+        state, returns the existing PaymentIntent client_secret without creating
+        a new one. Requires an active jar membership.
+        Amount is always read from the server — the client cannot supply it.
+        Stripe Customer ID is never returned to the client.
+        No setup_future_usage — one-time test drips only.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: jarId
+          schema:
+            type: string
+            format: uuid
+          required: true
+          description: Jar ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DripPaymentIntentRequest"
+      responses:
+        "200":
+          description: PaymentIntent created or existing one returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DripPaymentIntentResponse"
+        "400":
+          description: Quote expired or invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a member of this jar, or transaction belongs to different jar
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Quote already consumed (succeeded/failed/cancelled)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /jars/{jarId}/drips/{financialTransactionId}/status:
+    get:
+      operationId: getDripPaymentStatus
+      tags: [drips]
+      summary: Poll the payment status for a drip
+      description: >
+        Returns the providerStatus for an in-flight or completed drip payment.
+        Only the member who initiated the payment may call this endpoint.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: jarId
+          schema:
+            type: string
+            format: uuid
+          required: true
+          description: Jar ID
+        - in: path
+          name: financialTransactionId
+          schema:
+            type: string
+            format: uuid
+          required: true
+          description: Financial transaction ID (from quote or PI creation)
+      responses:
+        "200":
+          description: Current payment status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DripPaymentStatusResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Transaction does not belong to the authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Transaction not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /healthz:
     get:
       operationId: healthCheck
@@ -2405,6 +2517,8 @@ components:
         Input for a financial quote. Only principalCents is accepted from the
         client. Supplying any fee component (dripJarFeeCents, totalChargeCents,
         feeRateBps, processingFeeEstimatedCents) is rejected with 400.
+        Phase 4B: optionally supply paymentMethodType + jarId to persist a quote
+        and receive a financialTransactionId for PI creation.
       properties:
         principalCents:
           type: integer
@@ -2415,5 +2529,73 @@ components:
           type: string
           description: ISO 4217 currency code (optional, defaults to USD).
           example: USD
+        paymentMethodType:
+          type: string
+          enum: [us_bank_account, card]
+          description: >
+            Phase 4B: Payment method type for gross-up fee calculation.
+            When provided, jarId is also required.
+        jarId:
+          type: string
+          format: uuid
+          description: >
+            Phase 4B: Required when paymentMethodType is provided.
+            Used to verify caller is an active jar member.
       required:
         - principalCents
+
+    DripPaymentIntentRequest:
+      type: object
+      description: Request body for creating a Stripe PaymentIntent for a persisted quote.
+      properties:
+        financialTransactionId:
+          type: string
+          format: uuid
+          description: Financial transaction ID returned by the Phase 4B quote endpoint.
+      required:
+        - financialTransactionId
+
+    DripPaymentIntentResponse:
+      type: object
+      description: >
+        Stripe PaymentIntent client secret for initialising the PaymentSheet.
+        providerTransactionId is intentionally NOT included.
+      properties:
+        financialTransactionId:
+          type: string
+          format: uuid
+          description: The financial transaction ID for status polling.
+        clientSecret:
+          type: string
+          description: Stripe PaymentIntent client_secret for the mobile PaymentSheet.
+        customerSessionClientSecret:
+          type: string
+          nullable: true
+          description: Stripe CustomerSession client_secret (for saved payment methods).
+      required:
+        - financialTransactionId
+        - clientSecret
+
+    DripPaymentStatusResponse:
+      type: object
+      description: Current payment status for a drip financial transaction.
+      properties:
+        financialTransactionId:
+          type: string
+          format: uuid
+        providerStatus:
+          type: string
+          enum: [quoted, provider_created, processing, succeeded, failed, cancelled, not_applicable, pending]
+          description: Current Stripe provider status.
+        totalQuotedCents:
+          type: integer
+          description: Total amount quoted in cents.
+        paymentMethodCategory:
+          type: string
+          nullable: true
+          enum: [card, us_bank_account]
+          description: Payment method type used for this quote.
+      required:
+        - financialTransactionId
+        - providerStatus
+        - totalQuotedCents

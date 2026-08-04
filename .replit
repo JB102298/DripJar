@@ -21,3 +21,13 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+
+[userenv.production]
+ALLOWED_ORIGINS = "https://m3jar.com,https://www.m3jar.com"
+APP_BASE_URL = "https://m3jar.com"
+EMAIL_FROM = "M3Jar <noreply@updates.m3jar.com>"
+EXPO_PUBLIC_DOMAIN = "m3jar.com"

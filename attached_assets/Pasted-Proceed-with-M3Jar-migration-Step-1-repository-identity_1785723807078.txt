@@ -1,0 +1,227 @@
+Proceed with M3Jar migration Step 1: repository identity cleanup + pre-release mobile app identity.
+
+You previously completed a read-only audit and identified the remaining TripJar references. This task is intentionally limited in scope.
+
+GOAL
+
+Remove the remaining safe/development-only TripJar branding and permanently establish the correct M3Jar mobile application identity before any App Store / Play Store release.
+
+Do NOT perform any DNS, Cloudflare, Resend, production deployment, custom-domain, environment-secret, or production email configuration work in this task.
+
+Before editing, inspect the current repository state and verify the audit findings still match the codebase.
+
+PART 1 — SAFE REPOSITORY BRANDING CLEANUP
+
+Update:
+
+1. README.md
+
+* Replace remaining TripJar branding with M3Jar.
+* Preserve technical meaning and formatting.
+
+2. replit.md
+
+* Replace remaining TripJar branding with M3Jar.
+* Update seed-account documentation to match the seed changes below.
+* Update TripJar-Codebase.pdf references to M3Jar-Codebase.pdf.
+
+3. Codebase PDF system
+    Update all coupled references atomically:
+
+* scripts/src/generate-codebase-pdf.ts
+* artifacts/api-server/src/routes/download.ts
+* .agents/agent_assets_metadata.toml
+
+Change:
+TripJar-Codebase.pdf
+→
+M3Jar-Codebase.pdf
+
+Also update any PDF title/metadata text from TripJar to M3Jar.
+
+Regenerate the PDF after the changes.
+
+Verify:
+
+* The generated file exists under the new M3Jar filename.
+* The download route references the exact new filename.
+* No stale runtime reference points to TripJar-Codebase.pdf.
+* Do not leave both old and new generated PDFs unless the old one is intentionally required by tooling. If it is safe to remove the obsolete generated TripJar PDF, remove it.
+
+PART 2 — DEVELOPMENT SEED DATA
+
+In:
+
+scripts/src/seed.ts
+
+Change development seed email addresses from @tripjar.dev to @m3jar.dev.
+
+Preserve:
+
+* Passwords
+* User identities
+* Roles
+* Relationships
+* All other seed data
+
+Then update/reseed the development database as necessary so the actual development data matches the new seed definitions.
+
+Do NOT touch production data because there should not be any production user database involved in this task.
+
+Verify the documented seed credentials in replit.md match the resulting dev database.
+
+PART 3 — TEST FIXTURES
+
+In:
+
+artifacts/api-server/src/tests/cors.test.ts
+
+Replace TripJar-domain test fixtures with equivalent M3Jar-domain fixtures where doing so does not weaken the tests.
+
+For example:
+tripjar.com → m3jar.com
+
+Preserve adversarial/exact-match test intent. An evil-domain fixture should remain an evil-domain fixture, just using M3Jar naming if appropriate.
+
+Run the affected CORS test suite after changes.
+
+PART 4 — MOBILE APPLICATION IDENTITY
+
+Nothing has shipped to the Apple App Store or Google Play Store yet.
+
+Update artifacts/mobile/app.json to establish the permanent M3Jar identity now:
+
+slug:
+“tripjar”
+→
+“m3jar”
+
+scheme:
+“tripjar”
+→
+“m3jar”
+
+iOS bundleIdentifier:
+“com.replit.tripjar”
+→
+“com.m3jar.app”
+
+Android package:
+“com.replit.tripjar”
+→
+“com.m3jar.app”
+
+Before changing these, inspect the repository for:
+
+* Expo project IDs
+* EAS configuration
+* eas.json
+* app.config files
+* expo.extra.eas.projectId
+* update URLs
+* owner/account references
+* any other Expo/EAS metadata coupled to the current slug or bundle identifiers
+
+If an existing Expo/EAS project is already linked and changing the slug would break that linkage, DO NOT guess or create a new Expo project automatically.
+
+Instead:
+
+* Make the safe local identity changes that do not require external account actions.
+* Clearly report any Expo/EAS external action that I must perform.
+* Do not execute irreversible external release/account operations.
+
+PART 5 — DO NOT CHANGE SECURESTORE KEYS YET
+
+Leave these unchanged for now:
+
+tripjar_access_token
+tripjar_refresh_token
+
+Also leave their matching test constants unchanged.
+
+We will handle SecureStore migration separately with an explicit compatibility shim.
+
+PART 6 — DO NOT TOUCH DOMAIN / EMAIL YET
+
+Do NOT modify the following in this task:
+
+* APP_BASE_URL production configuration
+* EMAIL_FROM production configuration
+* RESEND_API_KEY
+* Resend domain verification
+* Cloudflare DNS
+* ALLOWED_ORIGINS production values
+* m3jar.com custom-domain attachment
+* email.ts TripJar fallback strings
+* password-reset email implementation
+* production deployment configuration
+
+Those will be handled in the next migration phase after this repository/app-identity step is verified.
+
+PART 7 — VALIDATION
+
+After making the changes:
+
+1. Search the entire repository for:
+
+* TripJar
+* tripjar
+* TRIPJAR
+
+Exclude only:
+
+* attached historical assets where modification would be inappropriate
+* agent-memory/history
+* intentionally retained SecureStore compatibility keys
+* the two email.ts domain fallbacks that are explicitly deferred to the next phase
+
+2. Run all relevant tests.
+
+At minimum:
+
+* CORS tests
+* mobile tests affected by app configuration, if applicable
+* API tests affected by the PDF download route
+* any repository validation/build/typecheck that normally protects these files
+
+3. Verify the regenerated M3Jar-Codebase.pdf can be located and that the download route points to it correctly.
+4. Inspect git diff before committing.
+
+The diff must contain only changes necessary for this migration step.
+
+Do not perform unrelated cleanup or refactoring.
+
+COMMIT
+
+If all validation passes, create one commit with:
+
+Commit title:
+Finalize M3Jar repository and mobile identity
+
+Commit body:
+
+* Replace remaining safe TripJar repository branding
+* Rename and regenerate the M3Jar codebase PDF
+* Migrate development seed identities to m3jar.dev
+* Update CORS branding fixtures
+* Establish pre-release Expo slug, scheme, iOS bundle ID, and Android package
+* Defer SecureStore token-key migration and production domain/email configuration
+
+Do not push until you have completed the final report below.
+
+FINAL REPORT
+
+Return:
+
+1. Files changed
+2. Exact branding references changed
+3. Old/new mobile identifiers
+4. Whether an existing Expo/EAS project linkage was found
+5. Any Expo/EAS action still required from me
+6. Seed database migration/reseed result
+7. PDF regeneration result
+8. Tests/checks run and results
+9. Remaining TripJar/tripjar references, with file and reason each one remains
+10. Git commit hash
+11. Confirmation that nothing was pushed
+12. Confirmation that no DNS, Resend, production env vars, deployments, or external services were changed

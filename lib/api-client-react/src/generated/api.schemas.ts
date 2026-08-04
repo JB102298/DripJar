@@ -856,6 +856,113 @@ export interface ActivityEvent {
   createdAt: string;
 }
 
+/**
+ * Server-authoritative financial quote for a drip. All fee components are computed server-side. Clients supply only principalCents.
+ */
+export interface FinancialQuote {
+  /** Intended contribution principal in integer cents. */
+  principalCents: number;
+  /** DripJar 3% service fee (non-refundable, server-computed). */
+  dripJarFeeCents: number;
+  /** Provider processing-fee estimate. 0 in Phase 4A; populated in Phase 4B when a live payment provider is integrated. */
+  estimatedProcessingFeeCents: number;
+  /** Total charged to the customer (principal + DripJar fee + processing fee). */
+  totalChargeCents: number;
+  /** ISO 4217 currency code. */
+  currency: string;
+  /** DripJar fee rate in basis points at time of quote (300 = 3%). */
+  feeRateBps: number;
+}
+
+/**
+ * Phase 4B: Payment method type for gross-up fee calculation. When provided, jarId is also required.
+ */
+export type FinancialQuoteRequestPaymentMethodType = typeof FinancialQuoteRequestPaymentMethodType[keyof typeof FinancialQuoteRequestPaymentMethodType];
+
+
+export const FinancialQuoteRequestPaymentMethodType = {
+  us_bank_account: 'us_bank_account',
+  card: 'card',
+} as const;
+
+/**
+ * Input for a financial quote. Only principalCents is accepted from the client. Supplying any fee component (dripJarFeeCents, totalChargeCents, feeRateBps, processingFeeEstimatedCents) is rejected with 400. Phase 4B: optionally supply paymentMethodType + jarId to persist a quote and receive a financialTransactionId for PI creation.
+ */
+export interface FinancialQuoteRequest {
+  /**
+     * Intended contribution principal in integer cents (minimum 1).
+     * @minimum 1
+     */
+  principalCents: number;
+  /** ISO 4217 currency code (optional, defaults to USD). */
+  currency?: string;
+  /** Phase 4B: Payment method type for gross-up fee calculation. When provided, jarId is also required. */
+  paymentMethodType?: FinancialQuoteRequestPaymentMethodType;
+  /** Phase 4B: Required when paymentMethodType is provided. Used to verify caller is an active jar member. */
+  jarId?: string;
+}
+
+/**
+ * Request body for creating a Stripe PaymentIntent for a persisted quote.
+ */
+export interface DripPaymentIntentRequest {
+  /** Financial transaction ID returned by the Phase 4B quote endpoint. */
+  financialTransactionId: string;
+}
+
+/**
+ * Stripe PaymentIntent client secret for initialising the PaymentSheet. providerTransactionId is intentionally NOT included.
+ */
+export interface DripPaymentIntentResponse {
+  /** The financial transaction ID for status polling. */
+  financialTransactionId: string;
+  /** Stripe PaymentIntent client_secret for the mobile PaymentSheet. */
+  clientSecret: string;
+  /** Stripe CustomerSession client_secret (for saved payment methods). */
+  customerSessionClientSecret?: string | null;
+}
+
+/**
+ * Current Stripe provider status.
+ */
+export type DripPaymentStatusResponseProviderStatus = typeof DripPaymentStatusResponseProviderStatus[keyof typeof DripPaymentStatusResponseProviderStatus];
+
+
+export const DripPaymentStatusResponseProviderStatus = {
+  quoted: 'quoted',
+  provider_created: 'provider_created',
+  processing: 'processing',
+  succeeded: 'succeeded',
+  failed: 'failed',
+  cancelled: 'cancelled',
+  not_applicable: 'not_applicable',
+  pending: 'pending',
+} as const;
+
+/**
+ * Payment method type used for this quote.
+ */
+export type DripPaymentStatusResponsePaymentMethodCategory = typeof DripPaymentStatusResponsePaymentMethodCategory[keyof typeof DripPaymentStatusResponsePaymentMethodCategory] | null;
+
+
+export const DripPaymentStatusResponsePaymentMethodCategory = {
+  card: 'card',
+  us_bank_account: 'us_bank_account',
+} as const;
+
+/**
+ * Current payment status for a drip financial transaction.
+ */
+export interface DripPaymentStatusResponse {
+  financialTransactionId: string;
+  /** Current Stripe provider status. */
+  providerStatus: DripPaymentStatusResponseProviderStatus;
+  /** Total amount quoted in cents. */
+  totalQuotedCents: number;
+  /** Payment method type used for this quote. */
+  paymentMethodCategory?: DripPaymentStatusResponsePaymentMethodCategory;
+}
+
 export type ListJarsParams = {
 status?: string;
 role?: string;

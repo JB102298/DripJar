@@ -1,0 +1,167 @@
+DO NOT PUSH commit 8975667 yet.
+
+Perform one final focused Phase 3 email-delivery concurrency and provider-failure audit/correction.
+
+Current HEAD:
+8975667 Add M3Jar cutoff and reminder automation
+
+Do not modify unrelated files.
+Do not touch production infrastructure, DNS, Resend configuration, secrets, Stripe, or deployment.
+
+GOAL
+
+Prove that the reminder email delivery state machine is correct under:
+1. concurrent retry attempts
+2. missing/unavailable email provider configuration in production
+
+PART 1 — CONCURRENT EMAIL RETRY CLAIM
+
+Audit the current reminder processor.
+
+Scenario:
+
+- reminder_sent_events row already exists
+- email_status = 'failed'
+- two /reminders/process executions begin concurrently
+
+Determine whether both executions can:
+- read 'failed'
+- both call Resend
+- both send the same logical reminder
+
+The UNIQUE event constraint alone is not sufficient because the event row already exists.
+
+Required behavior:
+
+Exactly ONE processor invocation may claim a pending/failed email attempt at a time.
+
+Implement an atomic database claim if one does not already exist.
+
+Acceptable patterns include:
+
+A. atomic conditional UPDATE:
+UPDATE reminder_sent_events
+SET email_status = 'sending',
+    email_attempt_count = email_attempt_count + 1,
+    email_last_attempt_at = now()
+WHERE id = ?
+  AND email_status IN ('pending','failed')
+RETURNING ...
+
+or an equivalent row-lock/transaction design.
+
+Add 'sending' to the delivery state if appropriate.
+
+After claiming:
+
+- success → email_status='sent', email_sent_at=now()
+- provider/send failure → email_status='failed'
+- preference disabled → email_status='skipped_preference'
+- another processor that fails to claim → must NOT send
+
+Consider crash recovery:
+If a process dies after marking 'sending' but before completing delivery, define a safe retry strategy.
+
+A simple stale-attempt timeout is acceptable, for example allowing a 'sending' event to become claimable again after a defined age.
+
+Document the chosen behavior.
+
+TESTS REQUIRED:
+
+1. Failed event followed by two concurrent processor runs:
+   - exactly one email send attempt
+2. Successful retry:
+   - status becomes sent
+3. Additional run after sent:
+   - zero additional sends
+4. Concurrent processing of a brand-new event:
+   - exactly one logical notification
+   - exactly one email attempt
+5. Stale 'sending' recovery if implemented
+
+Do not rely on fixed sleeps if database synchronization can prove the behavior.
+
+PART 2 — PRODUCTION PROVIDER-UNAVAILABLE BEHAVIOR
+
+Audit reminder-email.ts and getResendClient().
+
+Required semantics:
+
+NODE_ENV=test:
+- no live Resend delivery
+- returning a test-safe/vacuous success is acceptable where necessary for unit tests
+
+NODE_ENV=production:
+- missing RESEND_API_KEY or inability to obtain a Resend client must NOT count as successful delivery
+- email function must return false (or equivalent failure result)
+- reminder_sent_events must become/remain 'failed'
+- later processor execution must be allowed to retry once configuration/provider is restored
+
+Development:
+- preserve safe existing behavior
+- do not leak tokens or secrets
+
+Add explicit tests proving:
+
+1. production + no RESEND_API_KEY → delivery is NOT marked sent
+2. production provider/send failure → failed status
+3. subsequent successful provider attempt → retry succeeds and marks sent
+4. NODE_ENV=test cannot send real email
+
+If changing NODE_ENV inside tests risks global-test races, isolate this test appropriately rather than introducing flaky shared-env tests.
+
+PART 3 — STATUS CONSTRAINT / MIGRATION
+
+If email_status gains a 'sending' value or any DB constraint/default needs adjustment:
+
+- update schema
+- add or amend the Phase 3 correction migration appropriately
+- because Phase 3 has not been pushed, keep the final migration history coherent
+- do not alter already-pushed migrations
+- verify fresh DB migrations
+- verify current dev DB
+- no dev data loss
+
+PART 4 — FINAL VALIDATION
+
+Run:
+
+- full API suite
+- full mobile suite
+- API typecheck
+- mobile typecheck
+- production API build
+
+Perform a focused code review for:
+
+- double-send race
+- stuck sending state
+- false-success when provider unavailable
+- preference-disabled retry loops
+
+PART 5 — COMMIT
+
+Phase 3 is still unpushed.
+
+Amend the existing Phase 3 commit again so it remains one coherent commit.
+
+Do NOT push.
+
+FINAL REPORT
+
+Return:
+
+1. Previous concurrent-retry behavior
+2. Final atomic email-claim algorithm
+3. Crash/stale-sending recovery behavior
+4. Production missing-RESEND_API_KEY behavior
+5. Test-environment behavior
+6. Schema/migration changes
+7. Concurrency test results
+8. Full API test result
+9. Full mobile test result
+10. Typecheck result
+11. Build result
+12. Final amended commit hash
+13. Confirmation nothing was pushed
+14. Confirmation no external/production services were touched

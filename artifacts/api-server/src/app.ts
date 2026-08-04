@@ -117,6 +117,19 @@ app.use(
 
 // ─── Body parsing ─────────────────────────────────────────────────────────────
 
+// Webhook raw-body handling (Approach A — plan step 16):
+// Mount express.raw on the exact webhook path BEFORE express.json.
+// With express.raw, req.body is a Buffer of the exact byte sequence.
+// The 64kb limit is enforced at Express level before the buffer is read.
+// express.json skips this path because req.body is already set by express.raw.
+//
+// ARCHITECTURAL INVARIANT: stripe.webhooks.constructEvent() must receive the
+// raw Buffer, never a parsed/re-stringified string.
+app.use(
+  "/api/webhooks/stripe",
+  express.raw({ type: "application/json", limit: "64kb" }),
+);
+
 app.use(express.json({ limit: "256kb" }));
 app.use(express.urlencoded({ extended: true, limit: "256kb" }));
 

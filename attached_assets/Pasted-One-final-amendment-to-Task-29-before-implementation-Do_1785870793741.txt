@@ -1,0 +1,219 @@
+One final amendment to Task #29 before implementation.
+
+Do NOT begin implementation yet.
+
+There is an arithmetic error in the processing-fee gross-up formulas currently written in Part C.
+
+1. REPLACE THE CLOSED-FORM GROSS-UP FORMULAS
+
+Remove the current closed-form card and ACH formulas.
+
+They currently overestimate some values.
+
+For example:
+
+baseCents = 20,600 ($206.00)
+
+CARD:
+The correct minimum processing fee is 646 cents.
+
+providerFee(21,246):
+halfUp(21,246 × 290 / 10,000) + 30
+= 616 + 30
+= 646
+
+Therefore:
+processing fee = $6.46
+total charge = $212.46
+
+ACH:
+The correct minimum processing fee is 166 cents, NOT 167.
+
+providerFee(20,766):
+halfUp(20,766 × 80 / 10,000)
+= 166
+
+Therefore:
+processing fee = $1.66
+total charge = $207.66
+
+Use a deterministic integer fixed-point solver instead of a fragile closed-form equation.
+
+Recommended algorithm concept:
+
+function computeGrossedUpProviderFee(baseCents, paymentMethodType) {
+  validateSafeInteger(baseCents);
+
+  let feeCents = 0;
+
+  for a bounded number of iterations {
+    const requiredFee =
+      computeStripeFeeOnCharge(
+        baseCents + feeCents,
+        paymentMethodType
+      );
+
+    if (requiredFee <= feeCents) {
+      return feeCents;
+    }
+
+    feeCents = requiredFee;
+  }
+
+  throw new Error("Provider fee gross-up did not converge");
+}
+
+computeStripeFeeOnCharge must use integer cents:
+
+CARD:
+halfUp(totalCents × 290 / 10_000) + 30
+
+ACH:
+min(
+  halfUp(totalCents × 80 / 10_000),
+  500
+)
+
+The solver starts from zero and monotonically approaches the minimum fee that covers the provider fee.
+
+Add a minimality invariant to tests:
+
+For returned fee P:
+
+providerFee(base + P) <= P
+
+AND, when P > 0:
+
+providerFee(base + P - 1) > P - 1
+
+That proves P is the MINIMUM sufficient whole-cent fee, not merely a sufficient fee.
+
+Required examples:
+
+$200 principal
+$6 DripJar fee
+base = $206
+
+Card:
+processing = $6.46
+total = $212.46
+
+ACH:
+processing = $1.66
+total = $207.66
+
+Also test:
+- ACH cap
+- immediately below ACH cap
+- card fixed-fee dominance
+- tiny principals
+- rounding boundaries
+- large safe-integer values
+- convergence
+- minimality
+
+Use Number.isSafeInteger guards on intermediate arithmetic.
+
+2. HARDEN STRIPE CUSTOMER CREATION IDEMPOTENCY
+
+SELECT FOR UPDATE protects concurrent DB callers but does not fully protect this failure case:
+
+1. Stripe Customer creation succeeds
+2. process/DB transaction fails before stripeCustomerId is persisted
+3. retry creates another Stripe Customer
+
+Therefore Stripe Customer creation must ALSO use a stable Stripe idempotency key derived from the internal DripJar user identity.
+
+Example concept:
+
+dripjar-customer:<userId>
+
+Use stable request parameters with that idempotency key so a retry after an interrupted DB write resolves to the same Stripe Customer rather than creating an orphan duplicate.
+
+Keep the DB unique constraint on stripeCustomerId.
+
+Test:
+- concurrent creation
+- Stripe succeeds but simulated DB persistence fails
+- retry resolves/reuses the same Stripe Customer
+
+Do not expose Stripe Customer IDs as client-authoritative values.
+
+3. ADD MOBILE PUBLISHABLE-KEY TEST-MODE GUARD
+
+The API already rejects sk_live_.
+
+Phase 4B is STRICT TEST MODE, so mobile configuration must also refuse a live publishable key.
+
+EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY must begin with:
+
+pk_test_
+
+If it begins with:
+pk_live_
+
+or is missing/invalid when Stripe payment UI is invoked:
+
+fail safely with a clear development/configuration error.
+
+Never log the key contents.
+
+Add tests for:
+- pk_test_ accepted
+- pk_live_ rejected
+- missing key rejected
+
+This guard must not introduce a Phase 4B live-mode bypass.
+
+4. MAKE WEBHOOK SIZE LIMIT REAL
+
+The plan says the Stripe webhook is limited to 64kb while raw body is captured through the global express.json verify callback.
+
+Ensure that limit is actually enforced.
+
+Either:
+
+A. mount the Stripe webhook with route-specific express.raw({ type: "application/json", limit: "64kb" }) BEFORE general JSON parsing
+
+OR
+
+B. if retaining the express.json verify-callback architecture, explicitly reject req.rawBody buffers larger than 64kb before signature construction/processing.
+
+Do not merely document a 64kb limit if Express is actually accepting its larger default.
+
+Whichever approach is used must preserve the exact original byte sequence required for Stripe signature verification.
+
+5. EVERYTHING ELSE REMAINS UNCHANGED
+
+Keep all other Task #29 requirements exactly as currently written, including:
+
+- Test Mode only
+- PaymentIntent idempotent retry
+- no setup_future_usage
+- no saved methods
+- CustomerSession preference when supported
+- internal financialTransactionId for polling
+- verified webhook only for ledger credit
+- durable event deduplication
+- failed/cancelled payments = zero Jar credit
+- no Connect
+- no refunds
+- no commitments
+- no payouts
+- no Issuing
+- no Jar Goals
+- no AutoDrip
+- complete security review
+- PDF generated as the ABSOLUTE LAST action
+
+Update Task #29 accordingly.
+
+Then return ONLY:
+- confirmation the incorrect gross-up formulas were removed
+- corrected $200 Card result
+- corrected $200 ACH result
+- customer creation idempotency safeguard
+- publishable-key guard
+- webhook size-limit approach selected
+
+Do not begin implementation until I accept the amended task.

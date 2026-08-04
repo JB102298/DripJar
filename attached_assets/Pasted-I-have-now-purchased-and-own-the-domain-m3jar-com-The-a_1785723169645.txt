@@ -1,0 +1,131 @@
+I have now purchased and own the domain:
+
+m3jar.com
+
+The app was previously branded as TripJar and has already been visually rebranded to M3Jar.
+
+I want you to perform a READ-ONLY AUDIT of every remaining TripJar-related technical or infrastructure reference in the repository.
+
+DO NOT MODIFY ANY FILES.
+DO NOT CREATE COMMITS.
+DO NOT CHANGE CONFIGURATION.
+DO NOT RUN MIGRATIONS.
+DO NOT RENAME INTERNAL KEYS.
+DO NOT UPDATE DOMAINS YET.
+
+Search the entire repository for all remaining occurrences of:
+
+TripJar
+Trip Jar
+tripjar
+trip-jar
+trip_jar
+TRIPJAR
+tripjar.app
+tripjar.com
+@tripjar
+tripjar.dev
+
+Also inspect configuration that may indirectly depend on the old brand/domain even if the string "tripjar" is not present.
+
+For every relevant occurrence, classify it into one of these categories:
+
+A. SAFE TO CHANGE NOW
+Examples:
+- documentation
+- code comments
+- generated PDF filename/title
+- non-production seed/demo copy
+- user-facing fallback values
+- purely cosmetic metadata
+
+B. DOMAIN/DNS DEPENDENT
+Examples:
+- CORS allowlists
+- frontend origins
+- API URLs
+- callback URLs
+- redirect URLs
+- email domains
+- sender addresses
+- web links
+- password-reset links
+- invitation links
+
+C. APP IDENTITY / RELEASE-SENSITIVE
+Examples:
+- Expo slug
+- iOS bundle identifier
+- Android package name
+- URL schemes
+- deep-link schemes
+- OAuth identifiers
+- EAS project identifiers
+
+D. PERSISTENT DATA / SESSION-SENSITIVE
+Examples:
+- SecureStore keys
+- AsyncStorage keys
+- database values
+- JWT claims
+- persistent cache keys
+- Stripe metadata keys
+- webhook metadata
+- existing user/session identifiers
+
+E. DEVELOPMENT-ONLY
+Examples:
+- seed emails
+- local test domains
+- fixtures
+- mocked URLs
+
+F. UNKNOWN / NEEDS REVIEW
+
+For each occurrence, report:
+
+1. Exact file path
+2. Exact value/reference
+3. What it is used for
+4. Whether changing it could break anything
+5. Recommended replacement, if applicable
+6. Whether it requires:
+   - Cloudflare DNS setup
+   - email provider setup
+   - Replit deployment configuration
+   - Stripe configuration
+   - Expo/EAS configuration
+   - database migration
+   - user/session migration
+   - no external setup
+
+Also inspect the current deployment architecture and answer these questions:
+
+1. What currently serves the public web/API traffic?
+2. Is tripjar.app currently configured anywhere as a real deployed domain, or is it only a placeholder?
+3. What domain/origin does the mobile app currently call for API requests?
+4. What URL is used in invitation links?
+5. What URL is used in password-reset links?
+6. What sender address/domain is used for outbound email?
+7. Is the sender domain currently verified with any email provider?
+8. What CORS origins are currently allowed?
+9. Are there any hardcoded production URLs?
+10. Are there environment variables controlling any of these values?
+
+Then give me a migration plan in the safest order for moving from the old TripJar infrastructure references to:
+
+m3jar.com
+
+Do not execute the migration.
+
+End with:
+
+- Total remaining TripJar references
+- Safe-to-change-now count
+- Domain/DNS-dependent count
+- Release-sensitive count
+- Persistent/session-sensitive count
+- Development-only count
+- Unknown count
+
+Again: THIS TASK IS READ-ONLY. DO NOT MODIFY ANYTHING.

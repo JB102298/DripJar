@@ -1,0 +1,221 @@
+Begin M3Jar production infrastructure Phase 2 with a READ-ONLY audit only.
+
+Do not modify files.
+Do not commit.
+Do not push.
+Do not create or change DNS records.
+Do not change Cloudflare.
+Do not create or modify a Resend account/domain.
+Do not change Replit secrets or environment variables.
+Do not deploy or publish anything.
+Do not attach a custom domain.
+
+GOAL
+
+Prepare a precise implementation plan for connecting m3jar.com to the M3Jar application and enabling production transactional email.
+
+The repository is currently on:
+
+f7f34c1 Finalize M3Jar repository and mobile identity
+
+The domain m3jar.com has already been purchased.
+
+Audit the current codebase and Replit project configuration and return the information below.
+
+PART 1 — DOMAIN / DEPLOYMENT ARCHITECTURE
+
+Determine:
+
+1. What service/process will serve the production web application.
+2. What service/process will serve the production API.
+3. Whether web and API currently share one origin/domain or require separate hostnames.
+4. Whether the current Replit deployment configuration supports:
+    * m3jar.com
+    * www.m3jar.com
+    * api.m3jar.com
+5. Whether a custom API subdomain is actually necessary.
+6. Which architecture you recommend for launch:
+
+Option A:
+https://m3jar.com serves the app and /api routes on the same origin.
+
+Option B:
+https://m3jar.com serves the app and https://api.m3jar.com serves the API.
+
+Prefer the simplest secure architecture unless there is a concrete technical reason otherwise.
+
+Report any code/configuration that would need modification for the recommended architecture.
+
+PART 2 — DOMAIN REFERENCES
+
+Inspect all runtime code for URL/domain behavior, including:
+
+* APP_BASE_URL
+* ALLOWED_ORIGINS
+* EXPO_PUBLIC_DOMAIN
+* EXPO_PUBLIC_API_URL
+* REPLIT_INTERNAL_APP_DOMAIN
+* REPLIT_DEV_DOMAIN
+* invitation URLs
+* password reset URLs
+* CORS
+* cookie behavior if applicable
+* redirects
+* deep links
+* API base URL construction
+
+Identify the exact production values you recommend for each relevant environment variable.
+
+Do not set them.
+
+PART 3 — RESEND / TRANSACTIONAL EMAIL
+
+Audit the email implementation and determine:
+
+1. Where Resend is initialized.
+2. Which environment variables are required.
+3. Current sender fallback.
+4. Which email flows currently exist.
+5. Which email flows currently only log tokens instead of sending.
+6. Whether invitation email HTML/text is production-ready.
+7. Whether password reset email functionality is missing.
+8. Whether any other launch-critical transactional emails are missing.
+
+Recommend the sender identity.
+
+Preferred public brand:
+M3Jar
+
+Preferred domain:
+m3jar.com
+
+Evaluate whether a sender such as:
+
+M3Jar noreply@updates.m3jar.com
+
+or
+
+M3Jar noreply@m3jar.com
+
+is technically preferable with Resend.
+
+Explain what DNS records Resend will likely require, but DO NOT invent record values — those must come from the actual Resend dashboard.
+
+PART 4 — DNS PLAN
+
+Assume the domain registrar currently controls m3jar.com unless repository/project metadata proves otherwise.
+
+Determine the minimum DNS architecture needed for:
+
+* apex m3jar.com
+* www.m3jar.com
+* transactional email
+* optional API hostname if genuinely necessary
+
+Report:
+
+1. Which records will be supplied by Replit when attaching the custom domain.
+2. Which records will be supplied by Resend during domain verification.
+3. Whether Cloudflare is actually necessary.
+
+Important:
+Do not assume Cloudflare must be used simply because it was mentioned in the previous audit.
+
+If the registrar’s DNS can safely host both Replit and Resend records, say so.
+
+If Cloudflare provides a concrete advantage for this architecture, explain it.
+
+PART 5 — PASSWORD RESET GAP
+
+Audit the existing forgot-password/reset-password implementation end to end.
+
+Document:
+
+1. How reset tokens are generated.
+2. Where they are stored.
+3. Expiration behavior.
+4. Whether tokens are single-use.
+5. Whether password changes revoke existing sessions.
+6. What endpoint receives the reset request.
+7. What frontend route/screens currently exist.
+8. What is missing to turn this into a production email flow.
+
+Do not implement anything yet.
+
+PART 6 — SECURITY / PRODUCTION READINESS
+
+Check for launch-sensitive configuration related to:
+
+* HTTPS assumptions
+* CORS
+* Helmet
+* rate limits
+* JWT secrets
+* refresh sessions
+* reset token security
+* cookies if used
+* trusted proxy configuration
+* logging of authentication/reset tokens
+* development-only debug behavior
+* production error leakage
+
+Flag anything that must be addressed before publishing M3Jar publicly.
+
+Separate findings into:
+
+BLOCKER — must fix before production
+IMPORTANT — should fix before launch
+OPTIONAL — can safely happen later
+
+PART 7 — REPLIT CONFIGURATION
+
+Inspect the current .replit and any deployment-related configuration.
+
+Report:
+
+1. Deployment target/type.
+2. Production build command.
+3. Production run command.
+4. Required production secrets/env vars.
+5. Whether any env vars are currently present only in development.
+6. Whether database configuration changes are required for production.
+7. Whether the existing database is appropriate for production or currently development-only.
+8. Any manual Replit dashboard steps that will eventually be required.
+
+Do not perform those steps.
+
+PART 8 — RECOMMENDED EXECUTION ORDER
+
+Return a numbered execution sequence beginning from the current state and ending with:
+
+* m3jar.com serving the production app
+* transactional invitation emails working
+* password-reset emails working
+* production CORS configured
+* production secrets configured
+* HTTPS/custom domain verified
+
+Each step should identify whether it requires:
+
+CODE CHANGE
+REPLIT DASHBOARD
+DOMAIN/DNS
+RESEND
+TEST/VALIDATION
+
+FINAL REPORT FORMAT
+
+Return:
+
+1. Recommended production architecture
+2. Domain/DNS plan
+3. Exact recommended environment variables and values, excluding secret values
+4. Resend/email requirements
+5. Password-reset gap analysis
+6. Production security findings ranked BLOCKER / IMPORTANT / OPTIONAL
+7. Replit deployment findings
+8. Database production-readiness findings
+9. Files that will eventually need modification
+10. External dashboard actions that will eventually be required
+11. Recommended execution order
+12. Explicit confirmation that this audit was read-only and nothing was changed

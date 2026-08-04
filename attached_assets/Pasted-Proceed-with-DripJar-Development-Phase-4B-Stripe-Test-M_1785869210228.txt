@@ -1,0 +1,725 @@
+Proceed with DripJar Development Phase 4B:
+Stripe Test Mode Contribution Flow.
+
+This is a FINANCIAL PROVIDER INTEGRATION phase.
+
+STRICTLY STRIPE TEST MODE.
+
+DO NOT:
+- use Stripe live mode
+- accept real money
+- implement Stripe Issuing / DripJar Card
+- implement organizer payouts
+- implement Connect destination charges/transfers yet
+- implement refunds yet
+- expose Commit My Funds yet
+- implement Jar Goals yet
+- implement autopay
+- publish/deploy
+- touch production database
+- modify DNS, Resend, Cloudflare, Expo/EAS, or other external infrastructure
+- push until final validation is complete
+
+CURRENT EXPECTED BASELINE
+
+Branch:
+main
+
+Expected HEAD and origin/main:
+3060475 — Clean DripJar test and TypeScript baseline
+
+Expected clean baseline:
+- API tests: 302/302
+- API typecheck: 0 errors
+- Mobile tests: 45/45
+- lib/db typecheck: 0 errors
+- API production build: pass
+
+IMPORTANT WORKTREE RULE
+
+Do not stage or commit:
+- attached_assets/
+- prior report PDFs
+- unrelated .replit changes
+- unrelated .agents/memory changes
+
+PART 1 — READ-ONLY PRE-IMPLEMENTATION AUDIT
+
+Before editing, inspect:
+
+- Phase 4A financial_transactions schema
+- ledger posting functions
+- quote engine
+- contribution routes
+- contribution mobile screen
+- Express app middleware/body parsing order
+- OpenAPI/generated client setup
+- current environment-variable pattern
+- auth/member authorization helpers
+
+Confirm internally how the Stripe flow should attach to the existing Phase 4A architecture.
+
+Do not redesign the ledger unless required to support verified provider events.
+
+PART 2 — STRIPE SDK + TEST-MODE GUARD
+
+Add the current supported Stripe Node SDK to the API server.
+
+Add the current supported Stripe React Native SDK only if necessary for the chosen mobile PaymentSheet implementation.
+
+Configuration may include:
+
+STRIPE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET
+EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY
+
+Never commit secret values.
+
+Implement a Stripe client factory.
+
+STRICT TEST-MODE GUARD:
+
+For Phase 4B:
+- secret key must be a Stripe test key
+- publishable key must be a Stripe test key where validated server/build-side
+- if a live secret key is detected, financial Stripe operations must refuse to initialize
+- do not log key contents
+- missing configuration should fail safely with a clear development error
+
+Tests must prove:
+- test key accepted
+- live key rejected
+- missing key handled safely
+
+Do not invent a future production bypass in this phase unless clearly isolated and disabled by default.
+
+PART 3 — STRIPE CUSTOMER LINKAGE
+
+Introduce the smallest safe linkage needed between a DripJar user and a Stripe Customer.
+
+Preferred:
+users/profiles gain nullable stripeCustomerId
+
+or a dedicated provider_customer table if architecture justifies it.
+
+Requirements:
+
+1. Stripe Customer created lazily on first payment setup.
+2. Internal user ID stored in Stripe metadata.
+3. Customer ownership is server-controlled.
+4. Client cannot submit arbitrary Stripe Customer IDs.
+5. Repeated initialization returns/reuses the same customer.
+6. Concurrent first-use requests cannot create multiple authoritative Stripe customers.
+
+TEST MODE ONLY.
+
+PART 4 — PROCESSING FEE QUOTE MODEL
+
+Phase 4A already supports:
+
+principal
+DripJar fee
+estimated processing fee
+total
+
+Now add Stripe-specific TEST-MODE fee estimation.
+
+IMPORTANT:
+This estimate is a DripJar pricing calculation for transparency.
+Do NOT falsely claim Stripe's Test Mode settlement proves live processing cost.
+
+Support at minimum:
+
+A. ACH / US bank account
+B. Card
+
+Use centrally defined provider-fee rules/configuration.
+
+Current intended customer behavior:
+- ACH/bank should be the preferred lower-cost method
+- card can remain a convenience option with higher processing cost
+
+The client chooses PAYMENT METHOD CATEGORY only.
+
+The client does NOT supply fee amounts or rates.
+
+Quote request concept:
+
+{
+  principalCents: 20000,
+  paymentMethodType: "us_bank_account"
+}
+
+Response concept:
+
+{
+  principalCents: 20000,
+  dripJarFeeCents: 600,
+  estimatedProcessingFeeCents: ...,
+  totalChargeCents: ...,
+  currency: "USD",
+  paymentMethodType: "us_bank_account",
+  feeRateBps: 300
+}
+
+Preserve the quoted processing fee on the financial transaction.
+
+PART 5 — QUOTE PERSISTENCE / EXPIRATION
+
+Do not let the client take an arbitrary old quote and mutate its values.
+
+Choose the smallest safe design:
+
+- persisted payment quote table
+OR
+- financial_transaction created in quoted/pending state
+
+The authoritative server record must preserve:
+
+- member
+- jar
+- principal
+- DripJar fee
+- estimated processing fee
+- total charge
+- payment method category
+- quote timestamp
+- status
+- idempotency key
+
+Use a reasonable quote expiration.
+
+The client should confirm by ID, not resubmit authoritative fee numbers.
+
+PART 6 — CREATE STRIPE TEST PAYMENTINTENT
+
+Add an authenticated endpoint such as:
+
+POST /jars/:jarId/drips/payment-intent
+
+or equivalent.
+
+Requirements:
+
+1. Caller must be an active member of that Jar.
+2. Caller can create a Drip only for themselves.
+3. Server loads authoritative stored quote.
+4. Quote must belong to caller and Jar.
+5. Quote must not be expired/already consumed.
+6. Server determines total Stripe amount.
+7. Client cannot override amount, fee, currency, customer, metadata, or Jar.
+8. Create PaymentIntent in STRIPE TEST MODE.
+9. Use Stripe idempotency key tied to stable internal transaction/idempotency identifier.
+10. Persist PaymentIntent ID server-side.
+11. Include safe metadata:
+    - internal financialTransactionId
+    - jarId
+    - memberId
+    - userId if appropriate
+12. Do not store card/bank credentials.
+13. PaymentIntent creation does NOT credit the Jar.
+
+Support appropriate PaymentIntent payment-method configuration for:
+
+- card
+- us_bank_account
+
+Use Stripe-supported delayed-payment behavior where required.
+
+PART 7 — PAYMENTINTENT / FINANCIAL TRANSACTION STATES
+
+Define explicit state transitions.
+
+For example:
+
+quoted
+provider_created
+processing
+succeeded
+failed
+cancelled
+
+and ledger posting states independently.
+
+Do not overload one field to represent both provider and ledger status.
+
+Important invariant:
+
+Stripe PaymentIntent status != DripJar ledger posting status.
+
+A payment is not financially credited until a verified webhook has been processed successfully.
+
+PART 8 — STRIPE WEBHOOK ENDPOINT
+
+Implement:
+
+POST /api/webhooks/stripe
+
+or an equivalent clearly provider-specific internal route.
+
+CRITICAL:
+
+Stripe signature verification requires the EXACT RAW request body.
+
+Ensure Express middleware ordering preserves the raw body for this endpoint.
+
+Do not verify against parsed/re-stringified JSON.
+
+Use:
+stripe.webhooks.constructEvent(...)
+
+with STRIPE_WEBHOOK_SECRET.
+
+Requirements:
+
+1. Missing signature → reject.
+2. Invalid signature → reject.
+3. Valid signature → process.
+4. Caller cannot bypass signature verification in normal runtime.
+5. Endpoint does not use normal user JWT authentication.
+6. Endpoint uses Stripe signature as authentication.
+7. Limit request size appropriately.
+8. Do not log raw financial payloads unnecessarily.
+9. Never log Stripe secrets.
+
+PART 9 — DURABLE STRIPE EVENT STORE
+
+Add a durable Stripe webhook-events table.
+
+Store at minimum:
+
+- internal id
+- stripeEventId UNIQUE
+- eventType
+- stripeCreatedAt
+- receivedAt
+- processedAt nullable
+- processingStatus
+- financialTransactionId nullable
+- safe error metadata
+- attempt count if useful
+
+Do not store unnecessary sensitive payloads.
+
+Exactly-once logical processing must use the Stripe event ID unique constraint plus financial transaction/ledger idempotency.
+
+Duplicate Stripe delivery must never double-credit a Jar.
+
+PART 10 — SUCCESSFUL CONTRIBUTION POSTING
+
+Handle the appropriate successful-payment event(s).
+
+For delayed US bank account methods, do NOT treat PaymentSheet completion as payment success.
+
+On verified successful Stripe payment:
+
+1. Find internal financial transaction using server-stored Stripe PaymentIntent ID and/or trusted metadata.
+2. Confirm:
+   - expected amount
+   - expected currency
+   - expected PaymentIntent
+   - expected customer where applicable
+3. Reject/review mismatches instead of posting money.
+4. Atomically:
+   - mark provider transaction successful
+   - post Phase 4A contribution ledger entries exactly once
+   - update ledger posting status
+   - mark webhook event processed
+5. Jar financial principal becomes visible only after this succeeds.
+
+The ledger example remains:
+
+external/payment clearing DR = total charge
+
+refundable principal CR = principal
+DripJar revenue CR = 3% fee
+processing fee clearing CR = quoted/recognized processing component as defined by the Phase 4B accounting model
+
+Do not alter Phase 4A invariants.
+
+PART 11 — FAILED/CANCELLED PAYMENTS
+
+Handle appropriate Stripe failure/cancellation events.
+
+Requirements:
+
+- mark financial transaction provider status
+- do not post contribution ledger entries
+- do not increase Jar financial balance
+- allow a safe retry/new attempt according to idempotency design
+- preserve complete audit trail
+
+No deletion of failed transaction history.
+
+PART 12 — ACTUAL STRIPE FEE RECONCILIATION
+
+Phase 4A supports:
+processingFeeEstimatedCents
+processingFeeActualCents
+
+In Phase 4B, investigate the safest Stripe Test Mode mechanism for retrieving an actual balance-transaction fee after the charge exists.
+
+If Stripe Test Mode reliably exposes it:
+- reconcile actual fee separately
+- preserve original estimate
+- do NOT alter principal
+- record variance
+
+If Test Mode values are unsuitable as a proxy for live pricing:
+- preserve actual field nullable
+- document why
+- do not fabricate an actual value
+
+Do not overbuild production reconciliation yet.
+
+PART 13 — MOBILE PAYMENT UI
+
+Update the Drip flow to use the server quote.
+
+Customer must see BEFORE payment:
+
+Example:
+
+Your Jar contribution       $200.00
+DripJar service fee (3%)      $6.00
+Payment processing            $X.XX
+-----------------------------------
+Total charged               $XXX.XX
+
+Clearly state:
+
+- $200.00 is credited to the Jar only after payment succeeds
+- DripJar fee is charged separately
+- processing fee is charged separately
+- contribution principal is refundable until explicitly committed under Jar rules
+- DripJar and processing fees are non-refundable
+- commitment is NOT part of Phase 4B yet
+
+Payment method selection:
+
+Prefer:
+Bank account / ACH — lower processing cost
+
+Also allow:
+Card — higher processing cost
+
+Use Stripe PaymentSheet if compatible with the existing Expo/React Native/web architecture.
+
+For delayed payment methods:
+do NOT show "Jar funded" immediately after PaymentSheet returns.
+
+Instead use language such as:
+
+"Your Drip is processing."
+
+The app should refresh/poll/query server state until verified webhook status becomes successful or failed.
+
+PART 14 — PAYMENT SHEET CLIENT SECURITY
+
+Client receives only what it needs:
+
+- PaymentIntent client secret
+- Stripe Customer-related client artifacts if required by PaymentSheet
+- publishable key through safe public configuration
+
+Never expose:
+- Stripe secret key
+- webhook secret
+- ledger account IDs
+- server fee configuration
+- arbitrary provider mutation capability
+
+PART 15 — SERVER-AUTHORITATIVE PROGRESS
+
+Do NOT automatically replace every existing simulated progress feature if that creates unnecessary scope.
+
+But Stripe-backed TEST contributions must use ledger-backed principal as authority.
+
+Requirements:
+
+- pending PaymentIntent = $0 funded
+- failed PaymentIntent = $0 funded
+- succeeded verified webhook + posted ledger = principal funded
+- duplicate webhook = no additional funded amount
+
+Clearly distinguish simulated/manual and stripe_test records in APIs/UI where they coexist.
+
+PART 16 — IDEMPOTENCY / CONCURRENCY
+
+Test:
+
+1. Double-tap create PaymentIntent.
+2. Same quote confirmed twice.
+3. Same internal idempotency key submitted twice.
+4. Duplicate webhook delivery.
+5. Two identical webhook requests concurrently.
+6. PaymentIntent success received after a previous processing event.
+7. Failed event followed later by success where Stripe lifecycle permits it.
+8. DB error during ledger posting followed by Stripe webhook retry.
+
+Requirements:
+
+- exactly one financial contribution posting
+- no double Jar credit
+- no double DripJar revenue
+- no duplicate ledger transaction
+- webhook remains retryable if internal posting failed
+
+PART 17 — PROVIDER OWNERSHIP VALIDATION
+
+Never accept arbitrary Stripe IDs from the client as authoritative.
+
+On webhook processing, validate that the PaymentIntent belongs to the stored DripJar financial transaction.
+
+Metadata is a routing hint, not sufficient authorization by itself.
+
+Cross-check DB-stored provider IDs.
+
+Test Stripe-ID substitution attacks.
+
+PART 18 — OPENAPI / GENERATED CLIENT
+
+Add public APIs for:
+
+- quote if changed
+- create/initiate Drip payment
+- payment/Drip status lookup
+
+Regenerate client normally.
+
+Do NOT expose the Stripe webhook through the public generated client if avoidable.
+
+PART 19 — DATABASE MIGRATIONS
+
+Use explicit numbered Drizzle migrations.
+
+Likely needs may include:
+
+- stripe customer linkage
+- Stripe event store
+- additional financial transaction provider fields/status constraints
+- quote lifecycle fields
+
+Use migrations as authority.
+
+Do not use drizzle-kit push as production strategy.
+
+Verify:
+- current dev DB
+- full fresh migration chain
+- no data destruction
+- clean schema state
+
+Do not touch production DB.
+
+PART 20 — TESTING
+
+Add comprehensive API tests covering:
+
+STRIPE CONFIG
+- test-key guard
+- live-key rejection
+- missing-key behavior
+
+CUSTOMER
+- first creation
+- reuse
+- concurrent initialization
+
+QUOTE
+- bank fee
+- card fee
+- server authority
+- expiration
+- tampering
+- ownership
+
+PAYMENTINTENT
+- amount
+- currency
+- metadata
+- customer
+- idempotency
+- quote ownership
+- duplicate confirmation
+
+WEBHOOK
+- raw-body signature validation
+- missing signature
+- invalid signature
+- duplicate event
+- concurrent duplicate
+- success posting
+- failure
+- cancellation
+- unknown event
+- mismatched amount
+- mismatched currency
+- mismatched PaymentIntent
+- DB rollback/retry
+
+LEDGER
+- exactly-once contribution posting
+- principal/DripJar/processing separation
+- balance invariants preserved
+
+AUTHORIZATION
+- one member cannot pay using another member's quote
+- outsider cannot create Drip for Jar
+- arbitrary Stripe IDs rejected
+
+Mobile tests:
+
+- payment method choice
+- fee breakdown rendering
+- total rendering
+- disclosure rendering
+- processing state
+- success state after server-confirmed status
+- failure state
+
+PART 21 — VALIDATION
+
+Run:
+
+- Stripe-focused tests
+- full API suite
+- full API suite second time
+- mobile test suite
+- API typecheck
+- mobile typecheck
+- lib/db typecheck
+- API production build
+- web/mobile build if feasible without publishing
+- full fresh migration chain
+
+No new TypeScript errors.
+
+PART 22 — SECURITY / FINANCIAL REVIEW
+
+Perform a separate review specifically for:
+
+- webhook spoofing
+- raw-body corruption
+- live-key accidental usage
+- PaymentIntent amount manipulation
+- provider object substitution
+- metadata trust
+- duplicate webhooks
+- concurrent posting
+- money creation out of thin air
+- double DripJar revenue
+- failed payments credited to Jar
+- PII/payment credential logging
+- client-secret exposure beyond intended client
+- ledger imbalance
+- retries after DB failure
+
+Fix severe findings before commit.
+
+PART 23 — OUT OF SCOPE
+
+Do NOT implement yet:
+
+- live Stripe
+- Connect onboarding
+- destination charges/transfers
+- organizer payout
+- Stripe Issuing
+- DripJar Card
+- real production ACH
+- real production card charges
+- refunds
+- Commit My Funds public flow
+- Jar Goals
+- autopay
+- production reconciliation workers
+- tax/compliance workflows
+- deployment/publishing
+
+PART 24 — COMMIT / PUSH
+
+If all validation passes, create ONE commit:
+
+Title:
+Add Stripe test-mode Drip payment flow
+
+Suggested body:
+- Add guarded Stripe Test Mode integration
+- Add server-authoritative Stripe payment quotes
+- Add Stripe Customer and PaymentIntent lifecycle
+- Add verified raw-body webhook handling
+- Post successful Stripe Drips to the double-entry ledger
+- Add durable webhook deduplication and retry safety
+- Add transparent ACH/card payment breakdown UI
+- Add provider and concurrency security coverage
+
+Do NOT push until all tests, builds, migration verification, and security review are complete.
+
+Then push through the normal Replit GitHub integration.
+
+Verify origin/main.
+
+REPORTING REQUIREMENT
+
+The PDF is the ABSOLUTE FINAL ACTION.
+
+Do not create the PDF:
+- during implementation
+- before testing
+- before the security review
+- before commit
+- before push
+- before origin verification
+- before working-tree verification
+
+After EVERYTHING is finished, create:
+
+phase4b-final-report.pdf
+
+The PDF must include the complete Phase 4B report:
+
+- starting HEAD
+- files changed
+- dependencies added
+- migrations
+- Stripe Test Mode guard
+- customer model
+- quote model
+- processing-fee model
+- PaymentIntent implementation
+- webhook/raw-body architecture
+- Stripe event deduplication
+- success/failure state machine
+- exact ledger posting
+- actual-fee reconciliation decision
+- mobile PaymentSheet implementation
+- ACH/card behavior
+- authorization
+- concurrency/idempotency
+- test results
+- typecheck results
+- build results
+- fresh migration result
+- security-review findings/fixes
+- final commit hash
+- push result
+- origin/main
+- working-tree status
+- remaining Phase 4C work
+- confirmation TEST MODE ONLY
+- confirmation no production/external infrastructure changed
+
+In Replit chat return ONLY:
+
+PASS / FAIL
+Final commit hash
+API tests
+Mobile tests
+Typechecks
+Build status
+origin/main
+Blockers
+PDF filename/path
+
+Do not paste the full report into chat.

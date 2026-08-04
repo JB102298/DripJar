@@ -39,8 +39,13 @@ import type {
   CreateMilestoneRequest,
   CreateScheduleRequest,
   DashboardData,
+  DripPaymentIntentRequest,
+  DripPaymentIntentResponse,
+  DripPaymentStatusResponse,
   EmailPreferences,
   ErrorResponse,
+  FinancialQuote,
+  FinancialQuoteRequest,
   ForgotPasswordRequest,
   HealthStatus,
   Invitation,
@@ -97,6 +102,234 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getGetFinancialQuoteUrl = () => {
+
+
+
+
+  return `/api/finance/quote`
+}
+
+/**
+ * Returns a server-computed breakdown of all charges for a drip of the given principal. The client provides only principalCents — all fee components are computed server-side and cannot be overridden. Supplying any fee field (dripJarFeeCents, totalChargeCents, etc.) in the request body is rejected with 400.
+ * @summary Get a server-authoritative financial quote for a contribution
+ */
+export const getFinancialQuote = async (financialQuoteRequest: FinancialQuoteRequest, options?: Parameters<typeof customFetch>[1]): Promise<FinancialQuote> => {
+
+  return customFetch<FinancialQuote>(getGetFinancialQuoteUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(financialQuoteRequest)
+  }
+);}
+
+
+
+
+
+export const getGetFinancialQuoteMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getFinancialQuote>>, TError,{data: BodyType<FinancialQuoteRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof getFinancialQuote>>, TError,{data: BodyType<FinancialQuoteRequest>}, TContext> => {
+
+const mutationKey = ['getFinancialQuote'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getFinancialQuote>>, {data: BodyType<FinancialQuoteRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  getFinancialQuote(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetFinancialQuoteMutationResult = NonNullable<Awaited<ReturnType<typeof getFinancialQuote>>>
+    export type GetFinancialQuoteMutationBody = BodyType<FinancialQuoteRequest>
+    export type GetFinancialQuoteMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Get a server-authoritative financial quote for a contribution
+ */
+export const useGetFinancialQuote = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getFinancialQuote>>, TError,{data: BodyType<FinancialQuoteRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof getFinancialQuote>>,
+        TError,
+        {data: BodyType<FinancialQuoteRequest>},
+        TContext
+      > => {
+      return useMutation(getGetFinancialQuoteMutationOptions(options));
+    }
+
+export const getCreateDripPaymentIntentUrl = (jarId: string,) => {
+
+
+
+
+  return `/api/jars/${jarId}/drips/payment-intent`
+}
+
+/**
+ * Idempotent: if the quote is already in 'provider_created' or 'processing' state, returns the existing PaymentIntent client_secret without creating a new one. Requires an active jar membership. Amount is always read from the server — the client cannot supply it. Stripe Customer ID is never returned to the client. No setup_future_usage — one-time test drips only.
+ * @summary Create (or return existing) Stripe PaymentIntent for a persisted quote
+ */
+export const createDripPaymentIntent = async (jarId: string,
+    dripPaymentIntentRequest: DripPaymentIntentRequest, options?: Parameters<typeof customFetch>[1]): Promise<DripPaymentIntentResponse> => {
+
+  return customFetch<DripPaymentIntentResponse>(getCreateDripPaymentIntentUrl(jarId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(dripPaymentIntentRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateDripPaymentIntentMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDripPaymentIntent>>, TError,{jarId: string;data: BodyType<DripPaymentIntentRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createDripPaymentIntent>>, TError,{jarId: string;data: BodyType<DripPaymentIntentRequest>}, TContext> => {
+
+const mutationKey = ['createDripPaymentIntent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createDripPaymentIntent>>, {jarId: string;data: BodyType<DripPaymentIntentRequest>}> = (props) => {
+          const {jarId,data} = props ?? {};
+
+          return  createDripPaymentIntent(jarId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateDripPaymentIntentMutationResult = NonNullable<Awaited<ReturnType<typeof createDripPaymentIntent>>>
+    export type CreateDripPaymentIntentMutationBody = BodyType<DripPaymentIntentRequest>
+    export type CreateDripPaymentIntentMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Create (or return existing) Stripe PaymentIntent for a persisted quote
+ */
+export const useCreateDripPaymentIntent = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDripPaymentIntent>>, TError,{jarId: string;data: BodyType<DripPaymentIntentRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createDripPaymentIntent>>,
+        TError,
+        {jarId: string;data: BodyType<DripPaymentIntentRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateDripPaymentIntentMutationOptions(options));
+    }
+
+export const getGetDripPaymentStatusUrl = (jarId: string,
+    financialTransactionId: string,) => {
+
+
+
+
+  return `/api/jars/${jarId}/drips/${financialTransactionId}/status`
+}
+
+/**
+ * Returns the providerStatus for an in-flight or completed drip payment. Only the member who initiated the payment may call this endpoint.
+ * @summary Poll the payment status for a drip
+ */
+export const getDripPaymentStatus = async (jarId: string,
+    financialTransactionId: string, options?: Parameters<typeof customFetch>[1]): Promise<DripPaymentStatusResponse> => {
+
+  return customFetch<DripPaymentStatusResponse>(getGetDripPaymentStatusUrl(jarId,financialTransactionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDripPaymentStatusQueryKey = (jarId: string,
+    financialTransactionId: string,) => {
+    return [
+    `/api/jars/${jarId}/drips/${financialTransactionId}/status`
+    ] as const;
+    }
+
+
+export const getGetDripPaymentStatusQueryOptions = <TData = Awaited<ReturnType<typeof getDripPaymentStatus>>, TError = ErrorType<ErrorResponse>>(jarId: string,
+    financialTransactionId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDripPaymentStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDripPaymentStatusQueryKey(jarId,financialTransactionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDripPaymentStatus>>> = ({ signal }) => getDripPaymentStatus(jarId,financialTransactionId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: jarId !== null && jarId !== undefined && financialTransactionId !== null && financialTransactionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDripPaymentStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetDripPaymentStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getDripPaymentStatus>>>
+export type GetDripPaymentStatusQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Poll the payment status for a drip
+ */
+
+export function useGetDripPaymentStatus<TData = Awaited<ReturnType<typeof getDripPaymentStatus>>, TError = ErrorType<ErrorResponse>>(
+ jarId: string,
+    financialTransactionId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDripPaymentStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetDripPaymentStatusQueryOptions(jarId,financialTransactionId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getHealthCheckUrl = () => {
 

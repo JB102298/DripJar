@@ -6,3 +6,24 @@ id = "raKQyR83eyDO6fczd3Bi3"
 uri = "file://M3Jar-Codebase.pdf"
 type = "pdf"
 title = "M3Jar — Full Codebase"
+
+[[outputs]]
+id = "8riGASeRx0Ye-uNL7gDJa"
+uri = "file://phase4a-report.pdf"
+type = "pdf"
+title = "DripJar Phase 4A — Implementation Report"
+description = "Full Phase 4A report: files changed, schema, ledger architecture, accounting model, fee engine, test results, all 3 issues encountered during development, 3 pre-existing issues to fix later, and remaining Phase 4B work."
+
+[[outputs]]
+id = "Jkueqw8hMyWa2ok5ngNtd"
+uri = "file://phase4a-final-hardening-report.pdf"
+type = "pdf"
+title = "DripJar Phase 4A — Final Hardening Report"
+description = "Fee rounding correction, ledger FK NOT NULL migration, test results, build/typecheck, push verification, architecture review."
+
+[[outputs]]
+id = "Un79J7mz6CDe2JS6K7LAQ"
+uri = "file://baseline-cleanup-final-report.pdf"
+type = "pdf"
+title = "DripJar Baseline Cleanup — Final Report"
+description = "@types/pg fix, reminder test isolation, 10-run stress results, full suite validation, commit/push verification."

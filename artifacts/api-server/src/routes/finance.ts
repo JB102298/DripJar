@@ -1,8 +1,10 @@
 /**
- * Finance Routes — Phase 4A
+ * Finance Routes — Phase 4A / 4B
  *
  * Public endpoints:
  *   POST /finance/quote            — server-authoritative contribution quote
+ *                                    Phase 4B: accepts optional paymentMethodType
+ *                                    to persist a quote with processing fee estimate
  *
  * Internal/dev-only endpoints (unavailable in production):
  *   GET  /finance/inspect/:txId    — full detail for a financial transaction
@@ -11,6 +13,7 @@
  *
  * Authorization rules:
  *   - /finance/quote: any authenticated user
+ *     Phase 4B: when paymentMethodType is provided, also requires jarId
  *   - /finance/inspect/:txId: auth + (own member transaction OR jar organizer)
  *   - /finance/balances/...: auth + (own memberId OR jar organizer)
  *   - Inspect/balance endpoints are dev-only (NODE_ENV !== 'production')
@@ -20,6 +23,7 @@
  *   - Clients CANNOT choose ledger accounts
  *   - Clients CANNOT post ledger entries directly
  *   - Clients CANNOT override the DripJar fee rate
+ *   - Clients CANNOT supply estimatedProcessingFeeCents
  */
 
 import { Router } from "express";
@@ -27,12 +31,13 @@ import { db } from "@workspace/db";
 import { jars, jarMembers, financialTransactions } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
-import { generateQuote, detectTamperedFeeFields } from "../lib/fee-engine.js";
+import { generateQuote, detectTamperedFeeFields, DRIPJAR_FEE_RATE_BPS } from "../lib/fee-engine.js";
 import {
   getMemberFinancialBalance,
   getJarFinancialBalance,
   getFinancialTransactionDetail,
 } from "../lib/financial-balance.js";
+import { computeGrossedUpProviderFee, type PaymentMethodType } from "../lib/provider-fees.js";
 
 const router = Router();
 
@@ -53,12 +58,18 @@ function devOnly(
 // ─── POST /finance/quote ───────────────────────────────────────────────────────
 //
 // Generate a server-authoritative financial quote for a drip.
-// The client supplies ONLY principalCents. All fee components are computed
-// server-side. Any attempt to supply fee values is rejected with 400.
+// The client supplies ONLY principalCents (+ optional jarId + paymentMethodType).
+// All fee components are computed server-side.
 //
-// Response:
-//   { principalCents, dripJarFeeCents, estimatedProcessingFeeCents,
-//     totalChargeCents, currency, feeRateBps }
+// Phase 4B extension:
+//   - Optional `paymentMethodType: 'us_bank_account' | 'card'`
+//   - When provided, REQUIRES `jarId` to look up the member record
+//   - Computes estimatedProcessingFeeCents via gross-up algorithm
+//   - Persists a financial_transaction row (providerStatus='quoted', TTL=30min)
+//   - Returns full quote + financialTransactionId + paymentMethodType
+//
+// Backward-compatible: omitting paymentMethodType returns a Phase 4A quote
+// with estimatedProcessingFeeCents=0 and no persisted transaction.
 
 router.post("/finance/quote", requireAuth, async (req, res) => {
   // Detect tampered fee fields before reading principalCents
@@ -68,9 +79,16 @@ router.post("/finance/quote", requireAuth, async (req, res) => {
     return;
   }
 
-  const { principalCents, currency } = req.body as {
+  const {
+    principalCents,
+    currency,
+    paymentMethodType,
+    jarId,
+  } = req.body as {
     principalCents?: unknown;
     currency?: unknown;
+    paymentMethodType?: unknown;
+    jarId?: unknown;
   };
 
   if (
@@ -89,11 +107,117 @@ router.post("/finance/quote", requireAuth, async (req, res) => {
     return;
   }
 
+  // Phase 4B: optional paymentMethodType
+  const resolvedCurrency = (typeof currency === "string" ? currency : undefined) ?? "USD";
+
+  if (paymentMethodType !== undefined) {
+    // Validate paymentMethodType
+    if (
+      paymentMethodType !== "us_bank_account" &&
+      paymentMethodType !== "card"
+    ) {
+      res.status(400).json({
+        error: "BadRequest",
+        message: "paymentMethodType must be 'us_bank_account' or 'card'",
+      });
+      return;
+    }
+
+    // jarId is required when paymentMethodType is provided (to look up member)
+    if (typeof jarId !== "string" || !jarId.trim()) {
+      res.status(400).json({
+        error: "BadRequest",
+        message: "jarId is required when paymentMethodType is provided",
+      });
+      return;
+    }
+
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+
+    // Verify jar exists
+    const [jar] = await db
+      .select({ id: jars.id })
+      .from(jars)
+      .where(eq(jars.id, jarId));
+
+    if (!jar) {
+      res.status(404).json({ error: "NotFound", message: "Jar not found" });
+      return;
+    }
+
+    // Verify caller is an active member of the jar
+    const [member] = await db
+      .select({ id: jarMembers.id, status: jarMembers.status })
+      .from(jarMembers)
+      .where(and(eq(jarMembers.userId, userId), eq(jarMembers.jarId, jarId)));
+
+    if (!member || member.status !== "active") {
+      res.status(403).json({
+        error: "Forbidden",
+        message: "You must be an active member of this jar",
+      });
+      return;
+    }
+
+    // Compute the processing fee gross-up
+    const principal = principalCents as number;
+    const dripJarFeeCents = generateQuote(principal, 0, resolvedCurrency).dripJarFeeCents;
+    const baseCents = principal + dripJarFeeCents;
+    const estimatedProcessingFeeCents = computeGrossedUpProviderFee(
+      baseCents,
+      paymentMethodType as PaymentMethodType,
+    );
+
+    const quote = generateQuote(principal, estimatedProcessingFeeCents, resolvedCurrency);
+
+    // Persist the quote as a financial_transaction (providerStatus='quoted')
+    const quoteExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes from now
+    const idempotencyKey = `quote-${userId}-${jarId}-${principal}-${paymentMethodType}-${Date.now()}`;
+
+    const [ft] = await db
+      .insert(financialTransactions)
+      .values({
+        jarId,
+        memberId: member.id,
+        transactionType: "contribution",
+        currency: resolvedCurrency,
+        requestedPrincipalCents: principal,
+        dripJarFeeCents: quote.dripJarFeeCents,
+        dripJarFeeRateBps: DRIPJAR_FEE_RATE_BPS,
+        processingFeeEstimatedCents: estimatedProcessingFeeCents,
+        processingFeeActualCents: null,
+        totalQuotedCents: quote.totalChargeCents,
+        providerType: "stripe",
+        providerTransactionId: null,
+        providerStatus: "quoted",
+        quoteExpiresAt,
+        paymentMethodCategory: paymentMethodType,
+        ledgerPostingStatus: "pending",
+        ledgerId: null,
+        idempotencyKey,
+      })
+      .returning({ id: financialTransactions.id });
+
+    if (!ft) {
+      res.status(500).json({ error: "InternalError", message: "Failed to persist quote" });
+      return;
+    }
+
+    res.json({
+      ...quote,
+      financialTransactionId: ft.id,
+      paymentMethodType,
+      quoteExpiresAt: quoteExpiresAt.toISOString(),
+    });
+    return;
+  }
+
+  // Phase 4A path: no paymentMethodType — backward-compatible
   try {
     const quote = generateQuote(
       principalCents as number,
-      0, // Phase 4A: no live processing-fee estimate
-      (typeof currency === "string" ? currency : undefined) ?? "USD",
+      0,
+      resolvedCurrency,
     );
     res.json(quote);
   } catch (err) {

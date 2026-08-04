@@ -1,0 +1,123 @@
+I am rebranding this application from “TripJar” to “M3Jar”.
+
+Your task is to update the branding throughout the codebase WITHOUT changing application logic, architecture, database structure, authentication behavior, API behavior, payment logic, migrations, or any other functional code.
+
+IMPORTANT RULES:
+
+1. Do NOT refactor unrelated code.
+2. Do NOT rename database tables, database columns, migration files, API routes, environment variables, internal IDs, package names, or backend identifiers unless they are purely display/branding values and changing them is clearly safe.
+3. Do NOT create new migrations.
+4. Do NOT modify authentication/session logic.
+5. Do NOT modify Stripe/payment logic.
+6. Do NOT change dependencies or package versions.
+7. Do NOT change navigation behavior, screens, components, validation logic, or API contracts.
+8. Preserve all existing tests and functionality.
+
+SEARCH THE ENTIRE REPOSITORY FOR:
+- TripJar
+- Trip Jar
+- tripjar
+- trip-jar
+- trip_jar
+- TRIPJAR
+
+Before making changes, classify every occurrence into one of two categories:
+
+A. SAFE BRANDING/DISPLAY REFERENCES
+Examples:
+- Visible UI text
+- Page titles
+- App name shown to users
+- Email copy
+- Notification copy
+- README/documentation
+- Comments referring to the product by name
+- App metadata/display name
+- Splash/login/signup text
+- User-facing error/help text
+- Terms/privacy placeholders if they simply reference the company/product name
+
+These SHOULD be changed to M3Jar.
+
+B. INTERNAL/TECHNICAL REFERENCES
+Examples:
+- Database tables/columns
+- Existing migration contents
+- API routes
+- Environment variable names
+- Storage keys
+- JWT claims
+- package identifiers
+- bundle identifiers
+- npm package names
+- internal constants used as persistent identifiers
+- Stripe metadata keys
+- OAuth callback identifiers
+- backend service names
+
+DO NOT change these automatically.
+
+If an internal/technical reference contains TripJar, leave it unchanged unless there is a compelling technical reason to change it. Report it to me instead.
+
+BRANDING CHANGES:
+
+Replace user-facing:
+“TripJar” → “M3Jar”
+
+Use this brand language where appropriate:
+M3Jar
+Making Meaningful Moments Happen
+
+Do not insert the tagline everywhere. Use it only where a tagline naturally belongs, such as:
+- Welcome/login screen
+- Splash/onboarding screen
+- Marketing/about copy
+- README project description
+
+APP CONFIGURATION:
+
+Review the Expo/mobile app configuration and identify:
+- display name
+- app name
+- slug
+- iOS bundle identifier
+- Android package name
+- scheme/deep-link identifiers
+
+Change ONLY the human-readable display name to M3Jar during this task.
+
+Do NOT change:
+- bundle identifiers
+- Android package identifiers
+- URL schemes
+- deep-link schemes
+- OAuth identifiers
+- existing slugs
+
+unless they are clearly unused and changing them cannot break anything.
+
+Do not guess.
+
+TESTING:
+
+After making the safe branding changes:
+
+1. Run the existing test suite.
+2. Run TypeScript/type checking if configured.
+3. Run linting if configured.
+4. Build or start both backend and mobile/frontend projects far enough to identify configuration errors.
+5. Search the repository again for every variation of “TripJar”.
+
+At completion, provide a report with:
+
+1. Files changed.
+2. Every branding change made.
+3. Every remaining TripJar reference.
+4. Why each remaining reference was intentionally left unchanged.
+5. Test/typecheck/lint/build results.
+6. Any potentially breaking rename that you recommend for a future dedicated migration.
+
+DO NOT make additional changes after the verification phase.
+
+The goal of this task is ONLY:
+“Safely change the visible product branding from TripJar to M3Jar while preserving all existing functionality.”

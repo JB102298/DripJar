@@ -1,0 +1,483 @@
+Proceed with M3Jar Development Phase 2: Membership & Jar Lifecycle Completeness.
+
+This is an implementation phase.
+
+Do NOT:
+- publish or deploy
+- change production environment variables or secrets
+- change DNS, Resend, Cloudflare, registrar settings
+- create/configure Stripe
+- introduce real-money functionality
+- modify production database data
+- push until final review
+
+Current branch:
+main
+
+Expected starting HEAD:
+09234a9 Prepare M3Jar production email and password reset flow
+
+Before editing:
+1. Verify branch and HEAD.
+2. Verify working tree has no tracked changes.
+3. Re-read the relevant existing routes/screens/schema before implementation.
+4. Preserve all existing behavior and tests.
+
+GOAL
+
+Complete the non-financial social/account lifecycle of M3Jar before beginning automation and real-money phases.
+
+A user should be able to:
+- create and manage a Jar
+- invite people
+- register from an invitation and complete joining
+- see/manage invitations
+- leave a Jar
+- remove members when authorized
+- edit Jar settings
+- cancel/archive a Jar
+- change their password
+- verify their email address
+
+All functionality must work end-to-end across database, API, mobile/web UI, authorization, activity logging, notifications/email where appropriate, and automated tests.
+
+PART 1 — ORGANIZER INVITATION MANAGEMENT
+
+Implement organizer-facing invitation management.
+
+Required capabilities:
+
+1. Organizer can view all invitations sent for a specific Jar.
+2. Show at minimum:
+   - invitee email
+   - status
+   - created date
+   - expiration
+   - contribution target if applicable
+3. Organizer can cancel/revoke a still-pending invitation.
+4. Revoked invitations can no longer be accepted.
+5. Already accepted invitations cannot be revoked in a way that removes the member.
+6. Expired invitations remain visibly distinct where appropriate.
+7. Authorization:
+   - only the Jar organizer may manage sent invitations
+   - ordinary members must not be able to list or cancel organizer invitations
+8. Log an activity event when an invitation is revoked if consistent with the current activity model.
+
+Use existing invitation-token security patterns.
+
+Do not expose raw invitation tokens in organizer listing responses.
+
+PART 2 — INVITE → REGISTER → AUTO-JOIN FLOW
+
+Fix the incomplete new-user invitation journey.
+
+Current behavior:
+Unauthenticated invitees must register/login and manually reopen the invitation link.
+
+Required behavior:
+
+1. User opens:
+   /invite/{token}
+
+2. If signed out:
+   - preserve the invitation token safely for the authentication flow
+   - allow user to choose login or registration
+   - after successful authentication/registration, automatically return to the invitation flow
+
+3. User should then be able to accept the invitation without manually reopening the email.
+
+4. Registration must NOT automatically accept the invitation without the user's explicit acceptance unless the existing product UX clearly already communicates acceptance.
+
+5. Avoid persisting invitation tokens longer than necessary.
+6. Do not log invitation tokens.
+7. Handle:
+   - expired token
+   - revoked token
+   - already accepted token
+   - invitation email belonging to a different authenticated account
+
+Do not weaken current invitation security.
+
+PART 3 — LEAVE JAR
+
+Implement member-initiated leaving.
+
+Requirements:
+
+1. Non-organizer member can leave a Jar.
+2. Organizer cannot use "leave" to abandon ownership.
+3. Authorization must be enforced server-side.
+4. Determine what should happen to:
+   - jar_members row/status
+   - contribution schedules
+   - agreement acceptances
+   - notifications
+   - activity history
+   - existing simulated contributions
+
+Prefer preserving historical/audit records rather than destructive deletion.
+
+If schema changes are required, use explicit lifecycle/status fields rather than deleting financial/history rows.
+
+Since contributions are currently simulated only:
+- do not invent real refund behavior
+- clearly preserve historical simulated contribution records
+
+Add member-facing UI with a confirmation step.
+
+PART 4 — REMOVE MEMBER
+
+Implement organizer member removal.
+
+Requirements:
+
+1. Only organizer may remove another member.
+2. Organizer cannot remove themselves through this action.
+3. Removed member loses active access to the Jar.
+4. Preserve historical activity/contribution records.
+5. Define and implement behavior for their:
+   - active schedule
+   - agreement acceptance
+   - notifications
+   - membership record/status
+
+6. Log removal in activity.
+7. Notify the removed member in-app if consistent with notification architecture.
+
+Add organizer UI from the Members area.
+
+Include confirmation before removal.
+
+PART 5 — MEMBERSHIP LIFECYCLE MODEL
+
+Before implementing Parts 3–4, inspect whether jar_members currently supports lifecycle states cleanly.
+
+If it currently assumes membership rows are permanently active:
+
+Design the smallest safe schema change needed to represent:
+- active
+- left
+- removed
+
+Prefer status + timestamp fields such as:
+- membership status
+- left/removed timestamp
+
+Do not hard-delete membership history unless there is a strong existing architectural reason.
+
+Create a new numbered Drizzle migration if schema changes are necessary.
+
+All Jar access checks must treat only active membership as granting access.
+
+Review getJarAccess and every route relying on membership.
+
+Add tests proving left/removed members cannot regain Jar access through stale endpoints.
+
+PART 6 — JAR SETTINGS UI
+
+The PATCH /api/jars/:jarId API already exists.
+
+Implement the missing Settings UI.
+
+Organizer should be able to edit fields that the backend safely supports, including appropriate existing Jar properties such as:
+- name
+- description
+- target/event date
+- other currently editable settings
+
+Do NOT casually allow changes to financial/member obligations if doing so would create inconsistent contribution targets, agreements, milestones, or schedules.
+
+Audit each editable field before exposing it.
+
+If a field requires recalculating participant obligations, do not implement a naive frontend-only recalculation.
+
+Report any fields intentionally left immutable and why.
+
+PART 7 — CANCEL / ARCHIVE JAR
+
+The backend already has POST /jars/:id/cancel.
+
+Complete the user flow.
+
+Requirements:
+
+1. Organizer-only UI action.
+2. Explicit confirmation.
+3. Clearly explain consequence.
+4. Cancelled Jar becomes non-active.
+5. Members should no longer be able to create simulated contributions or modify active schedules on a cancelled Jar.
+6. Historical data remains viewable if the architecture supports it.
+7. Add activity and notification behavior where appropriate.
+8. Ensure API-level state guards exist — do not rely on hiding buttons.
+
+Audit whether "cancelled" and "archived" should remain distinct concepts.
+
+Do not add hard deletion in this phase.
+
+PART 8 — PASSWORD CHANGE
+
+Implement authenticated password change.
+
+Backend requirements:
+
+1. Require current password.
+2. Require new password meeting existing password policy.
+3. Verify current password using existing bcrypt patterns.
+4. Update the password hash.
+5. Revoke existing refresh sessions after successful change.
+
+Choose and document whether:
+- current session survives, or
+- all sessions including current are revoked and user must sign in again.
+
+Prefer the option that best matches the existing security architecture.
+
+6. Rate-limit appropriately.
+7. Never log passwords.
+8. Return generic safe errors.
+
+Frontend:
+- add Change Password under profile/settings
+- current password
+- new password
+- confirm new password
+- loading/error/success states
+
+Add tests.
+
+PART 9 — EMAIL VERIFICATION
+
+Implement email verification end-to-end.
+
+Current state:
+users.emailVerified exists but is unused.
+
+Requirements:
+
+1. Generate a cryptographically random verification token.
+2. Store only a hash of the token.
+3. Give tokens a defined expiration.
+4. Verification tokens must be single-use.
+5. Send an M3Jar verification email using the existing Resend abstraction.
+6. Add public verification route/screen.
+7. Allow resend-verification with rate limiting.
+8. Preserve anti-enumeration principles where appropriate.
+9. Mark emailVerified only after successful token validation.
+10. Do not log raw verification tokens in production.
+11. Development-only token exposure, if added for testing, must be guarded exactly like password-reset dev behavior.
+
+DATABASE:
+If verification-token hash/expiry fields do not exist, add them via migration.
+
+PRODUCT BEHAVIOR:
+
+Do NOT suddenly block all existing app use based on emailVerified unless explicitly necessary for this phase.
+
+Instead:
+- implement the verification system
+- visibly show verification state
+- prompt unverified users to verify
+- identify any sensitive actions that should eventually require verification
+
+For invitation handling:
+carefully prevent an authenticated user from using an invitation addressed to another email.
+
+Add automated coverage.
+
+PART 10 — PROFILE / SETTINGS UX
+
+Integrate the new account lifecycle actions coherently into the existing profile/settings experience:
+
+- email verification status
+- resend verification
+- change password
+
+Do not redesign unrelated screens.
+
+Do not implement:
+- payment methods
+- push notification preferences
+- financial settings
+- Stripe UI
+
+Those belong to later phases.
+
+PART 11 — ACTIVITY & NOTIFICATIONS
+
+Review every new lifecycle action from this phase.
+
+Add appropriate activity events for:
+- member joined through invite if not already present
+- member left
+- member removed
+- invitation revoked
+- Jar cancelled
+- relevant Jar settings changes
+
+Use existing activity infrastructure.
+
+Add in-app notifications only where they provide meaningful user value and match the existing notification architecture.
+
+Do not create notification spam.
+
+PART 12 — AUTHORIZATION REVIEW
+
+Perform a focused authorization audit after implementation.
+
+Verify:
+
+- non-organizers cannot cancel invites
+- non-organizers cannot remove members
+- members cannot modify organizer-only Jar settings
+- left members lose Jar access
+- removed members lose Jar access
+- cancelled Jars reject mutation endpoints that should no longer operate
+- invitation email/account mismatches cannot be exploited
+- verification tokens cannot be replayed
+- password change cannot be performed without current password
+
+Add negative tests for authorization failures.
+
+PART 13 — TESTING
+
+Add automated coverage for all new behavior.
+
+API tests should cover at minimum:
+
+- organizer sent-invite list
+- cancel invitation
+- unauthorized invite management
+- revoked invite acceptance
+- leave Jar
+- organizer cannot leave
+- remove member
+- unauthorized removal
+- removed/left member access rejection
+- Jar settings authorization
+- cancel Jar state enforcement
+- password change success/failure
+- refresh-session behavior after password change
+- email verification token success
+- expired verification token
+- replayed verification token
+- resend verification
+- invitation email/account mismatch
+
+Mobile tests should cover key lifecycle UI:
+
+- invite authentication return flow
+- leave confirmation
+- remove-member authorization UI
+- Jar settings screen
+- cancel Jar confirmation
+- password-change validation
+- email-verification state/action
+
+Run:
+
+- complete API suite
+- complete mobile suite
+- API typecheck
+- mobile typecheck
+- production build validation if possible without publishing
+
+Do not fix unrelated historical typecheck issues in this phase unless required by touched files.
+
+However:
+No NEW typecheck errors may be introduced.
+
+PART 14 — DATABASE MIGRATION SAFETY
+
+If schema changes are needed:
+
+1. Generate explicit numbered migration(s).
+2. Do not use drizzle-kit push as the authoritative production strategy.
+3. Verify migration on a clean database.
+4. Verify migration against current development schema.
+5. Confirm no dev data is unintentionally destroyed.
+6. Keep future production migration compatibility intact.
+
+Do not touch the unpublished production database.
+
+PART 15 — DO NOT IMPLEMENT YET
+
+Explicitly out of scope:
+
+- real money
+- Stripe
+- Financial Connections
+- ACH
+- cards
+- PaymentIntents
+- SetupIntents
+- payment methods
+- ledger
+- withdrawals
+- refunds
+- payouts
+- M3Jar fees
+- autopay
+- financial webhooks
+- cutoff-date enforcement
+- automated reminder scheduling
+- push notifications
+- SecureStore TripJar-key migration
+- production deployment
+
+PART 16 — CODE REVIEW
+
+After implementation:
+
+1. Inspect complete diff.
+2. Search for authorization holes.
+3. Search for destructive deletes where history should be preserved.
+4. Search for raw invitation/verification/password token leakage.
+5. Ensure no unrelated refactors entered the diff.
+6. Run a separate code-review pass before committing.
+
+PART 17 — COMMIT
+
+If validation passes, create ONE commit:
+
+Commit title:
+Complete M3Jar membership and jar lifecycle
+
+Commit body:
+- Add organizer invitation management
+- Complete invite-to-registration return flow
+- Add member leave and organizer removal lifecycle
+- Add Jar settings and cancellation UI
+- Add authenticated password change
+- Add email verification flow
+- Harden lifecycle authorization and activity tracking
+- Add automated coverage for new lifecycle behavior
+
+Do NOT push.
+
+FINAL REPORT
+
+Return:
+
+1. Files changed
+2. Database/schema changes
+3. Migration details
+4. Invitation-management implementation
+5. Invite→register→join implementation
+6. Leave-Jar implementation
+7. Remove-member implementation
+8. Membership lifecycle behavior
+9. Jar settings implementation
+10. Jar cancellation behavior
+11. Password-change implementation
+12. Email-verification implementation
+13. Activity/notification changes
+14. Authorization/security review findings
+15. API tests/results
+16. Mobile tests/results
+17. Typecheck results, separating pre-existing issues
+18. Build result
+19. Code-review findings/fixes
+20. Remaining known lifecycle gaps
+21. Git commit hash
+22. Confirmation nothing was pushed
+23. Confirmation no production deployment, Stripe, financial infrastructure, DNS, Resend configuration, secrets, or external services were changed

@@ -1,0 +1,241 @@
+Proceed with a focused DripJar baseline cleanup pass before Phase 4B.
+
+DO NOT start Phase 4B.
+DO NOT add Stripe.
+DO NOT publish or deploy.
+DO NOT touch production database, DNS, Resend, Cloudflare, secrets, Expo/EAS, or any external service.
+
+Current expected HEAD:
+d63d0f9 — Phase 4A hardening: fee rounding + ledger FK NOT NULL
+
+GOAL
+
+Clean the development baseline so Phase 4B starts from:
+
+- full API suite passing
+- API typecheck clean
+- no change to application/business behavior
+- no financial architecture changes
+- no Stripe/provider work
+
+There are exactly two known baseline issues to address:
+
+1. Missing pg TypeScript declarations
+2. Flaky Phase 3 automation reminder-deduplication test caused by shared test-database pollution
+
+PART 1 — VERIFY BASELINE
+
+Before editing:
+
+1. Verify branch = main.
+2. Verify HEAD = d63d0f9.
+3. Verify origin/main = d63d0f9.
+4. Inspect working-tree status.
+5. Do not include untracked attached_assets or report PDFs in the commit.
+
+Run the current baseline once and confirm:
+
+- API typecheck fails only on the known pg type issue.
+- phase3-automation deduplication test is the only known flaky/failing test if it reproduces.
+- no new Phase 4A financial failures exist.
+
+PART 2 — FIX @types/pg / TYPECHECK BASELINE
+
+Known issue:
+
+artifacts/api-server/src/__tests__/refresh-token-concurrency-proof.test.ts
+
+imports:
+PoolClient from "pg"
+
+but the API package does not currently have the necessary TypeScript declarations.
+
+Implement the smallest clean fix.
+
+Preferred approach:
+
+- add @types/pg to the appropriate api-server devDependencies if that matches the workspace dependency model
+- update lockfile as required
+
+Do not:
+- remove the test
+- weaken types with any
+- disable typechecking
+- suppress the error with ts-ignore
+- move the error somewhere else
+
+After the fix:
+
+pnpm --filter @workspace/api-server run typecheck
+
+must pass with ZERO errors.
+
+PART 3 — FIX PHASE 3 AUTOMATION TEST ISOLATION
+
+Known flaky test:
+
+phase3-automation.test.ts
+"running twice does not double-count notifications"
+
+Root cause:
+shared dev/test DB accumulates jars and agreement-required state from previous tests/runs, so the global reminder processor sees unrelated records and the second invocation can discover events not created by the current test.
+
+Important:
+Do NOT change production reminder semantics merely to make the test pass.
+
+Fix the TEST ISOLATION problem.
+
+Preferred strategies, in order:
+
+A. Make the test processor invocation operate on test-owned data only if the existing architecture supports a safe test-scoping mechanism.
+
+OR
+
+B. Add deterministic cleanup for test-created jars/members/agreements/reminder events in afterEach/afterAll.
+
+OR
+
+C. Create a test helper that records resources created by the suite and cleans them up/marks them terminal after the suite.
+
+Use whichever approach is smallest and safest.
+
+Requirements:
+
+1. Do not rely on execution order.
+2. Do not rely on a pristine dev DB.
+3. Do not use arbitrary sleeps.
+4. Do not change reminder idempotency keys just for tests.
+5. Do not weaken the production reminder processor.
+6. Do not delete unrelated user/dev data.
+7. Cleanup must target only data created by the relevant tests.
+8. Repeated local test runs must remain green.
+
+PART 4 — STRESS THE FLAKY TEST
+
+After implementing the isolation fix:
+
+Run the affected Phase 3 automation test repeatedly.
+
+At minimum:
+- run the relevant test file 10 consecutive times
+- then run the full API suite at least twice
+
+Expected:
+- zero intermittent deduplication failures
+
+If any run fails:
+- investigate before committing
+- do not call the cleanup complete
+
+PART 5 — FULL VALIDATION
+
+Run:
+
+- API typecheck
+- full API test suite
+- full API test suite a second time
+- mobile test suite
+- lib/db typecheck
+- API production build
+
+Expected final state:
+
+API typecheck: 0 errors
+API tests: 100% pass
+Mobile tests: 100% pass
+lib/db typecheck: 0 errors
+Production build: pass
+
+No new warnings attributable to this cleanup.
+
+PART 6 — CODE REVIEW
+
+Perform a focused review confirming:
+
+- no production reminder logic was weakened
+- cleanup targets only test-created data
+- no user/dev data is broadly deleted
+- no test was skipped or relaxed
+- no ts-ignore / any workaround was introduced
+- no Phase 4A financial code changed
+- no Stripe/provider code added
+
+PART 7 — COMMIT
+
+Create ONE commit:
+
+Title:
+Clean DripJar test and TypeScript baseline
+
+Suggested body:
+- Add PostgreSQL type declarations for API concurrency tests
+- Isolate Phase 3 reminder tests from shared database pollution
+- Remove reminder-deduplication test flakiness
+- Restore clean API TypeScript baseline
+- Verify repeated full-suite stability
+
+Do NOT push until validation is complete.
+
+After commit, push using the normal Replit GitHub integration.
+
+Verify origin/main matches local HEAD.
+
+PART 8 — REPORTING
+
+IMPORTANT:
+The downloadable PDF must be the ABSOLUTE LAST TASK.
+
+Do NOT generate the PDF until ALL of the following are complete:
+
+1. edits
+2. repeated flaky-test stress runs
+3. both full API test runs
+4. mobile tests
+5. typechecks
+6. production build
+7. code review
+8. commit
+9. push
+10. origin/main verification
+11. working-tree verification
+
+ONLY THEN create:
+
+baseline-cleanup-final-report.pdf
+
+The PDF must contain the COMPLETE report:
+
+- starting HEAD
+- files changed
+- exact @types/pg fix
+- exact reminder-test isolation strategy
+- why production behavior was not changed
+- 10-run flaky-test stress results
+- first full API suite result
+- second full API suite result
+- mobile test result
+- API typecheck result
+- lib/db typecheck result
+- build result
+- code-review findings
+- commit hash
+- push result
+- origin/main
+- working-tree status
+- confirmation Phase 4A financial code was untouched
+- confirmation no Stripe/provider work occurred
+- confirmation no production/external infrastructure changed
+
+In Replit chat return ONLY:
+
+PASS / FAIL
+Final commit hash
+API test totals
+API typecheck status
+Mobile test total
+Build status
+origin/main
+Blockers, if any
+PDF filename/path
+
+Do not paste the full report into chat.

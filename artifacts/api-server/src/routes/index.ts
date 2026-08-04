@@ -17,6 +17,8 @@ import remindersRouter from "./reminders.js";
 import downloadRouter from "./download.js";
 import preferencesRouter from "./preferences.js";
 import financeRouter from "./finance.js";
+import dripsRouter from "./drips.js";
+import stripeWebhooksRouter from "./stripe-webhooks.js";
 
 const router: IRouter = Router();
 
@@ -38,5 +40,7 @@ router.use(remindersRouter);
 router.use(downloadRouter);
 router.use(preferencesRouter);
 router.use(financeRouter);
+router.use(dripsRouter);
+router.use(stripeWebhooksRouter);
 
 export default router;

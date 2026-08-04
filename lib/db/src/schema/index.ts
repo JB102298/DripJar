@@ -86,10 +86,13 @@ export const profiles = pgTable("profiles", {
   emailPrefContributionReminders: boolean("email_pref_contribution_reminders").notNull().default(true),
   emailPrefCutoffReminders: boolean("email_pref_cutoff_reminders").notNull().default(true),
   emailPrefLifecycle: boolean("email_pref_lifecycle").notNull().default(true),
+  // Phase 4B: Stripe Customer ID — null until first Stripe payment is initiated
+  stripeCustomerId: text("stripe_customer_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("profiles_user_id_idx").on(t.userId),
+  uniqueIndex("profiles_stripe_customer_id_idx").on(t.stripeCustomerId),
 ]);
 
 export const profilesRelations = relations(profiles, ({ one }) => ({
@@ -572,8 +575,20 @@ export const financialTransactions = pgTable("financial_transactions", {
   // Payment provider (null Phase 4A; 'stripe' Phase 4B+)
   providerType: text("provider_type"),
   providerTransactionId: text("provider_transaction_id"),
-  // 'not_applicable'|'pending'|'succeeded'|'failed'
+  // Phase 4B providerStatus values (extends Phase 4A not_applicable|pending):
+  //   'not_applicable'   — simulated / no payment provider
+  //   'pending'          — created but not yet submitted to provider
+  //   'quoted'           — fee quote persisted; awaiting PI creation (30-min TTL)
+  //   'provider_created' — PaymentIntent created at Stripe, not yet confirmed
+  //   'processing'       — PaymentIntent processing (ACH in-flight)
+  //   'succeeded'        — confirmed via webhook; ledger posted
+  //   'failed'           — payment failed
+  //   'cancelled'        — PaymentIntent cancelled
   providerStatus: text("provider_status").notNull().default("not_applicable"),
+  // Phase 4B: quote expiry — null for non-quoted transactions
+  quoteExpiresAt: timestamp("quote_expires_at"),
+  // Phase 4B: 'us_bank_account' | 'card' | null for non-Stripe transactions
+  paymentMethodCategory: text("payment_method_category"),
   // 'pending'|'posted'|'failed'
   ledgerPostingStatus: text("ledger_posting_status").notNull().default("pending"),
   // Set once ledger entries are posted
@@ -672,6 +687,46 @@ export const ledgerEntriesRelations = relations(ledgerEntries, ({ one }) => ({
   }),
 }));
 
+// ─── Stripe Webhook Events ────────────────────────────────────────────────────
+//
+// Idempotency store for incoming Stripe webhook events.
+// Each Stripe event ID is stored exactly once; duplicate deliveries are
+// detected via the unique constraint on stripeEventId and discarded.
+//
+// processingStatus lifecycle:
+//   'received'   → initial state on insert
+//   'processing' → claimed by handler (set inside the success handler tx)
+//   'processed'  → event fully handled and ledger posted (if applicable)
+//   'failed'     → handler threw; Stripe will retry
+//   'ignored'    → unknown/unsupported event type; 200 returned to Stripe
+
+export const stripeWebhookEvents = pgTable("stripe_webhook_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  stripeEventId: text("stripe_event_id").notNull(),
+  eventType: text("event_type").notNull(),
+  stripeCreatedAt: timestamp("stripe_created_at").notNull(),
+  receivedAt: timestamp("received_at").notNull().defaultNow(),
+  processedAt: timestamp("processed_at"),
+  // 'received'|'processing'|'processed'|'failed'|'ignored'
+  processingStatus: text("processing_status").notNull().default("received"),
+  financialTransactionId: uuid("financial_transaction_id").references(
+    () => financialTransactions.id,
+  ),
+  errorMessage: text("error_message"),
+  attemptCount: integer("attempt_count").notNull().default(0),
+}, (t) => [
+  uniqueIndex("stripe_webhook_events_stripe_event_id_idx").on(t.stripeEventId),
+  index("stripe_webhook_events_ft_id_idx").on(t.financialTransactionId),
+  index("stripe_webhook_events_status_idx").on(t.processingStatus),
+]);
+
+export const stripeWebhookEventsRelations = relations(stripeWebhookEvents, ({ one }) => ({
+  financialTransaction: one(financialTransactions, {
+    fields: [stripeWebhookEvents.financialTransactionId],
+    references: [financialTransactions.id],
+  }),
+}));
+
 // ─── Add financial_transactions to existing relation maps ─────────────────────
 
 export const jarsFinancialRelations = relations(jars, ({ many: _many }) => ({
@@ -724,3 +779,5 @@ export type LedgerTransaction = typeof ledgerTransactions.$inferSelect;
 export type NewLedgerTransaction = typeof ledgerTransactions.$inferInsert;
 export type LedgerEntry = typeof ledgerEntries.$inferSelect;
 export type NewLedgerEntry = typeof ledgerEntries.$inferInsert;
+export type StripeWebhookEvent = typeof stripeWebhookEvents.$inferSelect;
+export type NewStripeWebhookEvent = typeof stripeWebhookEvents.$inferInsert;

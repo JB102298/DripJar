@@ -1,0 +1,204 @@
+We are back in the REAL DripJar Replit project.
+
+FIRST: READ-ONLY VERIFY THE PROJECT.
+
+Expected GitHub repository:
+github.com/JB102298/TripJar
+
+Expected origin/main:
+b6fd453 — Update agent memory with Phase 4A learnings
+
+Expected history immediately before it:
+8841ec9 — Add DripJar financial ledger foundation
+65de175 — Add M3Jar cutoff and reminder automation
+
+Do not modify anything until those facts are verified.
+
+Once verified, recreate the Phase 4A hardening correction that was previously implemented in an ephemeral audit clone but could not be pushed.
+
+IMPORTANT:
+The prior temporary commit SHA 6141179 MUST NOT be treated as something to cherry-pick because it exists only in an ephemeral /tmp clone outside this project.
+
+Reimplement the following corrections directly in THIS native DripJar workspace.
+
+PHASE 4A HARDENING CORRECTIONS
+
+1. FEE ROUNDING
+
+In:
+artifacts/api-server/src/lib/fee-engine.ts
+
+Replace:
+
+Math.round((principalCents * rateBps) / 10_000)
+
+with explicit half-up basis-point rounding:
+
+Math.floor((principalCents * rateBps + 5_000) / 10_000)
+
+Update comments/JSDoc so they accurately describe the implementation.
+
+Add/retain tests covering:
+- $0.50 principal midpoint → $0.02 fee
+- $1.50 → $0.05
+- $5.00 → $0.15
+- below midpoint
+- above midpoint
+- large safe-integer values
+
+2. LEDGER TRANSACTION OWNERSHIP
+
+Make:
+
+ledger_transactions.financial_transaction_id
+
+NOT NULL at both:
+- Drizzle schema level
+- PostgreSQL migration level
+
+Create migration:
+
+0009_ledger_tx_fk_not_null.sql
+
+Migration requirements:
+
+- first check whether any current ledger_transactions rows have NULL financial_transaction_id
+- abort migration if orphan rows exist
+- otherwise ALTER COLUMN financial_transaction_id SET NOT NULL
+- preserve all existing data
+- register migration correctly in drizzle meta journal
+
+In the ledger posting layer, require financialTransactionId before inserting a ledger_transaction.
+
+Every posted ledger transaction must belong to a financial_transaction.
+
+Add an invariant test confirming zero ledger_transactions exist with NULL financial_transaction_id.
+
+3. DO NOT CHANGE THESE BUSINESS RULES
+
+Do not expose postCommitPrincipal through an HTTP route.
+
+Contributor fund commitment is still NOT implemented as a public action in Phase 4A.
+
+Future rule remains:
+only the authenticated contributor may commit their own funds.
+
+Do not allow organizer-triggered commitment of another contributor's principal.
+
+Do not change fund_destination_type.
+
+It should remain NULL in Phase 4A and stay independent from contributor commitment.
+
+Future destination decisions:
+- organizer_bank_payout
+- dripjar_card
+
+belong to later phases.
+
+4. VALIDATION
+
+After implementation run:
+
+- complete API test suite
+- library/shared DB typecheck
+- API typecheck
+- API production build
+- migration against current dev DB
+- full fresh migration chain through 0009
+- focused financial architecture review
+
+Confirm:
+- no new TypeScript errors
+- no orphan ledger transactions
+- all ledger postings still balance
+- Phase 4A financial invariants remain intact
+
+5. COMMIT
+
+Create ONE new commit on top of b6fd453.
+
+Preferred title:
+
+Phase 4A hardening: fee rounding + ledger FK NOT NULL
+
+Do NOT amend or rewrite already-pushed history.
+
+After validation, PUSH this commit using this project's normal Replit GitHub integration.
+
+Do not request or create a GitHub Personal Access Token.
+
+Verify origin/main after the push.
+
+6. DO NOT TOUCH
+
+Do not:
+- add Stripe yet
+- start Phase 4B
+- publish/deploy
+- touch production DB
+- modify secrets/env vars
+- modify DNS
+- modify Resend
+- modify Cloudflare
+- modify Expo/EAS
+- access any external financial service
+
+REPORTING REQUIREMENT — VERY IMPORTANT
+
+The downloadable PDF must be the ABSOLUTE LAST TASK.
+
+Do NOT generate the PDF during implementation.
+Do NOT generate it before committing.
+Do NOT generate it before pushing.
+Do NOT generate it before verifying origin/main.
+
+First complete:
+1. implementation
+2. tests
+3. typechecks
+4. builds
+5. migration verification
+6. architecture review
+7. commit
+8. push
+9. remote verification
+10. final working-tree verification
+
+ONLY AFTER EVERYTHING ABOVE IS COMPLETE:
+
+Create a downloadable PDF named:
+
+phase4a-final-hardening-report.pdf
+
+The PDF must contain the complete final state, including:
+
+- starting HEAD
+- files changed
+- exact fee-rounding implementation
+- migration 0009 details
+- ledger ownership/invariant results
+- all test totals
+- typecheck results
+- build results
+- migration verification
+- architecture review
+- final commit hash
+- push result
+- final origin/main
+- working-tree status
+- confirmation no Stripe/provider work occurred
+- confirmation no production/external infrastructure changed
+- any blocker or warning encountered
+
+In the Replit chat itself return ONLY:
+
+PASS / FAIL
+Final commit hash
+API test total
+Typecheck/build status
+origin/main
+Working-tree status
+Blockers, if any
+PDF filename/path
+
+Do not paste the full report into chat.

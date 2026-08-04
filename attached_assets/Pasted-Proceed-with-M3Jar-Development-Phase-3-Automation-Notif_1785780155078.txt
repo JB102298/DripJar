@@ -1,0 +1,483 @@
+Proceed with M3Jar Development Phase 3: Automation, Notifications & Cutoff Model.
+
+This is an implementation phase.
+
+Do NOT:
+- publish or deploy
+- touch the production database
+- change production environment variables or secrets
+- change DNS, Resend, Cloudflare, registrar settings
+- add Stripe or any real-money provider
+- implement real deposits, refunds, withdrawals, payouts, fees, or ledger logic
+- push until final review
+
+Current branch:
+main
+
+Expected starting HEAD:
+aec280f Complete M3Jar membership and jar lifecycle
+
+IMPORTANT WORKTREE NOTE
+
+There is currently an unrelated local .replit modification plus local agent-memory notes and attached_assets/ files.
+
+Do NOT modify, revert, stage, commit, or otherwise absorb those unrelated files into this phase.
+
+Before editing:
+1. Verify branch and HEAD.
+2. Verify origin/main matches aec280f.
+3. Inspect the current working tree.
+4. Preserve the existing unrelated .replit modification exactly as-is.
+5. Read the existing schedules, reminders, agreements, jars, notifications, email, activity, and related mobile screens before implementation.
+
+GOAL
+
+Complete the non-financial rules and automation layer M3Jar will later rely on for real-money behavior.
+
+This phase should establish:
+
+- an explicit Jar cutoff-date model
+- clear Saving / Commitment / Closed lifecycle semantics
+- API-level agreement and cutoff rules
+- automatic reminder processing
+- upcoming/missed contribution state
+- cutoff-related reminders
+- reminder email delivery
+- user-level email notification preferences
+- reliable, testable scheduled-processing behavior
+
+The system must remain SIMULATED only.
+
+PART 1 — CUTOFF DATE MODEL
+
+Audit the current Jar lifecycle and agreement language.
+
+Introduce the smallest safe schema/model change needed to represent a real cutoff date.
+
+Determine whether the cutoff should be:
+
+- explicitly set by organizer
+- derived from target/event date
+- or support both with an explicit stored value
+
+Prefer an explicit persisted cutoff timestamp/date that can be validated independently.
+
+Requirements:
+
+1. Add a cutoff field to the Jar model if none exists.
+2. Validate:
+   - cutoff must be before the event/target date where applicable
+   - cutoff cannot be nonsensical relative to current date when creating/launching
+3. Define exact semantics for:
+   - Draft
+   - Inviting
+   - Saving
+   - Commitment
+   - Cancelled
+   - Completed
+4. Decide whether Commitment is a stored status transition or a derived phase from cutoff time.
+5. Avoid ambiguous dual sources of truth.
+
+Document the chosen model clearly in code comments only where necessary.
+
+Do not implement financial effects yet.
+
+PART 2 — AGREEMENT ENFORCEMENT
+
+The agreement system already stores versioned acceptances.
+
+Add API-level rules so Jar activation/lifecycle behavior can rely on them.
+
+Requirements:
+
+1. Define which actions require an accepted current agreement.
+2. At minimum, evaluate:
+   - joining/remaining active in a Jar
+   - creating/changing contribution schedules
+   - simulated contribution creation
+   - transition into Commitment phase
+3. If all active members must accept the current agreement before a Jar can enter Commitment, enforce that server-side.
+4. If agreement text/version changes:
+   - previous acceptance must not silently count for the new version
+   - user must re-accept where required
+5. Do not rely on frontend visibility alone.
+6. Return explicit safe API errors for blocked actions.
+7. Add tests for outdated/nonexistent acceptance.
+
+PART 3 — CUTOFF LIFECYCLE TRANSITION
+
+Implement deterministic lifecycle behavior around the cutoff.
+
+Choose the safest architecture between:
+
+A. derived phase from current time + cutoff date
+B. persisted status transition performed by automation
+
+Avoid requiring two independent truths that can drift.
+
+Requirements:
+
+- before cutoff: Saving behavior
+- at/after cutoff: Commitment behavior
+- cancelled/completed states override derived phase
+- expired/cutoff calculations must be timezone-safe
+- use UTC consistently at the API/database layer
+
+If automation performs a transition, make it idempotent and safe to run repeatedly.
+
+Add tests around:
+- just before cutoff
+- exact cutoff instant
+- just after cutoff
+- cancelled Jar
+- completed Jar
+
+PART 4 — UPCOMING / MISSED CONTRIBUTION LOGIC
+
+Audit the current contribution_schedules and reminder logic.
+
+Implement a canonical server-side way to determine:
+
+- next scheduled contribution
+- due soon
+- due today
+- missed
+- satisfied
+- inactive schedule
+
+Requirements:
+
+1. Do not trust the frontend to determine whether a contribution is missed.
+2. Base state on:
+   - schedule
+   - due date
+   - actual simulated contribution records
+   - membership state
+   - Jar lifecycle
+3. Define how a contribution satisfies a scheduled obligation.
+4. Prevent double-counting one contribution across multiple schedule periods.
+5. Handle weekly, bi-weekly, monthly, and twice-monthly schedules consistently.
+6. Use integer cents.
+7. Do not invent real payment settlement semantics yet.
+
+Expose this information through existing or new API responses as appropriate.
+
+PART 5 — AUTOMATED REMINDER PROCESSING
+
+The project already has POST /internal/process-reminders guarded by INTERNAL_REMINDER_TOKEN.
+
+Refactor/extend this into a reliable idempotent processing job.
+
+Requirements:
+
+1. Job may run repeatedly without generating duplicate reminders for the same event/period.
+2. It should evaluate:
+   - upcoming contribution due
+   - contribution missed
+   - upcoming cutoff
+   - cutoff reached
+   - agreement acceptance still required where meaningful
+3. Create in-app notifications only once per logical reminder event.
+4. Record sufficient metadata/idempotency state to prevent duplicate delivery.
+5. Use database transactions where appropriate.
+6. Do not rely solely on in-memory state.
+
+If schema changes are needed for reminder deduplication, add them explicitly.
+
+PART 6 — SCHEDULER ARCHITECTURE
+
+Do NOT configure an external scheduler yet.
+
+Instead, make the reminder processor callable safely from one.
+
+Return a recommendation for the eventual scheduler:
+
+- Replit Scheduled Deployment
+- external cron
+- or another Replit-native mechanism
+
+The processor must be safe to run at least daily, and ideally hourly if appropriate.
+
+Do not modify Replit deployment configuration.
+
+PART 7 — REMINDER EMAILS
+
+Use the existing Resend abstraction.
+
+Add transactional emails for appropriate reminder events, at minimum:
+
+- upcoming contribution due
+- missed contribution
+- upcoming cutoff
+- cutoff reached / Commitment phase
+- agreement acceptance reminder if product-appropriate
+
+Requirements:
+
+1. M3Jar branding.
+2. HTML + plain text.
+3. Links point to the relevant Jar or action using APP_BASE_URL.
+4. Email delivery failure must not break reminder processing.
+5. No sensitive tokens in logs.
+6. NODE_ENV=test must never send live email.
+7. Avoid duplicate email sends using the same idempotency/deduplication model as notifications.
+
+PART 8 — EMAIL NOTIFICATION PREFERENCES
+
+Implement user-level email preferences.
+
+Keep this narrow.
+
+Recommended categories:
+
+- contribution reminders
+- cutoff/agreement reminders
+- membership/Jar lifecycle emails
+
+Do not implement marketing emails.
+
+Requirements:
+
+1. Secure defaults appropriate for transactional product messaging.
+2. Users can enable/disable optional reminder categories.
+3. Critical security emails such as:
+   - password reset
+   - email verification
+must not be disabled through notification preferences.
+4. Invitation emails should remain functional.
+5. Preferences must be enforced server-side before reminder emails are sent.
+
+Add profile/settings UI for these preferences.
+
+PART 9 — IN-APP NOTIFICATION IMPROVEMENTS
+
+Review current notifications.
+
+Ensure the app can distinguish and display:
+
+- contribution_due
+- contribution_missed
+- cutoff_upcoming
+- cutoff_reached
+- agreement_required
+- meaningful Jar lifecycle notices
+
+Add types only where necessary.
+
+Do not create redundant notifications for events already represented adequately.
+
+PART 10 — JAR UI FOR CUTOFF / PHASE
+
+Update Jar screens so users clearly understand the current lifecycle.
+
+Display:
+
+- cutoff date
+- current phase
+- time until cutoff where useful
+- whether current agreement is accepted
+- what changes at cutoff
+
+Do NOT imply real money is locked, refunded, or held yet.
+
+Because M3Jar is still simulated, language must clearly describe the product state without falsely representing actual custody of funds.
+
+PART 11 — CREATE / EDIT JAR FLOW
+
+Integrate cutoff configuration into Jar creation/settings.
+
+Requirements:
+
+- organizer sets or confirms cutoff
+- validate against target date
+- explain the meaning of cutoff
+- avoid allowing unsafe changes after the Jar is in a phase where changing it would invalidate member expectations
+
+If cutoff can be edited:
+- define when
+- determine whether agreement version must change
+- determine whether members must re-accept
+
+Enforce server-side.
+
+PART 12 — ACTIVITY LOGGING
+
+Add activity events for meaningful Phase 3 actions, such as:
+
+- cutoff configured/changed
+- Jar enters Commitment
+- agreement version changed
+- relevant reminder state if activity feed needs it
+
+Do not log every automated reminder if that would clutter the feed.
+
+PART 13 — TIME / TIMEZONE REVIEW
+
+Perform a focused time-handling audit.
+
+Requirements:
+
+- database timestamps interpreted consistently
+- cutoff comparisons use UTC server-side
+- user-facing dates display correctly in local time
+- no off-by-one-day behavior for date-only cutoff settings
+- monthly/twice-monthly schedules remain deterministic across month lengths
+- daylight-saving changes do not create duplicate/missing schedule events
+
+Add tests around boundary cases.
+
+PART 14 — AUTHORIZATION / SECURITY
+
+Verify:
+
+- only organizer can change cutoff
+- cutoff changes obey lifecycle restrictions
+- agreement state cannot be forged client-side
+- reminder internal endpoint remains protected
+- reminder deduplication cannot be bypassed by repeated job calls
+- members cannot mutate schedules/Jars after lifecycle rules forbid it
+- cancelled/removed/left users are excluded from reminder processing
+- reminder emails cannot be triggered to arbitrary addresses supplied by the caller
+
+PART 15 — TEST COVERAGE
+
+Add automated coverage for all new logic.
+
+API tests should include:
+
+- cutoff validation
+- lifecycle phase derivation/transition
+- agreement enforcement
+- agreement version re-acceptance
+- schedule upcoming/due/missed calculations
+- contribution satisfaction logic
+- reminder deduplication
+- repeated processor runs
+- cutoff reminder timing
+- email preference enforcement
+- reminder-email failure behavior
+- removed/left member exclusion
+- authorization on cutoff changes
+- timezone/boundary cases
+
+Mobile tests should cover:
+
+- cutoff setup validation
+- phase/cutoff display
+- agreement-required state
+- notification preference UI
+- reminder/notification rendering where relevant
+
+Run:
+
+- full API test suite
+- full mobile test suite
+- API typecheck
+- mobile typecheck
+- production build validation where possible without publishing
+
+No new typecheck errors.
+
+Do not fix unrelated historical typecheck failures in this phase unless required by touched files.
+
+PART 16 — DATABASE MIGRATIONS
+
+If schema changes are required:
+
+1. Add explicit numbered Drizzle migration(s).
+2. Use migrations as the source of truth.
+3. Do not use drizzle-kit push for production strategy.
+4. Verify on clean database.
+5. Verify against current development schema.
+6. Preserve all dev data.
+7. Do not touch the unpublished production DB.
+
+PART 17 — OUT OF SCOPE
+
+Do NOT implement yet:
+
+- Stripe
+- cards
+- ACH
+- Financial Connections
+- PaymentIntents
+- SetupIntents
+- real payment methods
+- real-money ledger
+- real deposits
+- real withdrawals
+- refunds
+- payouts
+- M3Jar fees
+- autopay execution
+- payment-provider webhooks
+- production scheduler configuration
+- push notifications
+- SecureStore TripJar-key migration
+- deployment/publishing
+
+PART 18 — CODE REVIEW
+
+After implementation:
+
+1. Inspect the complete diff.
+2. Perform a separate architecture/security review.
+3. Look specifically for:
+   - duplicate reminders
+   - timezone bugs
+   - agreement bypasses
+   - stale membership reminders
+   - lifecycle inconsistencies
+   - client-owned business rules
+4. Fix severe findings before committing.
+5. Do not include unrelated .replit, .agents/memory, or attached_assets changes.
+
+PART 19 — COMMIT
+
+If validation passes, create one commit:
+
+Commit title:
+Add M3Jar cutoff and reminder automation
+
+Commit body:
+- Add explicit cutoff and Jar phase rules
+- Enforce current agreement acceptance
+- Add canonical upcoming and missed contribution logic
+- Add idempotent reminder processing
+- Add contribution and cutoff reminder emails
+- Add email notification preferences
+- Surface cutoff and phase state in the app
+- Add automated coverage for lifecycle and reminder behavior
+
+Do NOT push.
+
+FINAL REPORT
+
+Return:
+
+1. Files changed
+2. Database/schema changes
+3. Migration details
+4. Cutoff model and exact semantics
+5. Jar phase model
+6. Agreement enforcement behavior
+7. Upcoming/missed contribution algorithm
+8. Reminder processor architecture
+9. Reminder deduplication strategy
+10. Reminder email implementation
+11. Notification-preference behavior
+12. Mobile/UI changes
+13. Timezone/boundary handling
+14. Activity changes
+15. Authorization/security review
+16. API tests/results
+17. Mobile tests/results
+18. Typecheck results and pre-existing errors
+19. Build result
+20. Code-review findings/fixes
+21. Remaining gaps before Phase 4
+22. Recommended eventual scheduler configuration
+23. Git commit hash
+24. Confirmation nothing was pushed
+25. Confirmation .replit/.agents/memory/attached_assets were excluded
+26. Confirmation no production deployment/database, Stripe, DNS, Resend configuration, secrets, or external services were changed
