@@ -12,6 +12,7 @@ import { useColors } from '@/hooks/useColors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   useGetInvitationByToken,
+  getGetInvitationByTokenQueryKey,
   useAcceptInvitation,
   useDeclineInvitation,
 } from '@workspace/api-client-react';
@@ -31,7 +32,7 @@ export default function InviteScreen() {
     data: invite,
     isLoading,
     isError,
-  } = useGetInvitationByToken(token!, { query: { enabled: !!token } });
+  } = useGetInvitationByToken(token!, { query: { queryKey: getGetInvitationByTokenQueryKey(token!), enabled: !!token } });
 
   const acceptMutation = useAcceptInvitation();
   const declineMutation = useDeclineInvitation();

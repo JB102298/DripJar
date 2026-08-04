@@ -6,7 +6,7 @@ import { useCreateJarContext } from '@/contexts/create-jar-context';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProgressBar } from '@/components/ProgressBar';
-import { CreateJarRequestCategory } from '@workspace/api-client-react/src/generated/api.schemas';
+import { CreateJarRequestCategory } from '@workspace/api-client-react';
 
 const CATEGORIES = [
   { id: 'Vacation', icon: 'sun', label: 'Vacation' },

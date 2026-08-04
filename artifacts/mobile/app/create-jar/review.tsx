@@ -6,7 +6,8 @@ import { useCreateJarContext } from '@/contexts/create-jar-context';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProgressBar } from '@/components/ProgressBar';
-import { useCreateJar, useQueryClient } from '@workspace/api-client-react';
+import { useCreateJar } from '@workspace/api-client-react';
+import { useQueryClient } from '@tanstack/react-query';
 
 export default function CreateJarStep8() {
   const colors = useColors();

@@ -22,6 +22,7 @@ import { useColors } from '@/hooks/useColors';
 import { CurrencyInput } from '@/components/CurrencyInput';
 import {
   useGetContributionSchedule,
+  getGetContributionScheduleQueryKey,
   useCreateContributionSchedule,
   useUpdateContributionSchedule,
 } from '@workspace/api-client-react';
@@ -49,7 +50,7 @@ export function ScheduleSetupSheet({ visible, jarId, onClose }: Props) {
   const queryClient = useQueryClient();
 
   const { data: existingSchedule, isLoading: loadingSchedule } = useGetContributionSchedule(jarId, {
-    query: { enabled: visible && !!jarId },
+    query: { queryKey: getGetContributionScheduleQueryKey(jarId), enabled: visible && !!jarId },
   });
 
   const { mutateAsync: createSchedule, isPending: creating } = useCreateContributionSchedule();

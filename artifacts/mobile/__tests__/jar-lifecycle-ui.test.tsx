@@ -93,6 +93,15 @@ vi.mock("@workspace/api-client-react", () => ({
   useRemoveJarMember: () => ({ mutateAsync: removeMutate }),
   useUpdateJar: () => ({ mutateAsync: updateMutate }),
   useCancelJar: () => ({ mutateAsync: cancelMutate }),
+  // queryKey helpers used by the component — return stable arrays so hooks stay enabled
+  getGetJarQueryKey: vi.fn((id: string) => ["jars", id]),
+  getGetJarHealthQueryKey: vi.fn((id: string) => ["jars", id, "health"]),
+  getListJarMembersQueryKey: vi.fn((id: string) => ["jars", id, "members"]),
+  getListMilestonesQueryKey: vi.fn((id: string) => ["jars", id, "milestones"]),
+  getListJarActivityQueryKey: vi.fn((id: string) => ["jars", id, "activity"]),
+  getListAgreementsQueryKey: vi.fn((id: string) => ["jars", id, "agreements"]),
+  getGetContributionScheduleQueryKey: vi.fn((id: string) => ["jars", id, "schedule"]),
+  getListJarInvitationsQueryKey: vi.fn((id: string) => ["jars", id, "invitations"]),
 }));
 
 vi.mock("@/hooks/useColors", () => ({

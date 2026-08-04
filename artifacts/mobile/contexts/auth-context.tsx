@@ -2,13 +2,13 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { setBaseUrl, setAuthTokenGetter } from '@workspace/api-client-react';
-import { useGetMe, useLogin, useRegister } from '@workspace/api-client-react';
+import { useGetMe, useLogin, useRegister, getGetMeQueryKey } from '@workspace/api-client-react';
 import type {
   User,
   Profile,
   LoginRequest,
   RegisterRequest,
-} from '@workspace/api-client-react/src/generated/api.schemas';
+} from '@workspace/api-client-react';
 
 // ─── SecureStore keys ────────────────────────────────────────────────────────
 
@@ -166,7 +166,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ── Me query ─────────────────────────────────────────────────────────────
 
   const { data: meData, isLoading: isMeLoading, refetch } = useGetMe({
-    query: { enabled: !!accessToken, retry: false },
+    query: { queryKey: getGetMeQueryKey(), enabled: !!accessToken, retry: false },
   });
 
   // ── Auth actions ─────────────────────────────────────────────────────────

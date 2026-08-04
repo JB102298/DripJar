@@ -6,7 +6,7 @@ import { useColors } from '@/hooks/useColors';
 import { ProgressBar } from './ProgressBar';
 import { JarHealthBadge } from './JarHealthBadge';
 import { useRouter } from 'expo-router';
-import type { JarSummary } from '@workspace/api-client-react/src/generated/api.schemas';
+import type { JarSummary } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
 
 interface JarCardProps {

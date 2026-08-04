@@ -4,7 +4,7 @@ import { useColors } from '@/hooks/useColors';
 import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { Tabs } from 'expo-router';
-import { useListNotifications } from '@workspace/api-client-react';
+import { useListNotifications, getListNotificationsQueryKey } from '@workspace/api-client-react';
 import { useAuth } from '@/contexts/auth-context';
 
 export default function TabLayout() {
@@ -13,7 +13,10 @@ export default function TabLayout() {
   const isWeb = Platform.OS === 'web';
   const { isAuthenticated } = useAuth();
 
-  const { data: notifications } = useListNotifications({ query: { enabled: isAuthenticated } });
+  const { data: notifications } = useListNotifications(
+    undefined,
+    { query: { queryKey: getListNotificationsQueryKey(), enabled: isAuthenticated } },
+  );
   
   const unreadCount = notifications?.filter(n => !n.isRead).length || 0;
 

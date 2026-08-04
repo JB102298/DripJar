@@ -2,18 +2,23 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, Platform } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useListJarActivity } from '@workspace/api-client-react';
+import { useListJarActivity, getListJarActivityQueryKey } from '@workspace/api-client-react';
 import { MemberAvatar } from '@/components/MemberAvatar';
 import { EmptyState } from '@/components/EmptyState';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
-import type { ActivityEvent } from '@workspace/api-client-react/src/generated/api.schemas';
+import type { ActivityEvent } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
 
 export default function ActivityScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
 
-  const { data: activityItems, isLoading, refetch, isRefetching } = useListJarActivity();
+  // Global activity tab has no jarId context — query disabled, shows empty state
+  const { data: activityItems, isLoading, refetch, isRefetching } = useListJarActivity(
+    '',
+    undefined,
+    { query: { queryKey: getListJarActivityQueryKey(''), enabled: false } },
+  );
 
   const getRelativeTime = (dateStr: string) => {
     const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });

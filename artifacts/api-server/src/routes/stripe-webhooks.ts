@@ -35,7 +35,7 @@ import {
   contributions,
   stripeWebhookEvents,
 } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getStripeClient } from "../lib/stripe.js";
 import {
   postContributionAccounting,
@@ -101,13 +101,7 @@ router.post("/webhooks/stripe", async (req, res) => {
     eventRowId = existingEvent.id;
     await db
       .update(stripeWebhookEvents)
-      .set({
-        attemptCount: db
-          .select({ c: stripeWebhookEvents.attemptCount })
-          .from(stripeWebhookEvents)
-          .where(eq(stripeWebhookEvents.id, existingEvent.id))
-          .then(([r]) => (r?.c ?? 0) + 1) as unknown as number,
-      })
+      .set({ attemptCount: sql`${stripeWebhookEvents.attemptCount} + 1` })
       .where(eq(stripeWebhookEvents.id, existingEvent.id));
   } else {
     const [inserted] = await db
@@ -119,9 +113,10 @@ router.post("/webhooks/stripe", async (req, res) => {
         processingStatus: "received",
         attemptCount: 1,
       })
+      .onConflictDoNothing()
       .returning({ id: stripeWebhookEvents.id });
     if (!inserted) {
-      // Race: another worker inserted first — re-read
+      // Race: concurrent worker inserted first (onConflictDoNothing returns nothing) — re-read
       const [raceRow] = await db
         .select({ id: stripeWebhookEvents.id, processingStatus: stripeWebhookEvents.processingStatus })
         .from(stripeWebhookEvents)
@@ -282,7 +277,12 @@ async function handlePaymentIntentSucceeded(
       .for("update");
 
     if (locked?.ledgerPostingStatus === "posted") {
-      // Concurrent delivery already won — this is safe to skip
+      // Concurrent delivery already won the lock.
+      // Mark this event processed too so no late "processing" update can win.
+      await txDb
+        .update(stripeWebhookEvents)
+        .set({ processingStatus: "processed", processedAt: new Date() })
+        .where(eq(stripeWebhookEvents.id, eventRowId));
       return;
     }
 

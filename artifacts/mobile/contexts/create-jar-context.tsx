@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState } from 'react';
-import type { CreateJarRequest } from '@workspace/api-client-react/src/generated/api.schemas';
+import type { CreateJarRequest } from '@workspace/api-client-react';
 
 type CreateJarState = Partial<CreateJarRequest> & {
   milestones?: { name: string; targetAmountCents: number }[];
@@ -19,7 +19,7 @@ export function CreateJarProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<CreateJarState>({});
 
   const updateState = (updates: Partial<CreateJarState>) => {
-    setState((prev) => ({ ...prev, ...updates }));
+    setState((prev: CreateJarState) => ({ ...prev, ...updates }));
   };
 
   const resetState = () => setState({});

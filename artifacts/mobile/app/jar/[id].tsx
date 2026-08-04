@@ -16,15 +16,15 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { 
-  useGetJar, 
-  useGetJarHealth,
-  useListJarMembers,
-  useListMilestones,
-  useListJarActivity,
-  useListAgreements,
-  useGetContributionSchedule,
+  useGetJar, getGetJarQueryKey,
+  useGetJarHealth, getGetJarHealthQueryKey,
+  useListJarMembers, getListJarMembersQueryKey,
+  useListMilestones, getListMilestonesQueryKey,
+  useListJarActivity, getListJarActivityQueryKey,
+  useListAgreements, getListAgreementsQueryKey,
+  useGetContributionSchedule, getGetContributionScheduleQueryKey,
   useCreateInvitation,
-  useListJarInvitations,
+  useListJarInvitations, getListJarInvitationsQueryKey,
   useRevokeInvitation,
   useLeaveJar,
   useRemoveJarMember,
@@ -61,13 +61,13 @@ export default function JarDetailScreen() {
   const [inviteSending, setInviteSending] = useState(false);
   const [inviteError, setInviteError] = useState('');
 
-  const { data: jar, isLoading: jarLoading, refetch: refetchJar } = useGetJar(id!, { query: { enabled: !!id } });
-  const { data: health, refetch: refetchHealth } = useGetJarHealth(id!, { query: { enabled: !!id } });
-  const { data: members, refetch: refetchMembers } = useListJarMembers(id!, { query: { enabled: !!id && activeTab === 'Members' } });
-  const { data: milestones, refetch: refetchMilestones } = useListMilestones(id!, { query: { enabled: !!id && activeTab === 'Milestones' } });
-  const { data: activity, refetch: refetchActivity } = useListJarActivity(id!, undefined, { query: { enabled: !!id && activeTab === 'Activity' } });
-  const { data: agreements, refetch: refetchAgreements } = useListAgreements(id!, { query: { enabled: !!id && activeTab === 'Agreements' } });
-  const { data: mySchedule, refetch: refetchSchedule } = useGetContributionSchedule(id!, { query: { enabled: !!id && activeTab === 'Overview' } });
+  const { data: jar, isLoading: jarLoading, refetch: refetchJar } = useGetJar(id!, { query: { queryKey: getGetJarQueryKey(id!), enabled: !!id } });
+  const { data: health, refetch: refetchHealth } = useGetJarHealth(id!, { query: { queryKey: getGetJarHealthQueryKey(id!), enabled: !!id } });
+  const { data: members, refetch: refetchMembers } = useListJarMembers(id!, { query: { queryKey: getListJarMembersQueryKey(id!), enabled: !!id && activeTab === 'Members' } });
+  const { data: milestones, refetch: refetchMilestones } = useListMilestones(id!, { query: { queryKey: getListMilestonesQueryKey(id!), enabled: !!id && activeTab === 'Milestones' } });
+  const { data: activity, refetch: refetchActivity } = useListJarActivity(id!, undefined, { query: { queryKey: getListJarActivityQueryKey(id!), enabled: !!id && activeTab === 'Activity' } });
+  const { data: agreements, refetch: refetchAgreements } = useListAgreements(id!, { query: { queryKey: getListAgreementsQueryKey(id!), enabled: !!id && activeTab === 'Agreements' } });
+  const { data: mySchedule, refetch: refetchSchedule } = useGetContributionSchedule(id!, { query: { queryKey: getGetContributionScheduleQueryKey(id!), enabled: !!id && activeTab === 'Overview' } });
 
   const createInvitationMutation = useCreateInvitation();
   const leaveJarMutation = useLeaveJar();
@@ -77,10 +77,8 @@ export default function JarDetailScreen() {
   const cancelJarMutation = useCancelJar();
 
   const isOrganizerUser = jar?.organizerId === user?.id;
-  // Cast matches the queryKey-less options shape used throughout this app
-  // (see pre-existing useGetJar/useListJarMembers calls above).
   const { data: sentInvitations, refetch: refetchInvitations } = useListJarInvitations(id!, {
-    query: { enabled: !!id && isOrganizerUser && activeTab === 'Settings' } as never,
+    query: { queryKey: getListJarInvitationsQueryKey(id!), enabled: !!id && isOrganizerUser && activeTab === 'Settings' },
   });
 
   // Settings tab edit state
@@ -737,7 +735,7 @@ export default function JarDetailScreen() {
   };
 
   if (jarLoading && !jar) {
-    return <SkeletonLoader height="100%" />;
+    return <SkeletonLoader style={{ flex: 1 }} />;
   }
 
   if (!jar) return <EmptyState icon="alert-circle" title="Jar not found" />;

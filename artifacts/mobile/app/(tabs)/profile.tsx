@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Platform, Switch } from 'react-native';
 
 type PrefKey = 'emailPrefContributionReminders' | 'emailPrefCutoffReminders' | 'emailPrefLifecycle';
-const PREF_ITEMS: Array<{ key: PrefKey; label: string; sub: string; icon: string }> = [
+const PREF_ITEMS: Array<{ key: PrefKey; label: string; sub: string; icon: React.ComponentProps<typeof Feather>['name'] }> = [
   { key: 'emailPrefContributionReminders', label: 'Contribution Reminders', sub: 'Due & missed contribution alerts', icon: 'repeat' },
   { key: 'emailPrefCutoffReminders', label: 'Cutoff Reminders', sub: 'Approaching commitment phase', icon: 'calendar' },
   { key: 'emailPrefLifecycle', label: 'Lifecycle Notifications', sub: 'Jar status changes & milestones', icon: 'bell' },

@@ -23,7 +23,7 @@ export default function RegisterScreen() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const getPasswordStrength = () => {
+  const getPasswordStrength = (): { width: `${number}%`; color: string } => {
     if (password.length === 0) return { width: '0%', color: colors.muted };
     if (password.length < 6) return { width: '33%', color: colors.destructive };
     if (password.length < 10) return { width: '66%', color: colors.warning };

@@ -48,6 +48,7 @@ vi.mock("@workspace/api-client-react", () => ({
   useGetMe: vi.fn(() => ({ data: undefined, isLoading: false, refetch: vi.fn() })),
   useLogin: vi.fn(() => ({})),
   useRegister: vi.fn(() => ({})),
+  getGetMeQueryKey: vi.fn(() => ["me"]),
 }));
 
 // (auth-context's `import type … from "…/api.schemas"` is type-only and

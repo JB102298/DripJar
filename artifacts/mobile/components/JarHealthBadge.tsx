@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useColors } from '@/hooks/useColors';
-import { JarHealthStatus } from '@workspace/api-client-react/src/generated/api.schemas';
+import { JarHealthStatus } from '@workspace/api-client-react';
 
 interface JarHealthBadgeProps {
   status: typeof JarHealthStatus[keyof typeof JarHealthStatus];

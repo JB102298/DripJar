@@ -1,0 +1,535 @@
+Proceed with a focused DripJar Phase 4B hardening pass.
+
+DO NOT start Phase 4C.
+DO NOT start Tasks #30 or #31.
+DO NOT enable live Stripe.
+DO NOT add product features.
+
+CURRENT EXPECTED BASELINE
+
+Branch:
+main
+
+Expected HEAD / origin/main:
+abde5be
+
+Phase 4B implementation already complete:
+- Stripe TEST MODE only
+- 356/356 API tests
+- 54/54 Phase 4B tests
+- 45/45 mobile tests
+- API typecheck clean
+- lib/db typecheck clean
+- API build clean
+- migrations 0000 → 0011 reproducible
+
+THIS HARDENING PASS HAS EXACTLY TWO GOALS:
+
+1. Make the mobile TypeScript baseline completely clean.
+2. Add a real-PostgreSQL concurrent Stripe webhook stress test proving exactly-once financial posting.
+
+Do not change business behavior.
+
+-----------------------------------
+PART 1 — READ-ONLY BASELINE CHECK
+-----------------------------------
+
+Before editing:
+
+1. Verify branch = main.
+2. Verify HEAD = abde5be.
+3. Verify origin/main = abde5be.
+4. Verify working-tree status.
+5. Record the current mobile TypeScript errors exactly.
+
+Expected pre-existing mobile TypeScript issues from the Phase 4B report include:
+
+- components/JarCard.tsx
+  deep/path import from:
+  @workspace/api-client-react/src/generated/api.schemas
+
+- components/JarHealthBadge.tsx
+  same generated-client deep import issue
+
+- components/MemberAvatar.tsx
+  same generated-client deep import issue
+
+- contexts/auth-context.tsx
+  same generated-client deep import issue
+
+- contexts/create-jar-context.tsx
+  same generated-client deep import issue
+
+- components/ScheduleSetupSheet.tsx
+  queryKey / UseQueryOptions typing issue
+
+- contexts/auth-context.tsx
+  queryKey typing issue
+
+- contexts/create-jar-context.tsx
+  implicit any issue
+
+Do not assume the list is complete.
+Run the actual mobile typecheck and use the compiler output as authority.
+
+-----------------------------------
+PART 2 — CLEAN MOBILE TYPESCRIPT
+-----------------------------------
+
+Fix the underlying TypeScript issues cleanly.
+
+Requirements:
+
+A. Generated API imports
+
+Do NOT import from internal implementation paths such as:
+
+@workspace/api-client-react/src/generated/...
+
+Prefer the package's public exports.
+
+If required types are not currently exported from:
+
+@workspace/api-client-react
+
+update the package's public index/export surface cleanly.
+
+Do not duplicate generated types manually.
+
+Do not create fragile relative imports into generated files.
+
+B. TanStack Query typing issues
+
+Fix query configuration using the actual generated hook/query-option signatures and installed TanStack Query version.
+
+Do not:
+- remove required query keys
+- cast to any
+- use ts-ignore
+- suppress the compiler
+- weaken global TypeScript settings
+
+Preserve runtime query behavior.
+
+C. Implicit-any issues
+
+Add proper types based on actual API/domain objects.
+
+Do not use `any` merely to silence the error.
+
+D. Phase 4B contribution screen
+
+Reconfirm:
+
+artifacts/mobile/app/contribution/[jarId].tsx
+
+still has zero TypeScript errors after any public API client export changes.
+
+GOAL:
+
+Mobile typecheck must finish with:
+
+0 errors.
+
+-----------------------------------
+PART 3 — REAL-DB CONCURRENT WEBHOOK STRESS TEST
+-----------------------------------
+
+Implement the proposed Phase 4B concurrency hardening test.
+
+This test must exercise a REAL PostgreSQL test/dev database.
+
+Do NOT mock the database transaction layer.
+
+Provider/network calls may be safely stubbed where necessary so no external Stripe call is required.
+
+The goal is specifically to prove DripJar's database-backed exactly-once behavior under concurrent webhook delivery.
+
+Create a dedicated Phase 4B concurrency/stress test file or clearly isolated test block.
+
+SETUP
+
+Create real test records for:
+
+- user
+- profile
+- jar
+- jar member
+- financial_transaction
+- providerTransactionId
+- Stripe-test payment state
+
+The financial transaction must represent a valid successful TEST-MODE payment eligible for ledger posting.
+
+Generate a valid Stripe test webhook payload/signature using Stripe's supported test-signature utilities or the safest equivalent.
+
+Do not bypass normal webhook signature verification merely to make the stress test easier.
+
+-----------------------------------
+PART 4 — CONCURRENT DUPLICATE DELIVERY
+-----------------------------------
+
+Send the SAME valid:
+
+payment_intent.succeeded
+
+event concurrently many times against the actual webhook path.
+
+Minimum:
+20 concurrent deliveries.
+
+Preferred:
+50 if runtime remains reasonable.
+
+All requests must carry the SAME Stripe event ID and same PaymentIntent.
+
+Exercise:
+
+POST /api/webhooks/stripe
+
+through the real Express route/middleware stack if feasible.
+
+This should test together:
+
+- express.raw webhook body handling
+- Stripe signature verification
+- stripe_webhook_events UNIQUE event-ID constraint
+- webhook processing-state logic
+- financial_transaction locking
+- ledgerPostingStatus exactly-once guard
+- contribution insertion
+- double-entry ledger posting
+
+-----------------------------------
+PART 5 — ASSERT EXACTLY-ONCE RESULTS
+-----------------------------------
+
+After all concurrent requests settle, query the REAL PostgreSQL database directly.
+
+Assert:
+
+1. Exactly ONE stripe_webhook_events row exists for the Stripe event ID.
+
+2. That event ends in the correct processed state.
+
+3. Exactly ONE Stripe-backed contribution record exists for the financial transaction.
+
+4. Exactly ONE contribution financial posting exists for the financialTransactionId.
+
+5. Exactly ONE ledger transaction represents the successful contribution.
+
+6. Ledger entries are balanced:
+   total debits === total credits.
+
+7. Refundable principal increased exactly once.
+
+8. DripJar fee revenue increased exactly once.
+
+9. Processing-fee clearing increased exactly once.
+
+10. Jar funded principal increased by exactly the principal amount.
+
+11. Member funded principal increased by exactly the principal amount.
+
+12. No duplicate DripJar revenue exists.
+
+13. No duplicate processing-fee liability exists.
+
+14. No transaction/ledger row is left in an impossible intermediate state.
+
+15. All concurrent HTTP responses are acceptable idempotent results:
+    no request should cause a second financial posting.
+
+Do not merely assert HTTP 200s.
+Database financial state is the authority.
+
+-----------------------------------
+PART 6 — SECOND CONCURRENCY SCENARIO
+-----------------------------------
+
+Also test two DIFFERENT Stripe webhook event IDs representing duplicate delivery/state notification for the SAME already-succeeded PaymentIntent.
+
+Example:
+
+event A:
+evt_test_success_a
+
+event B:
+evt_test_success_b
+
+Both reference the same providerTransactionId / PaymentIntent and both indicate succeeded.
+
+Deliver them concurrently.
+
+Expected:
+
+- two durable Stripe event records may exist because Stripe event IDs differ
+- but only ONE financial contribution/ledger posting may exist
+- second event must observe that ledgerPostingStatus is already posted and finish idempotently
+- principal and revenue remain exactly once
+
+This protects against relying solely on Stripe event-ID deduplication.
+
+-----------------------------------
+PART 7 — OPTIONAL HIGH-VALUE RACE
+-----------------------------------
+
+If straightforward with the current implementation, also test:
+
+payment_intent.processing
+and
+payment_intent.succeeded
+
+arriving concurrently for the same PaymentIntent.
+
+Required final financial state:
+
+- succeeded
+- ledger posted exactly once
+- principal credited exactly once
+
+The stale `processing` event must not regress a succeeded transaction back to processing.
+
+If current code would allow state regression, treat that as a real Phase 4B correctness bug and fix it.
+
+If this scenario requires significant redesign, document it rather than expanding scope without review.
+
+-----------------------------------
+PART 8 — DO NOT ALTER THESE RULES
+-----------------------------------
+
+Do not change:
+
+- 3% DripJar fee
+- provider fee gross-up algorithm
+- $200 example results
+- Test Mode guards
+- quote TTL
+- contributor ownership
+- PaymentIntent retry semantics
+- webhook signature authentication
+- 64kb webhook limit
+- delayed ACH behavior
+- ledger account structure
+- fund_destination_type
+- commitment behavior
+- refund behavior
+- Jar Goals
+- schedules/business payment limits
+
+Do not implement Task #31.
+
+A member's ability to Drip ahead of schedule is a separate product decision.
+
+-----------------------------------
+PART 9 — SECURITY REVIEW
+-----------------------------------
+
+Review the hardening changes for:
+
+- use of any / ts-ignore / type suppression
+- accidental public exposure of generated implementation paths
+- webhook signature bypass in tests
+- mocked DB hiding concurrency behavior
+- race conditions around stripe_webhook_events
+- race conditions around financial_transactions
+- stale provider-state regression
+- duplicate contributions
+- duplicate ledger transactions
+- duplicate DripJar revenue
+- database deadlocks
+- serialization/unique-constraint errors incorrectly surfaced as 500s
+- test data leaking into unrelated test suites
+
+Fix legitimate Phase 4B issues found.
+
+-----------------------------------
+PART 10 — VALIDATION
+-----------------------------------
+
+Run:
+
+1. Mobile typecheck
+   Expected: ZERO errors
+
+2. Mobile tests
+   Expected: 100% pass
+
+3. New real-DB webhook concurrency stress suite
+   Run at least 5 consecutive times
+
+4. Phase 4B focused suite
+   Expected: 100% pass
+
+5. Full API suite — run 1
+   Expected: 100% pass
+
+6. Full API suite — run 2
+   Expected: 100% pass
+
+7. API typecheck
+   Expected: ZERO errors
+
+8. lib/db typecheck
+   Expected: ZERO errors
+
+9. API production build
+   Expected: pass
+
+10. Fresh migration chain
+    0000 → latest
+    Expected: pass
+
+If any full-suite test flakes or fails:
+STOP and investigate.
+Do not classify it as pre-existing without proving it.
+
+-----------------------------------
+PART 11 — COMMIT
+-----------------------------------
+
+Create ONE application commit.
+
+Title:
+
+Harden Stripe webhook concurrency and mobile types
+
+Suggested body:
+
+- Restore zero-error mobile TypeScript baseline
+- Replace generated-client deep imports with public exports
+- Correct TanStack Query typings without suppression
+- Add real-PostgreSQL concurrent Stripe webhook stress coverage
+- Verify exactly-once contribution and ledger posting under duplicate delivery
+- Protect succeeded payment state from duplicate financial posting
+
+Do NOT create a separate agent-memory commit.
+
+Do NOT commit:
+- .agents/memory/
+- unrelated .replit changes
+- attached_assets/
+- old report PDFs
+
+If Replit/platform changes memory files automatically, leave them uncommitted.
+
+After ALL validation passes:
+
+Push through the normal Replit GitHub integration.
+
+Verify:
+local HEAD === origin/main.
+
+-----------------------------------
+PART 12 — OUT OF SCOPE
+-----------------------------------
+
+Do NOT:
+
+- start Phase 4C
+- implement refunds
+- expose Commit My Funds
+- start Task #30
+- use live Stripe keys
+- start Task #31
+- limit Drips to scheduled amount
+- add Connect
+- add payouts
+- add Issuing
+- add DripJar Card
+- add Jar Goals
+- add AutoDrip
+- deploy/publish
+- touch production database
+- modify DNS
+- modify Resend
+- modify Cloudflare
+- modify production secrets
+
+-----------------------------------
+PART 13 — PDF — ABSOLUTE FINAL ACTION
+-----------------------------------
+
+The PDF must be the LAST action of the entire session.
+
+Do NOT generate it:
+- before tests
+- before the stress test
+- before security review
+- before commit
+- before push
+- before origin/main verification
+- before final git status
+
+After EVERYTHING is complete, create:
+
+phase4b-hardening-final-report.pdf
+
+The PDF must contain:
+
+- starting HEAD
+- final HEAD
+- files changed
+- every original mobile TypeScript error
+- exact fix for each category
+- proof mobile typecheck = 0 errors
+- concurrency test architecture
+- whether DB was mocked (must be NO)
+- concurrent request count
+- Stripe signature-generation method
+- same-event-ID stress results
+- different-event-ID/same-PI stress results
+- processing-vs-succeeded race result if tested
+- exact contribution row count
+- exact ledger transaction count
+- ledger debit/credit totals
+- member principal result
+- Jar principal result
+- DripJar revenue result
+- processing-fee result
+- 5 repeated stress-test results
+- Phase 4B focused test results
+- both full API test results
+- mobile test results
+- all typecheck results
+- build result
+- migration result
+- security review
+- commit hash
+- push result
+- origin/main
+- working-tree status
+- confirmation no live Stripe/provider activity occurred
+- confirmation Tasks #30/#31 were not started
+- confirmation Phase 4C was not started
+
+ABSOLUTE FINAL-SEQUENCE RULE:
+
+After generating the PDF:
+- do not modify files
+- do not run tests
+- do not update agent memory
+- do not commit
+- do not push
+- do not perform any other project action
+
+The PDF must describe the true final state.
+
+In Replit chat return ONLY:
+
+PASS / FAIL
+Final commit hash
+origin/main
+Mobile typecheck
+Mobile tests
+Webhook stress tests
+Phase 4B focused tests
+API run 1
+API run 2
+API typecheck
+Build
+Migration chain
+Blockers
+PDF filename/path
+
+Do not paste the report into chat.

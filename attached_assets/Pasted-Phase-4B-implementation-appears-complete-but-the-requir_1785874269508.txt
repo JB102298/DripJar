@@ -1,0 +1,368 @@
+Phase 4B implementation appears complete, but the required final verification/reporting sequence is incomplete.
+
+DO NOT start Tasks #30, #31, or #32.
+DO NOT start Phase 4C.
+DO NOT add or change features unless a verification step proves something is actually incorrect.
+
+This is a FINALIZATION / VERIFICATION pass for Task #29 only.
+
+IMPORTANT:
+The phase4b-final-report.pdf must be the ABSOLUTE LAST action.
+
+FIRST verify the final implementation state.
+
+1. GIT / PUSH STATE
+
+Report and verify:
+
+- current branch
+- current local HEAD hash + subject
+- origin/main hash + subject
+- whether local HEAD === origin/main
+- whether the Phase 4B commit was successfully pushed after the earlier timeout
+- git status
+- exact Phase 4B files included in the commit
+
+Do not include:
+- attached_assets/
+- prior PDFs
+- unrelated .agents/
+- unrelated .replit changes
+
+If the Phase 4B commit has NOT actually been pushed:
+- use the normal Replit GitHub integration
+- push it
+- verify origin/main afterward
+
+Do not amend/rebase unless absolutely required.
+
+2. MIGRATION AUTHORITY — IMPORTANT
+
+The implementation session said:
+
+"DB applied directly — drizzle-kit has no state tracking in this project"
+
+Audit this carefully.
+
+Verify that every Phase 4B schema change exists in committed migration SQL files and is registered correctly in:
+
+lib/db/drizzle/meta/_journal.json
+
+The database must NOT depend on manually-applied SQL that is absent from the migration history.
+
+Verify migration files include all Phase 4B changes, including:
+
+- profiles.stripe_customer_id
+- unique constraint/index as intended
+- financial_transactions.quote_expires_at
+- financial_transactions.payment_method_category
+- providerStatus constraint expansion for:
+  quoted
+  provider_created
+  processing
+  succeeded
+  failed
+  cancelled
+  plus existing valid statuses
+- stripe_webhook_events table
+- indexes / unique stripeEventId constraint
+- all FKs and status constraints
+
+Then create/use a CLEAN disposable test database/schema and run the ENTIRE committed migration chain:
+
+0000 → latest Phase 4B migration
+
+Do NOT manually patch that clean database.
+
+The committed migrations alone must produce the correct Phase 4B schema.
+
+Verify afterward using information_schema / PostgreSQL metadata.
+
+If the fresh migration chain fails, fix the migration files before declaring Phase 4B complete.
+
+Do NOT touch production DB.
+
+3. WEBHOOK ROUTE / RAW BODY
+
+Confirm the exact externally-mounted webhook URL.
+
+The intended endpoint is:
+
+POST /api/webhooks/stripe
+
+If the route file itself uses `/webhooks/stripe` but is mounted beneath `/api`, document that clearly.
+
+Verify:
+
+- Stripe webhook route is mounted BEFORE general express.json parsing
+- express.raw({ type: "application/json", limit: "64kb" }) is actually applied
+- webhook handler receives Buffer/raw bytes
+- global JSON middleware does not parse the webhook afterward before signature verification
+- no JWT auth is applied to the webhook
+- stripe-signature is required
+- invalid/missing signature cannot create webhook event records or financial state changes
+
+Do not change a correct implementation merely because file-level route naming differs from final mounted URL.
+
+4. PAYMENT / LEDGER INVARIANTS
+
+Re-verify:
+
+A pending or provider_created PaymentIntent:
+- credits $0 Jar principal
+
+A processing PaymentIntent:
+- credits $0 Jar principal
+
+payment_intent.payment_failed:
+- credits $0
+
+payment_intent.canceled:
+- credits $0
+
+Only verified payment_intent.succeeded:
+- may post contribution accounting
+
+Successful posting must create exactly one financial effect for the financialTransactionId.
+
+Verify:
+- principal
+- DripJar fee
+- processing estimate
+remain separate
+
+Duplicate webhook:
+- no double principal
+- no double DripJar revenue
+- no duplicate contribution record
+- no duplicate ledger posting
+
+5. FEE GROSS-UP
+
+Verify final implementation produces:
+
+$200 principal
+$6 DripJar fee
+base = $206.00
+
+Card:
+processingFeeEstimatedCents = 646
+totalChargeCents = 21246
+
+ACH:
+processingFeeEstimatedCents = 166
+totalChargeCents = 20766
+
+Verify minimality invariant:
+
+providerFee(base + P) <= P
+
+and when P > 0:
+
+providerFee(base + P - 1) > P - 1
+
+Verify ACH cap behavior.
+
+6. STRIPE TEST-MODE SAFETY
+
+Verify API:
+
+sk_test_ → allowed
+sk_live_ → rejected
+missing/invalid key → safe configuration failure when Stripe operation is invoked
+
+Verify mobile:
+
+pk_test_ → allowed
+pk_live_ → rejected
+missing/invalid key → payment UI cannot initialize
+
+Confirm:
+- no live-mode bypass
+- no Stripe secret values logged
+- no webhook secret exposed
+- no production Stripe calls were made
+
+7. CUSTOMER IDEMPOTENCY
+
+Verify getOrCreateStripeCustomer uses:
+
+- DB ownership/state check
+- SELECT FOR UPDATE or equivalent concurrency protection
+- stable Stripe idempotency key based on internal user identity
+
+Verify test coverage for:
+
+Stripe Customer creation succeeds
+→ simulated DB persistence failure
+→ retry
+→ same Stripe Customer reused rather than creating another authoritative customer
+
+8. PAYMENTINTENT IDEMPOTENCY
+
+Verify:
+
+same financialTransactionId + first request
+→ one PaymentIntent
+
+harmless retry while provider_created/processing
+→ existing PaymentIntent returned
+
+two simultaneous requests
+→ one authoritative PaymentIntent
+
+terminal:
+succeeded / failed / cancelled
+→ same quote cannot silently generate another PaymentIntent
+
+9. CLIENT AUTHORITY
+
+Verify the mobile/client cannot authoritatively provide:
+
+- Stripe Customer ID
+- PaymentIntent ID
+- principal amount after quote
+- DripJar fee
+- processing fee
+- total
+- currency
+- Jar/member ownership
+- provider metadata
+
+Server must reload authoritative financial_transaction state.
+
+Confirm mobile polls using internal:
+
+financialTransactionId
+
+not Stripe PaymentIntent ID.
+
+10. ACTUAL PROCESSING FEE
+
+Document what Phase 4B ultimately does with:
+
+processingFeeActualCents
+
+If Test Mode reliably returns the BalanceTransaction fee:
+- explain when/how it is stored
+
+If it does not:
+- confirm it remains NULL
+- do not fabricate a value
+
+Original processingFeeEstimatedCents must never be overwritten.
+
+11. FINAL TEST VALIDATION
+
+Run the Phase 4B focused suite.
+
+Then run:
+
+- FULL API suite — run 1
+- FULL API suite — run 2
+- Mobile suite
+- API typecheck
+- Mobile typecheck
+- lib/db typecheck
+- API production build
+- fresh migration chain from 0000 → latest
+
+Because a Phase 3 dedup test failed during one earlier full-suite execution, the final report must explicitly record:
+
+- which earlier run failed
+- why it was classified as known/inter-test state flakiness
+- results of the FINAL two full API runs
+
+For Phase 4B final approval I want the final verification runs to be green.
+
+If the Phase 3 test fails again during final validation:
+STOP and investigate rather than hiding it.
+
+12. SECURITY REVIEW
+
+Re-run the final review covering:
+
+- webhook spoofing
+- raw-body corruption
+- oversized webhook body
+- live-key accidental use
+- amount manipulation
+- provider object substitution
+- metadata-only trust
+- duplicate webhook delivery
+- concurrent duplicate webhook delivery
+- duplicate PaymentIntent creation
+- failed payment credited
+- processing ACH credited prematurely
+- double ledger posting
+- double DripJar revenue
+- customer duplicate creation
+- client-secret exposure
+- PII/payment credential logging
+- DB failure + webhook retry
+- migration reproducibility
+
+Fix severe findings before final approval.
+
+13. FOLLOW-UP TASKS
+
+Do NOT execute #30, #31, or #32.
+
+In the report only, list them as proposed follow-ups.
+
+Specifically flag that:
+
+#30 live Stripe keys / production enablement is NOT approved and must NOT occur yet.
+
+We are remaining in Stripe TEST MODE.
+
+14. PDF — ABSOLUTE FINAL ACTION
+
+Only after:
+
+- git verification
+- push verification
+- migration reproducibility verification
+- webhook verification
+- financial invariant review
+- tests
+- typechecks
+- build
+- security review
+- final origin/main verification
+- final working-tree verification
+
+are ALL complete:
+
+Create:
+
+phase4b-final-report.pdf
+
+THIS MUST BE THE FINAL ACTION OF THE SESSION.
+
+The PDF must include the COMPLETE results from every section above.
+
+Do not create or update memory AFTER generating the PDF.
+Do not run additional tests AFTER generating the PDF.
+Do not change files AFTER generating the PDF.
+Do not commit anything AFTER generating the PDF.
+
+The PDF must represent the actual final state.
+
+In Replit chat return ONLY:
+
+PASS / FAIL
+Final commit hash
+origin/main
+API tests run 1
+API tests run 2
+Phase 4B focused tests
+Mobile tests
+API typecheck
+Mobile typecheck
+Build
+Fresh migration chain
+Blockers
+PDF filename/path
+
+Do not paste the report into chat.

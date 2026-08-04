@@ -1,12 +1,13 @@
 import React from 'react';
-import { View, TextInput, StyleSheet, TextInputProps } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TextInputProps, StyleProp, ViewStyle } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 
-interface CurrencyInputProps extends Omit<TextInputProps, 'onChangeText' | 'value'> {
+interface CurrencyInputProps extends Omit<TextInputProps, 'onChangeText' | 'value' | 'style'> {
   value: number; // in cents
   onChangeCents: (cents: number) => void;
   label?: string;
   error?: string;
+  style?: StyleProp<ViewStyle>;
 }
 
 export function CurrencyInput({ value, onChangeCents, label, error, style, ...props }: CurrencyInputProps) {

@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import { useColors } from '@/hooks/useColors';
-import { JarMemberHealthStatus } from '@workspace/api-client-react/src/generated/api.schemas';
+import { JarMemberHealthStatus } from '@workspace/api-client-react';
 
 interface MemberAvatarProps {
   displayName: string;

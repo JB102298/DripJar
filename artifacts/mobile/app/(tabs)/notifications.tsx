@@ -7,7 +7,7 @@ import { useListNotifications } from '@workspace/api-client-react';
 import { EmptyState } from '@/components/EmptyState';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
 import { Feather } from '@expo/vector-icons';
-import type { Notification } from '@workspace/api-client-react/src/generated/api.schemas';
+import type { Notification } from '@workspace/api-client-react';
 
 export default function NotificationsScreen() {
   const colors = useColors();

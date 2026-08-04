@@ -27,3 +27,10 @@ uri = "file://baseline-cleanup-final-report.pdf"
 type = "pdf"
 title = "DripJar Baseline Cleanup — Final Report"
 description = "@types/pg fix, reminder test isolation, 10-run stress results, full suite validation, commit/push verification."
+
+[[outputs]]
+id = "aU3hDL22sb4yyZZrKIfzR"
+uri = "file://phase4b-final-report.pdf"
+type = "pdf"
+title = "Phase 4B Final Report"
+description = "Finalization & verification report for the Stripe test-mode Drip payment flow."
