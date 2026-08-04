@@ -5,15 +5,23 @@
  * fee components — they supply only the intended principal, and all fees
  * are derived here.
  *
- * Rounding: integer half-up (Math.round on cents arithmetic).
+ * Rounding: explicit integer half-up via
+ *   Math.floor((principalCents * rateBps + 5_000) / 10_000)
+ *
+ * This is equivalent to "round half away from zero" for positive values and
+ * avoids any floating-point intermediate representation.  Adding 5_000 before
+ * the integer division by 10_000 guarantees that the exact midpoint (fractional
+ * fee of exactly 0.5 cents) rounds UP to the next whole cent.
  *
  * Examples:
- *   computeDripJarFee(20000) → 600   ($200.00 → $6.00)
- *   computeDripJarFee(10000) → 300   ($100.00 → $3.00)
- *   computeDripJarFee(100)   → 3     ($1.00   → $0.03)
- *   computeDripJarFee(34)    → 1     ($0.34   → $0.01, rounds up from 1.02)
- *   computeDripJarFee(16)    → 0     ($0.16   → $0.00, rounds down from 0.48)
- *   computeDripJarFee(17)    → 1     ($0.17   → $0.01, rounds up from 0.51)
+ *   computeDripJarFee(20000) → 600   ($200.00 → $6.00,  exact)
+ *   computeDripJarFee(10000) → 300   ($100.00 → $3.00,  exact)
+ *   computeDripJarFee(100)   → 3     ($1.00   → $0.03,  exact)
+ *   computeDripJarFee(50)    → 2     ($0.50   → $0.02,  midpoint rounds up)
+ *   computeDripJarFee(150)   → 5     ($1.50   → $0.05,  midpoint rounds up)
+ *   computeDripJarFee(34)    → 1     ($0.34   → $0.01,  rounds down from 1.02)
+ *   computeDripJarFee(16)    → 0     ($0.16   → $0.00,  rounds down from 0.48)
+ *   computeDripJarFee(17)    → 1     ($0.17   → $0.01,  rounds up  from 0.51)
  */
 
 /** Current DripJar service fee rate in basis points (300 bps = 3%). */
@@ -41,7 +49,12 @@ export interface FinancialQuote {
 /**
  * Compute the DripJar service fee for a given principal.
  *
- * Formula: Math.round(principal × rateBps / 10_000)
+ * Formula: Math.floor((principal × rateBps + 5_000) / 10_000)
+ *
+ * Explicit half-up integer rounding: adding 5_000 (half of 10_000) before the
+ * floor division means values at exactly the halfway point round UP, while
+ * values below the halfway point round DOWN — with no floating-point
+ * representation issues.
  *
  * The rate is applied server-side only. Callers cannot pass a custom rate
  * through any public API.
@@ -59,10 +72,11 @@ export function computeDripJarFee(
   if (!Number.isInteger(rateBps) || rateBps < 0 || rateBps > 10_000) {
     throw new Error(`rateBps must be an integer in [0, 10000]; got ${rateBps}`);
   }
-  // Integer arithmetic with half-up rounding.
-  // No floating-point accumulation: multiplication is exact for values within
-  // safe integer range (principalCents < 2^53 / 10000).
-  return Math.round((principalCents * rateBps) / 10_000);
+  // Explicit half-up rounding via integer arithmetic only.
+  // Adding 5_000 before dividing by 10_000 guarantees the midpoint rounds up.
+  // Safe for all principalCents < Number.MAX_SAFE_INTEGER / rateBps (≈ 3×10^13
+  // at 300 bps), which covers all realistic drip amounts.
+  return Math.floor((principalCents * rateBps + 5_000) / 10_000);
 }
 
 /**

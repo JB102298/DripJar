@@ -604,12 +604,13 @@ export const financialTransactionsRelations = relations(financialTransactions, (
 // ─── Ledger Transactions ──────────────────────────────────────────────────────
 //
 // Groups a balanced set of ledger entries. Immutable once postedAt is set.
-// financialTransactionId is nullable so system/adjustment entries can exist
-// without a parent financial_transaction.
+// Every ledger_transaction must belong to a financial_transaction — the FK is
+// NOT NULL and enforced at both the application layer and the DB layer.
 
 export const ledgerTransactions = pgTable("ledger_transactions", {
   id: uuid("id").primaryKey().defaultRandom(),
   financialTransactionId: uuid("financial_transaction_id")
+    .notNull()
     .references(() => financialTransactions.id, { onDelete: "restrict" }),
   description: text("description").notNull(),
   currency: text("currency").notNull().default("USD"),

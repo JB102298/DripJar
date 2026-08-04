@@ -106,6 +106,7 @@ async function getMemberId(jarId: string, userId: string): Promise<string> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("Fee Engine — computeDripJarFee", () => {
+  // ── Exact values ────────────────────────────────────────────────────────────
   it("$200.00 → $6.00 (20000 → 600)", () => {
     expect(computeDripJarFee(20_000)).toBe(600);
   });
@@ -118,26 +119,53 @@ describe("Fee Engine — computeDripJarFee", () => {
     expect(computeDripJarFee(100)).toBe(3);
   });
 
-  it("$0.34 → $0.01 (rounds up from 1.02)", () => {
-    expect(computeDripJarFee(34)).toBe(1);
+  it("$5.00 → $0.15 (500 → 15, exact)", () => {
+    expect(computeDripJarFee(500)).toBe(15);
   });
 
-  it("$0.33 → $0.01 (rounds up from 0.99)", () => {
-    expect(computeDripJarFee(33)).toBe(1);
+  // ── Midpoint cases — explicit half-up rounding ────────────────────────────
+  // At exactly the half-cent boundary the new formula (Math.floor with +5000
+  // bias) rounds UP, consistent with standard half-up convention.
+
+  it("$0.50 midpoint → $0.02 (50 → 2, rounds up)", () => {
+    // 50 × 300 = 15 000; 15 000 / 10 000 = 1.5 → half-up = 2
+    expect(computeDripJarFee(50)).toBe(2);
   });
 
-  it("$0.17 → $0.01 (rounds up from 0.51)", () => {
-    expect(computeDripJarFee(17)).toBe(1);
+  it("$1.50 midpoint → $0.05 (150 → 5, rounds up)", () => {
+    // 150 × 300 = 45 000; 45 000 / 10 000 = 4.5 → half-up = 5
+    expect(computeDripJarFee(150)).toBe(5);
   });
 
-  it("$0.16 → $0.00 (rounds down from 0.48)", () => {
+  // ── Below midpoint — rounds down ─────────────────────────────────────────
+  it("$0.16 → $0.00 (below midpoint, rounds down from 0.48)", () => {
     expect(computeDripJarFee(16)).toBe(0);
   });
 
-  it("large value: $10,000.00 (1000000 → 30000)", () => {
+  it("$0.34 → $0.01 (below midpoint, rounds down from 1.02)", () => {
+    expect(computeDripJarFee(34)).toBe(1);
+  });
+
+  // ── Above midpoint — rounds up ───────────────────────────────────────────
+  it("$0.17 → $0.01 (above midpoint, rounds up from 0.51)", () => {
+    expect(computeDripJarFee(17)).toBe(1);
+  });
+
+  it("$0.33 → $0.01 (above midpoint, rounds up from 0.99)", () => {
+    expect(computeDripJarFee(33)).toBe(1);
+  });
+
+  // ── Large safe-integer values ─────────────────────────────────────────────
+  it("large value: $10,000.00 (1_000_000 → 30_000)", () => {
     expect(computeDripJarFee(1_000_000)).toBe(30_000);
   });
 
+  it("large safe-integer: $1,000,000.00 (100_000_000 → 3_000_000)", () => {
+    // 100_000_000 × 300 = 30_000_000_000 — well within Number.MAX_SAFE_INTEGER
+    expect(computeDripJarFee(100_000_000)).toBe(3_000_000);
+  });
+
+  // ── Edge cases ────────────────────────────────────────────────────────────
   it("zero principal → zero fee", () => {
     expect(computeDripJarFee(0)).toBe(0);
   });
@@ -897,9 +925,12 @@ describe("Ledger invariants", () => {
   });
 
   it("postLedgerTransaction rejects unbalanced entries", async () => {
+    // financialTransactionId is now required; use a sentinel UUID.
+    // The balance check fires before any DB insert, so no row is created.
     await expect(
       postLedgerTransaction({
         description: "Intentionally unbalanced",
+        financialTransactionId: "00000000-0000-0000-0000-000000000001",
         entries: [
           { accountCode: "EXT_PAY_CLR", entryType: "debit", amountCents: 100 },
           { accountCode: "CTRB_REFUNDABLE", entryType: "credit", amountCents: 90 },
@@ -912,6 +943,7 @@ describe("Ledger invariants", () => {
     await expect(
       postLedgerTransaction({
         description: "Zero amount",
+        financialTransactionId: "00000000-0000-0000-0000-000000000002",
         entries: [
           { accountCode: "EXT_PAY_CLR", entryType: "debit", amountCents: 0 },
           { accountCode: "CTRB_REFUNDABLE", entryType: "credit", amountCents: 0 },
@@ -922,7 +954,11 @@ describe("Ledger invariants", () => {
 
   it("postLedgerTransaction rejects empty entries array", async () => {
     await expect(
-      postLedgerTransaction({ description: "Empty", entries: [] }),
+      postLedgerTransaction({
+        description: "Empty",
+        financialTransactionId: "00000000-0000-0000-0000-000000000003",
+        entries: [],
+      }),
     ).rejects.toThrow();
   });
 
@@ -964,6 +1000,17 @@ describe("Ledger invariants", () => {
     const b = await getMemberFinancialBalance(jar.id, memberId);
     expect(b.dripJarFeesEarnedCents).toBe(600); // $6 still earned
     expect(b.refundedPrincipalCents).toBe(20_000);
+  });
+
+  it("no ledger_transaction has a NULL financial_transaction_id", async () => {
+    // Every ledger_transaction must belong to a financial_transaction.
+    // The DB column is NOT NULL (migration 0009) and the application layer
+    // enforces this before insert. This test confirms zero orphan rows.
+    const orphans = await db
+      .select({ id: ledgerTransactions.id })
+      .from(ledgerTransactions)
+      .where(sql`${ledgerTransactions.financialTransactionId} IS NULL`);
+    expect(orphans.length).toBe(0);
   });
 
   it("simulated contributions never appear in financial ledger balances", async () => {

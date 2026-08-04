@@ -64,6 +64,13 @@
       "when": 1785811500000,
       "tag": "0008_phase4a_financial_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785862200000,
+      "tag": "0009_ledger_tx_fk_not_null",
+      "breakpoints": true
     }
   ]
 }

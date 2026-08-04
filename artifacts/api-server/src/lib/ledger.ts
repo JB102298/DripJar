@@ -43,7 +43,11 @@ export interface LedgerEntryInput {
 export interface PostLedgerTransactionInput {
   description: string;
   currency?: string;
-  financialTransactionId?: string;
+  /**
+   * Every ledger_transaction must belong to a financial_transaction.
+   * Required — the DB column is NOT NULL.
+   */
+  financialTransactionId: string;
   entries: LedgerEntryInput[];
 }
 
@@ -94,6 +98,10 @@ async function _postLedgerEntriesInTx(
 ): Promise<PostedLedger> {
   const { description, currency = "USD", financialTransactionId, entries } = input;
 
+  if (!financialTransactionId) {
+    throw new Error("financialTransactionId is required for every ledger_transaction");
+  }
+
   if (entries.length === 0) {
     throw new Error("Ledger transaction must have at least one entry");
   }
@@ -132,7 +140,7 @@ async function _postLedgerEntriesInTx(
   const [ledgerTx] = await tx
     .insert(ledgerTransactions)
     .values({
-      financialTransactionId: financialTransactionId ?? null,
+      financialTransactionId,
       description,
       currency,
     })
