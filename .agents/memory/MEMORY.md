@@ -1,8 +1,12 @@
 - [Security sprint](security-sprint.md) — auth hardening decisions: 15-min JWTs with jti, refresh token rotation, hashed reset tokens, exact CORS, rate-limit test pattern
 - [Refresh token families](refresh-token-families.md) — rotation policy, family-scoped replay revocation, and lessons: verify column defaults via information_schema; prove locking via pg_backend_pid + pg_locks polling
-- [TripJar architecture](tripjar-arch.md) — JWT auth (Bearer token), integer cents everywhere, simulated payments only for MVP
+- [M3Jar architecture](tripjar-arch.md) — JWT auth (Bearer token), integer cents everywhere, simulated payments only for MVP
 - [Zod codegen disabled](zod-codegen-disabled.md) — orval 8.x generates zod v4 syntax but workspace uses zod v3.25.76; api-zod is empty/disabled
 - [Backend route layout](backend-routes.md) — all 18 routes registered, auth uses `requireAuth` from `src/lib/auth.ts`
-- [DB schema pushed](db-schema.md) — all 16 tables live; seed via `pnpm --filter @workspace/scripts run seed` (jordan@tripjar.dev / password123)
-- [DB migration system](db-migration-system.md) — drizzle migrations in lib/db/drizzle/; idempotent SQL; drizzle.config out must be relative; TTY caveat for generate
+- [DB schema pushed](db-schema.md) — all 16 tables live + 4 email-delivery columns on reminder_sent_events (migration 0007); seed via `pnpm --filter @workspace/scripts run seed`
+- [DB migration system](db-migration-system.md) — drizzle migrations in lib/db/drizzle/; idempotent SQL; drizzle.config out must be relative; TTY caveat for generate; after schema changes run `pnpm tsc -p lib/db/tsconfig.json` to rebuild .d.ts before api-server typecheck
+- [API/mobile test conventions](api-test-conventions.md) — /api prefix in supertest, `token` field, test-env email kill-switch, vitest jpg-require pitfall
 - [Expo app plugin fix](expo-plugin-fix.md) — removed expo-build-properties from app.json plugins (not installed, not needed for web preview)
+- [Phase 3 design decisions](phase3-design.md) — cumulative contribution accounting, UTC-only date math, delivery-state reminder events, cutoff immutability after acceptance, timing-safe token
+- [Concurrency test lessons](concurrency-test-lessons.md) — vi.hoisted for mocks, arrow-fn constructor pitfall, parallel vitest files share DB (no HTTP processor in concurrency tests), atomic claim pattern
+- [Drizzle journal registration](drizzle-journal-registration.md) — hand-written SQL migrations must be added to meta/_journal.json or drizzle-kit silently skips them (exits 0, tables never created)
