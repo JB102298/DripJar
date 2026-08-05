@@ -383,6 +383,10 @@ describe("Email notification preferences", () => {
 describe("Reminder processor idempotency", () => {
   const originalToken = process.env["INTERNAL_REMINDER_TOKEN"];
 
+  // 60s: a single processor flush scans all active schedules and saving jars.
+  // When the full test suite runs (singleFork), earlier test files create many
+  // jars/schedules, making each processor call take ~25–30s.  60s gives enough
+  // headroom so the flush beforeAll does not itself time out.
   beforeAll(async () => {
     process.env["INTERNAL_REMINDER_TOKEN"] = INTERNAL_TOKEN;
     // Flush all accumulated reminder events (from previous test runs or earlier
@@ -394,7 +398,7 @@ describe("Reminder processor idempotency", () => {
     await request(app)
       .post(`${BASE}/internal/process-reminders`)
       .set("X-Internal-Token", INTERNAL_TOKEN);
-  });
+  }, 60_000);
   afterAll(() => {
     if (originalToken !== undefined) process.env["INTERNAL_REMINDER_TOKEN"] = originalToken;
     else delete process.env["INTERNAL_REMINDER_TOKEN"];
@@ -427,7 +431,10 @@ describe("Reminder processor idempotency", () => {
     expect(res.body).toHaveProperty("runAt");
   });
 
-  it("running twice does not double-count notifications (deduplication)", async () => {
+  // 90s: this test calls the processor twice in sequence.  Under full-suite load
+  // each call can take ~25–30s (processor scans all active schedules/jars created
+  // by the 14 other test files).  90s covers 2 × 30s comfortably.
+  it("running twice does not double-count notifications (deduplication)", { timeout: 90_000 }, async () => {
     // First run
     const r1 = await request(app)
       .post(`${BASE}/internal/process-reminders`)
@@ -579,6 +586,9 @@ import { eq as _eq } from "drizzle-orm";
 describe("Email delivery state tracking (Part 4)", () => {
   const originalToken = process.env["INTERNAL_REMINDER_TOKEN"];
 
+  // 60s: same reasoning as "Reminder processor idempotency" above — a single
+  // processor flush scans every active schedule and saving jar in the DB, which
+  // can take ~25–30s in the full-suite context.
   beforeAll(async () => {
     process.env["INTERNAL_REMINDER_TOKEN"] = INTERNAL_TOKEN;
     // Same flush strategy as "Reminder processor idempotency" above: drain all
@@ -587,7 +597,7 @@ describe("Email delivery state tracking (Part 4)", () => {
     await request(app)
       .post(`${BASE}/internal/process-reminders`)
       .set("X-Internal-Token", INTERNAL_TOKEN);
-  });
+  }, 60_000);
   afterAll(() => {
     if (originalToken !== undefined) process.env["INTERNAL_REMINDER_TOKEN"] = originalToken;
     else delete process.env["INTERNAL_REMINDER_TOKEN"];
@@ -605,7 +615,8 @@ describe("Email delivery state tracking (Part 4)", () => {
     }
   });
 
-  it("second run: events already sent are reported as skipped_duplicate (not re-sent)", async () => {
+  // 90s: calls the processor twice — same reasoning as "running twice" above.
+  it("second run: events already sent are reported as skipped_duplicate (not re-sent)", { timeout: 90_000 }, async () => {
     const r1 = await request(app)
       .post(`${BASE}/internal/process-reminders`)
       .set("X-Internal-Token", INTERNAL_TOKEN);
