@@ -28,7 +28,12 @@ export type ActivityEventType =
   | "refund_requested"
   | "refund_completed"
   | "refund_partially_failed"
-  | "refund_failed";
+  | "refund_failed"
+  // Phase 4D — Jar Goals (metadata only; no financial events for waterfall shifts)
+  | "goal_created"
+  | "goal_updated"
+  | "goal_archived"
+  | "goal_reordered";
 
 export async function logActivity(params: {
   jarId: string;

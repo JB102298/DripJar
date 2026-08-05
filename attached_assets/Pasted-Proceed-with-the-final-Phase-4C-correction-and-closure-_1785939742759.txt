@@ -1,0 +1,404 @@
+Proceed with the final Phase 4C correction and closure pass.
+
+This is NOT a new feature phase.
+
+DO NOT:
+- start Phase 4D
+- start Tasks #37–39
+- enable live Stripe
+- wire production scheduling
+- deploy/publish
+- use a GitHub PAT
+- touch production DB, DNS, Resend, Cloudflare, or production secrets
+
+CURRENT REPORTED STATE
+
+Local HEAD:
+52f1eab — Phase 4C implementation
+
+origin/main:
+d91c9b5
+
+The Phase 4C conformance audit found the implementation fundamentally sound, with three code corrections required before approval.
+
+==================================================
+1. RESTORE COMMITMENT SNAPSHOT TTL TO 15 MINUTES
+==================================================
+
+Current runtime:
+
+SNAPSHOT_TTL_MS = 5 * 60_000
+
+Approved Phase 4C architecture:
+
+15 minutes
+
+Change the canonical TTL to:
+
+15 * 60_000
+
+Requirements:
+
+- update implementation
+- update tests
+- update comments/docs
+- preview response expiresAt must reflect 15 minutes
+- stale/expired confirmation behavior unchanged
+
+Add/adjust tests proving:
+- preview expiry is approximately 15 minutes
+- confirm before expiry works
+- confirm after expiry rejects
+
+Do not introduce multiple competing TTL constants.
+
+==================================================
+2. FIX REFUND MOBILE VISIBILITY BEFORE CUTOFF
+==================================================
+
+The API correctly allows eligible principal refunds throughout the Jar's Saving lifecycle.
+
+Refunds must NOT require cutoffReached.
+
+Current mobile logic reportedly uses:
+
+showRefundBtn = cutoffReached && ...
+
+That conflicts with the business rule.
+
+Correct behavior:
+
+The Refund action should be available whenever:
+
+- authenticated contributor is an active member
+- Jar lifecycle permits financial mutation
+- refundable Stripe-backed principal > 0
+
+Cutoff is NOT required.
+
+Commit My Funds remains cutoff/Commitment-phase gated.
+
+Do not weaken backend refund eligibility rules.
+
+Add mobile/UI tests proving:
+
+BEFORE cutoff:
+- refundable principal > 0
+- Refund button visible
+- Commit My Funds hidden
+
+AFTER cutoff:
+- refundable principal > 0
+- Refund button still visible
+- Commit My Funds visible when commitment conditions are satisfied
+
+Committed / refund-pending / zero-refundable states should continue hiding or disabling refund action appropriately.
+
+==================================================
+3. HANDLE CONCURRENT DUPLICATE COMMIT CLEANLY
+==================================================
+
+The audit found a rare race:
+
+Two concurrent confirmations can both pass the pre-transaction idempotency check.
+
+The DB unique constraint safely prevents duplicate commitment, but the losing request may surface as HTTP 500.
+
+Correct this consumer-facing behavior.
+
+Required behavior:
+
+If the insert fails because the existing commitment uniqueness/idempotency constraint was won by the other concurrent request:
+
+1. detect the expected PostgreSQL unique-constraint conflict
+2. re-read the existing successful commitment for the authenticated member/snapshot
+3. return the existing commitment result idempotently if it represents the same successful operation
+
+OR return a clean:
+
+409 AlreadyCommitted
+
+if the conflict represents a different already-existing commitment.
+
+Do NOT:
+- swallow unrelated DB errors
+- turn arbitrary SQL errors into 409
+- weaken the DB uniqueness constraint
+- create another ledger posting
+
+Preferred for SAME snapshotToken:
+HTTP 200 existing commitment result
+
+For a DIFFERENT competing snapshot against already committed funds:
+409 AlreadyCommitted / snapshot stale as appropriate
+
+Add a real concurrency test.
+
+Assert:
+- exactly one fund_commitments record
+- exactly one commitment ledger posting
+- no negative refundable balance
+- no HTTP 500 from the expected duplicate-commit race
+
+==================================================
+4. DO NOT WIRE THE REFUND SCHEDULER YET
+==================================================
+
+The audit correctly identified:
+
+POST /internal/dispatch-refunds
+
+currently has no production scheduler.
+
+Leave that architecture unchanged in this correction.
+
+This is NOT a Phase 4C blocker because:
+- Stripe remains TEST MODE only
+- dispatcher exists
+- dispatcher is directly testable
+- no production launch is occurring
+
+Document clearly:
+
+"Production scheduler for refund dispatch is a pre-go-live prerequisite."
+
+Do NOT implement Task #37 during this pass.
+
+==================================================
+5. REPORT/BALANCE DOCUMENTATION CORRECTION
+==================================================
+
+Do not change accounting code unless audit proves otherwise.
+
+Canonical relationship currently verified by the audit:
+
+lifetimeContributedPrincipalCents =
+refundablePrincipalCents
++ committedPrincipalCents
++ refundPendingCents
++ refundedPrincipalCents
+
+Ensure comments/report wording use the correct four-term interpretation.
+
+Do not call the three-state sum "contributed principal."
+
+If useful, distinguish:
+
+Lifetime contributed principal
+vs
+Current retained/outstanding principal
+
+No schema redesign needed.
+
+==================================================
+6. VERIFY AGREEMENT BINDING REMAINS INTACT
+==================================================
+
+Reconfirm after edits:
+
+- commitment agreementId NOT NULL
+- agreementVersion NOT NULL
+- contributor accepted exact current agreement
+- newer agreement after preview invalidates snapshot
+- historical fund_commitments retain exact agreement/version
+
+Do not modify this working architecture unless necessary.
+
+==================================================
+7. VERIFY REFUND BUSINESS RULES REMAIN INTACT
+==================================================
+
+Reconfirm:
+
+- refund API has NO cutoff-date requirement
+- committed principal cannot refund
+- REFUND_PENDING principal cannot refund twice
+- fees cannot refund
+- simulated contributions excluded
+- FIFO lot provenance preserved
+- refund.updated / refund.failed behavior unchanged
+- canceled → cancelled mapper unchanged
+- terminal refund state cannot regress
+
+==================================================
+8. FULL VALIDATION
+==================================================
+
+Run:
+
+- Phase 4C commitment tests
+- Phase 4C refund tests
+- duplicate-commit concurrency test
+- full API suite run 1
+- full API suite run 2
+- full mobile suite
+- API typecheck
+- mobile typecheck
+- lib/db typecheck
+- API production build
+- fresh committed migration chain 0000 → 0017
+
+IMPORTANT:
+
+The previous audit could not complete the full API suite due runner timeout.
+
+For this closure pass, get TWO complete full-suite runs to 100%.
+
+If runtime is the issue:
+- fix legitimate test isolation/timing configuration
+- do not skip tests
+- do not weaken assertions
+- do not classify failures as environmental without evidence
+
+Report actual final test totals.
+
+==================================================
+9. COMMIT
+==================================================
+
+Create ONE correction commit on top of 52f1eab.
+
+Title:
+
+Finalize Phase 4C commitment and refund behavior
+
+Suggested body:
+
+- Restore 15-minute commitment snapshot TTL
+- Expose eligible refunds before commitment cutoff
+- Handle concurrent duplicate commitment idempotently
+- Correct financial lifecycle documentation
+- Revalidate Phase 4C financial and security invariants
+
+Do NOT create a separate agent-memory commit.
+
+Do not commit:
+- .agents/memory
+- attached_assets
+- previous PDFs
+- unrelated .replit changes
+- report-generation scripts
+
+==================================================
+10. PUSH USING REPLIT MANAGED GITHUB
+==================================================
+
+After all validation passes:
+
+Push BOTH:
+- existing Phase 4C commit 52f1eab
+- new correction commit
+
+using the normal Replit managed GitHub integration.
+
+Do NOT request or use a PAT.
+
+Then verify:
+
+git rev-parse HEAD
+git rev-parse origin/main
+
+They must match exactly.
+
+==================================================
+11. SECURITY REVIEW
+==================================================
+
+Before push, re-review:
+
+- organizer commit substitution
+- organizer refund substitution
+- client memberId substitution
+- PI/refund-ID substitution
+- snapshot source-lot substitution
+- concurrent duplicate commitment
+- concurrent refund
+- refund vs commit
+- refund of committed principal
+- refund of reserved principal
+- fee refund
+- duplicate Stripe refund
+- refund webhook idempotency
+- terminal-state regression
+- ledger imbalance
+- negative refundable balance
+- Test Mode guard
+
+Fix blocking findings before commit/push.
+
+==================================================
+12. PDF — ABSOLUTE FINAL ACTION
+==================================================
+
+The PDF must be the LAST action.
+
+Only after:
+
+- corrections complete
+- tests complete
+- two full API runs complete
+- typechecks complete
+- build complete
+- fresh migrations complete
+- security review complete
+- commit complete
+- push complete
+- HEAD === origin/main verified
+- final git status verified
+
+create:
+
+phase4c-closure-report.pdf
+
+The PDF must include:
+
+- starting local HEAD
+- starting origin/main
+- files changed
+- 15-minute TTL correction
+- refund-before-cutoff UX correction
+- duplicate-commit race correction
+- dispatcher scheduler explicitly deferred
+- correct four-term balance formula
+- Phase 4C commitment test total
+- Phase 4C refund test total
+- full API run 1
+- full API run 2
+- mobile test total
+- all typecheck results
+- build result
+- fresh 0000→0017 migration result
+- security review
+- final commit hash
+- final origin/main
+- push method
+- working-tree status
+- confirmation no PAT
+- confirmation Stripe TEST MODE only
+- confirmation Phase 4D not started
+
+After generating the PDF:
+DO NOTHING ELSE.
+
+Do not update memory.
+Do not run another test.
+Do not modify files.
+Do not commit.
+Do not push.
+
+In chat return ONLY:
+
+PASS / FAIL
+Final commit hash
+origin/main
+Phase 4C commitment tests
+Phase 4C refund tests
+API run 1
+API run 2
+Mobile tests
+Typechecks
+Build
+Migration chain
+Push method
+Blockers
+PDF filename/path

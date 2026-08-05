@@ -14,3 +14,4 @@
 - [Stripe migration lesson](stripe-migration-lesson.md) — drizzle-kit reports success without applying; apply SQL directly; ft_provider_status_check must be expanded; mock PI IDs must be unique per test
 - [Webhook concurrency patterns](webhook-concurrency-patterns.md) — 3 production bugs fixed: onConflictDoNothing for idempotent INSERT, sql`col+1` for increments, mark processed in every tx exit path
 - [Phase 4B compliance lessons](phase4b-compliance-lessons.md) — real Stripe sig in tests: send payload as string not Buffer; pool-wait helper needed for singleFork full-suite; pdfkit use .cjs extension
+- [Phase 4C lessons](phase4c-lessons.md) — let-in-async-closure narrows to `never`; concurrent commit race; reminder processor slow with accumulated Saving jars; webhook-concurrency Scenario A borderline 120s timeout; background procs die between ShellExec calls

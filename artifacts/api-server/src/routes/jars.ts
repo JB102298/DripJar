@@ -3,7 +3,7 @@ import { db } from "@workspace/db";
 import {
   jars,
   jarMembers,
-  contributions,
+  jarGoals,
   profiles,
   agreements,
   agreementAcceptances,
@@ -14,6 +14,7 @@ import { calculateJarHealth } from "../lib/jar-health.js";
 import { logActivity } from "../lib/activity.js";
 import { notifyAllMembers } from "../lib/notifications.js";
 import { deriveJarPhase, toUTCDateString } from "../lib/phase.js";
+import { getJarSavedPrincipalCents } from "../lib/financial-balance.js";
 
 const router = Router();
 
@@ -32,20 +33,6 @@ async function getJarAccess(jarId: string, userId: string) {
   return { jar: jar[0], member: member[0] ?? null, isOrganizer };
 }
 
-// Helper: get total saved for a jar
-async function getTotalSaved(jarId: string): Promise<number> {
-  const result = await db
-    .select({ total: sql<number>`coalesce(sum(${contributions.amountCents}), 0)` })
-    .from(contributions)
-    .where(
-      and(
-        eq(contributions.jarId, jarId),
-        inArray(contributions.status, ["completed", "simulated"]),
-      ),
-    );
-  return Number(result[0]?.total ?? 0);
-}
-
 // Helper: compute daysRemaining
 function daysRemaining(targetDate: string): number | null {
   if (!targetDate) return null;
@@ -55,7 +42,7 @@ function daysRemaining(targetDate: string): number | null {
 
 // Helper: build jar summary
 async function buildJarSummary(jar: typeof jars.$inferSelect, userId: string) {
-  const totalSavedCents = await getTotalSaved(jar.id);
+  const totalSavedCents = await getJarSavedPrincipalCents(jar.id);
   const percentFunded = jar.goalAmountCents > 0
     ? Math.min(100, Math.round((totalSavedCents / jar.goalAmountCents) * 1000) / 10)
     : 0;
@@ -257,7 +244,7 @@ router.get("/jars/:jarId", requireAuth, async (req, res) => {
     return;
   }
 
-  const totalSavedCents = await getTotalSaved(jarId);
+  const totalSavedCents = await getJarSavedPrincipalCents(jarId);
   const percentFunded = jar.goalAmountCents > 0
     ? Math.min(100, Math.round((totalSavedCents / jar.goalAmountCents) * 1000) / 10)
     : 0;
@@ -341,6 +328,24 @@ router.patch("/jars/:jarId", requireAuth, async (req, res) => {
       res.status(400).json({
         error: "BadRequest",
         message: `${key === "goalAmountCents" ? "The goal amount" : "The approval threshold"} can only be changed before the jar is launched`,
+      });
+      return;
+    }
+  }
+
+  // New (Phase 4D): when goalAmountCents changes pre-launch, ensure active goals still fit.
+  // goalAmountCents is already guarded by preLaunchOnly above, so we only reach here if isPreLaunch.
+  if (req.body["goalAmountCents"] !== undefined && isPreLaunch) {
+    const newGoalAmount = req.body["goalAmountCents"] as number;
+    const [goalSumRow] = await db
+      .select({ total: sql<number>`coalesce(sum(${jarGoals.targetPrincipalCents}), 0)` })
+      .from(jarGoals)
+      .where(and(eq(jarGoals.jarId, jarId), eq(jarGoals.status, "active")));
+    const activeGoalTotal = Number(goalSumRow?.total ?? 0);
+    if (activeGoalTotal > newGoalAmount) {
+      res.status(409).json({
+        error: "Conflict",
+        message: `Active goal targets total ${activeGoalTotal} cents — reduce or archive goals before lowering the jar target below that amount`,
       });
       return;
     }
@@ -527,7 +532,7 @@ router.get("/jars/:jarId/health", requireAuth, async (req, res) => {
     return;
   }
 
-  const totalSavedCents = await getTotalSaved(jarId);
+  const totalSavedCents = await getJarSavedPrincipalCents(jarId);
   const health = calculateJarHealth(
     jar.goalAmountCents,
     totalSavedCents,

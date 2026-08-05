@@ -1,0 +1,202 @@
+Perform a FINAL Phase 4C verification-only closure pass.
+
+Do NOT change application behavior unless a verification step proves something is broken.
+Do NOT start Phase 4D.
+Do NOT start Tasks #37–39.
+Do NOT enable live Stripe.
+Do NOT deploy.
+Do NOT use a PAT.
+
+Current expected HEAD / origin/main:
+b6a4694 — Finalize Phase 4C commitment and refund behavior
+
+GOAL:
+Resolve the two remaining verification gaps only:
+
+1. complete full API validation including phase3-automation
+2. prove fresh migration reproducibility from 0000 → 0017
+
+==================================================
+1. FULL API SUITE — INCLUDING PHASE3 AUTOMATION
+==================================================
+
+The prior closure report timed out on:
+
+phase3-automation.test.ts
+
+Do NOT exclude it from final validation.
+
+First, run phase3-automation.test.ts by itself with sufficient test timeout to complete naturally.
+
+Then run the full API suite including it.
+
+If the full suite exceeds the current global timeout because those tests are intentionally long-running:
+
+- adjust TEST-ONLY timeout configuration appropriately
+- do not change production reminder logic
+- do not remove or weaken assertions
+- do not skip phase3-automation
+- do not mark it “previously verified” instead of executing it now
+
+Required:
+Run the true full API suite twice.
+
+Both runs must complete with 100% passing tests.
+
+Report the ACTUAL total including phase3-automation.
+
+Also explain whether rate-limits.test.ts is intentionally excluded by project configuration.
+If it is intended to be a separate suite, run it separately and report its result.
+
+==================================================
+2. FRESH MIGRATION REPRODUCIBILITY
+==================================================
+
+Create a clean disposable PostgreSQL database or isolated schema.
+
+Starting from no DripJar tables:
+
+Apply ONLY the committed migration files:
+
+0000
+through
+0017
+
+Do NOT:
+- manually patch SQL
+- copy schema from dev DB
+- use drizzle-kit push
+- apply ad hoc fixes after migration
+
+Verify afterward:
+
+- all 18 migrations represented
+- ledger_accounts includes REFUND_PENDING
+- commitment_snapshots exists
+- commitment_snapshot_allocations exists
+- fund_commitments exists
+- commitment_allocations exists
+- refund_requests exists
+- refund_allocations exists
+- all indexes/unique constraints exist
+- agreement fields are NOT NULL where required
+- ft_transaction_type_check includes Phase 4C refund types
+- refund status constraints are correct
+- no placeholder refund table remains
+- fresh schema matches Drizzle definitions
+
+If migration 0015 aborts because the placeholder-table guard expects an existing table/state, verify that this behavior is correct on the real fresh migration sequence and fix only if necessary.
+
+==================================================
+3. RECONFIRM CURRENT PHASE 4C STATE
+==================================================
+
+Read-only confirm:
+
+- snapshot TTL = 15 minutes
+- refunds not cutoff-gated
+- commitment remains cutoff-gated
+- duplicate same-snapshot commit is idempotent
+- REFUND_PENDING reservation unchanged
+- Stripe TEST MODE guard unchanged
+- dispatcher scheduler remains deferred as pre-go-live prerequisite
+
+No code changes unless verification reveals an actual problem.
+
+==================================================
+4. FINAL VALIDATION
+==================================================
+
+Run:
+
+- Phase 4C commitment suite
+- Phase 4C refund suite
+- phase3-automation suite
+- rate-limits suite if separate
+- FULL API suite run 1
+- FULL API suite run 2
+- mobile suite
+- API typecheck
+- mobile typecheck
+- lib/db typecheck
+- API production build
+- clean 0000 → 0017 migration chain
+
+All executed suites must pass 100%.
+
+==================================================
+5. GIT
+==================================================
+
+If NO code/test-config changes are needed:
+
+do not create an empty commit.
+
+If a TEST-ONLY timeout/config correction is required to allow the legitimate long-running suite to complete:
+
+create one narrowly scoped commit, for example:
+
+Finalize Phase 4C test verification
+
+Do not change production behavior.
+
+Push with Replit managed GitHub integration.
+
+Verify:
+
+git rev-parse HEAD
+git rev-parse origin/main
+
+They must match.
+
+==================================================
+6. PDF — ABSOLUTE FINAL ACTION
+==================================================
+
+After all verification is complete and git state is final, create:
+
+phase4c-final-verification-report.pdf
+
+The PDF must include:
+
+- starting HEAD
+- final HEAD
+- whether any code/config changes were needed
+- phase3-automation standalone result
+- rate-limits result
+- FULL API run 1 actual total
+- FULL API run 2 actual total
+- Phase 4C focused results
+- mobile tests
+- all typechecks
+- build
+- exact fresh migration procedure
+- clean 0000 → 0017 migration result
+- post-migration schema verification
+- final origin/main
+- working-tree status
+- confirmation Stripe TEST MODE only
+- confirmation Phase 4D not started
+
+The PDF must be the LAST action.
+
+After creating it:
+do nothing else.
+
+In chat return ONLY:
+
+PASS / FAIL
+Final HEAD
+origin/main
+Phase3 automation
+Rate limits
+API run 1
+API run 2
+Phase 4C commitment
+Phase 4C refunds
+Mobile
+Typechecks
+Build
+Fresh migration
+Blockers
+PDF filename/path

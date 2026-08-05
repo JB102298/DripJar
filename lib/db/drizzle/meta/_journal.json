@@ -127,6 +127,13 @@
       "when": 1754436300000,
       "tag": "0017_phase4c_ft_transaction_types",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1754520000000,
+      "tag": "0018_phase4d_jar_goals",
+      "breakpoints": true
     }
   ]
 }

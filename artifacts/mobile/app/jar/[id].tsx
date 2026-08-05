@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -42,6 +42,8 @@ import { MemberAvatar } from '@/components/MemberAvatar';
 import { EmptyState } from '@/components/EmptyState';
 import { ScheduleSetupSheet } from '@/components/ScheduleSetupSheet';
 import { useAuth } from '@/contexts/auth-context';
+import { useJarGoals } from '@/hooks/useJarGoals';
+import { useFinancialSummary } from '@/hooks/useFinancialSummary';
 
 type Tab = 'Overview' | 'Members' | 'Milestones' | 'Activity' | 'Agreements' | 'Settings';
 const TABS: Tab[] = ['Overview', 'Members', 'Milestones', 'Activity', 'Agreements', 'Settings'];
@@ -80,6 +82,11 @@ export default function JarDetailScreen() {
   const { data: sentInvitations, refetch: refetchInvitations } = useListJarInvitations(id!, {
     query: { queryKey: getListJarInvitationsQueryKey(id!), enabled: !!id && isOrganizerUser && activeTab === 'Settings' },
   });
+
+  // Phase 4D: Goals + Financial Summary (Overview tab only)
+  const { data: goalsData, refetch: refetchGoals } = useJarGoals(id, { enabled: !!id && activeTab === 'Overview' });
+  const { data: financialSummary, refetch: refetchFinancialSummary } = useFinancialSummary(id, { enabled: !!id && activeTab === 'Overview' });
+  const [financialExpanded, setFinancialExpanded] = useState(false);
 
   // Settings tab edit state
   const [settingsName, setSettingsName] = useState('');
@@ -208,7 +215,9 @@ export default function JarDetailScreen() {
     setRefreshing(true);
     await refetchJar();
     await refetchHealth();
-    if (activeTab === 'Overview') await refetchSchedule();
+    if (activeTab === 'Overview') {
+      await Promise.all([refetchSchedule(), refetchGoals(), refetchFinancialSummary()]);
+    }
     if (activeTab === 'Members') await refetchMembers();
     if (activeTab === 'Milestones') await refetchMilestones();
     if (activeTab === 'Activity') await refetchActivity();
@@ -451,6 +460,101 @@ export default function JarDetailScreen() {
               </Pressable>
             )}
           </View>
+        )}
+
+        {/* ── Goals Section (Phase 4D) ── */}
+        {goalsData && (
+          <View style={[styles.goalsSection, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.goalsSectionHeader}>
+              <Text style={[styles.goalsSectionTitle, { color: colors.foreground }]}>Jar Goals</Text>
+              {isOrganizerUser && (
+                <Pressable onPress={() => router.push(`/jar/${jar.id}/goals`)}>
+                  <Text style={[styles.goalsManageLink, { color: colors.primary }]}>Manage</Text>
+                </Pressable>
+              )}
+            </View>
+
+            {goalsData.goals.length === 0 && !isOrganizerUser && null}
+            {goalsData.goals.length === 0 && isOrganizerUser && (
+              <Text style={[styles.goalsEmpty, { color: colors.mutedForeground }]}>
+                No goals yet. Tap Manage to add your first goal.
+              </Text>
+            )}
+
+            {goalsData.goals.map((goal, idx) => {
+              const funded = goal.fundingState === 'funded';
+              const partial = goal.fundingState === 'partially_funded';
+              const stateColor = funded ? '#22c55e' : partial ? colors.primary : colors.mutedForeground;
+              const stateIcon = funded ? 'check-circle' : partial ? 'circle' : 'circle';
+              return (
+                <View key={goal.id} style={[styles.goalItem, idx > 0 && { borderTopWidth: 1, borderTopColor: colors.border }]}>
+                  <View style={styles.goalItemHeader}>
+                    <Feather name={stateIcon as any} size={15} color={stateColor} style={{ marginRight: 6 }} />
+                    <Text style={[styles.goalName, { color: colors.foreground }]} numberOfLines={1}>{goal.name}</Text>
+                    <Text style={[styles.goalPercent, { color: stateColor }]}>{Math.round(goal.savedPercent)}%</Text>
+                  </View>
+                  <ProgressBar progress={goal.savedPercent} height={5} />
+                  <Text style={[styles.goalAmounts, { color: colors.mutedForeground }]}>
+                    {formatCurrency(goal.savedAllocatedCents)} of {formatCurrency(goal.targetPrincipalCents)}
+                    {funded ? '  ✓ Funded' : ''}
+                  </Text>
+                </View>
+              );
+            })}
+
+            {goalsData.unallocatedCents > 0 && (
+              <View style={[styles.goalItem, goalsData.goals.length > 0 && { borderTopWidth: 1, borderTopColor: colors.border }]}>
+                <View style={styles.goalItemHeader}>
+                  <Feather name="inbox" size={15} color={colors.mutedForeground} style={{ marginRight: 6 }} />
+                  <Text style={[styles.goalName, { color: colors.mutedForeground }]}>Unallocated</Text>
+                  <Text style={[styles.goalPercent, { color: colors.mutedForeground }]}>{formatCurrency(goalsData.unallocatedCents)}</Text>
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ── Financial Details Accordion (Phase 4D) ── */}
+        {financialSummary && (
+          <Pressable
+            style={[styles.financialAccordion, { backgroundColor: colors.card, borderColor: colors.border }]}
+            onPress={() => setFinancialExpanded(e => !e)}
+          >
+            <View style={styles.financialAccordionHeader}>
+              <Feather name="pie-chart" size={16} color={colors.mutedForeground} style={{ marginRight: 8 }} />
+              <Text style={[styles.financialAccordionTitle, { color: colors.foreground }]}>Financial Details</Text>
+              <Feather name={financialExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={colors.mutedForeground} />
+            </View>
+            {financialExpanded && (
+              <View style={styles.financialRows}>
+                {[
+                  { label: 'Still Refundable', value: financialSummary.jar.refundablePrincipalCents, accent: false },
+                  { label: 'Locked In', value: financialSummary.jar.committedPrincipalCents, accent: true },
+                  ...(financialSummary.jar.refundPendingCents > 0
+                    ? [{ label: 'Refund Pending', value: financialSummary.jar.refundPendingCents, accent: false }]
+                    : []),
+                  ...(financialSummary.jar.refundedLifetimeCents > 0
+                    ? [{ label: 'Refunded (total)', value: financialSummary.jar.refundedLifetimeCents, accent: false }]
+                    : []),
+                  { label: 'DripJar Fees', value: financialSummary.jar.dripJarFeesTotalCents, accent: false },
+                  { label: 'Processing Fees', value: financialSummary.jar.processingFeesTotalCents, accent: false },
+                ].map(row => (
+                  <View key={row.label} style={styles.financialRow}>
+                    <Text style={[styles.financialLabel, { color: colors.mutedForeground }]}>{row.label}</Text>
+                    <Text style={[styles.financialValue, { color: row.accent ? colors.darkGreen : colors.foreground }]}>
+                      {formatCurrency(row.value)}
+                    </Text>
+                  </View>
+                ))}
+                {financialSummary.jar.isOverTarget && (
+                  <View style={[styles.financialRow, { marginTop: 4 }]}>
+                    <Text style={[styles.financialLabel, { color: '#f59e0b' }]}>Over target by</Text>
+                    <Text style={[styles.financialValue, { color: '#f59e0b' }]}>{formatCurrency(financialSummary.jar.overTargetByCents)}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </Pressable>
         )}
       </View>
     );
@@ -1194,6 +1298,94 @@ const styles = StyleSheet.create({
   actionButtonText: {
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  // Phase 4D — Goals section
+  goalsSection: {
+    borderRadius: 16,
+    borderWidth: 1,
+    marginTop: 20,
+    overflow: 'hidden',
+  },
+  goalsSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 10,
+  },
+  goalsSectionTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  goalsManageLink: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  goalsEmpty: {
+    fontSize: 13,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+  },
+  goalItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  goalItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  goalName: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  goalPercent: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  goalAmounts: {
+    fontSize: 12,
+    marginTop: 2,
+    marginLeft: 21,
+  },
+  // Phase 4D — Financial details accordion
+  financialAccordion: {
+    borderRadius: 16,
+    borderWidth: 1,
+    marginTop: 12,
+    overflow: 'hidden',
+  },
+  financialAccordionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  financialAccordionTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  financialRows: {
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    gap: 8,
+  },
+  financialRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  financialLabel: {
+    fontSize: 13,
+  },
+  financialValue: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   memberRow: {
     flexDirection: 'row',

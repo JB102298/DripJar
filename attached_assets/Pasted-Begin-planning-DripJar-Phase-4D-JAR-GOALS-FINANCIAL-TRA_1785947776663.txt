@@ -1,0 +1,1333 @@
+Begin planning DripJar Phase 4D:
+
+JAR GOALS + FINANCIAL TRANSPARENCY UX
+
+THIS IS A READ-ONLY ARCHITECTURE / IMPLEMENTATION-PLANNING TASK FIRST.
+
+Do NOT implement Phase 4D yet.
+Do NOT modify files.
+Do NOT create migrations.
+Do NOT commit.
+Do NOT push.
+Do NOT enable live Stripe.
+Do NOT wire production scheduling.
+Do NOT deploy or publish.
+
+Current expected repository state:
+
+Branch:
+main
+
+Expected local HEAD / origin/main:
+240cb9b4b1b51449c2bfae01b00efd1ae7e2ad33
+
+Phase 4C is CLOSED.
+
+Current financial foundation includes:
+
+- Stripe TEST MODE Drip collection
+- immutable double-entry ledger
+- refundable principal
+- committed principal
+- REFUND_PENDING reservation
+- refunded principal
+- DripJar fee accounting
+- processing-fee accounting
+- source-lot provenance
+- agreement-bound fund commitment
+- principal refunds
+- FIFO refund allocation
+- Stripe refund reconciliation
+- concurrency protections
+- reproducible migrations through 0017
+
+==================================================
+PHASE 4D PRODUCT GOAL
+==================================================
+
+Make the Jar's financial state understandable and actionable for normal users.
+
+Phase 4D has TWO major components:
+
+A. JAR GOALS
+B. FINANCIAL TRANSPARENCY UX
+
+Jar Goals are planning categories INSIDE one Jar.
+
+Examples:
+
+Vacation Jar — $10,000 total
+
+Goals:
+Flights        $2,500
+Hotel          $3,500
+Rental Car     $1,000
+Activities     $1,500
+Spending Money $1,500
+
+These goals DO NOT represent:
+
+- separate Stripe balances
+- separate bank accounts
+- separate ledgers
+- separate custodial accounts
+- separate payout destinations
+
+There is still ONE actual Jar financial balance.
+
+Goals answer:
+
+"What are we saving this Jar's money for?"
+
+==================================================
+1. JAR GOALS — CORE BUSINESS RULES
+==================================================
+
+Jar Goals should be OPTIONAL.
+
+A Jar may have:
+
+- no named goals
+OR
+- one or more named goals
+
+If no goals exist, existing Jar behavior continues normally.
+
+Each goal should conceptually include:
+
+- id
+- jarId
+- name
+- description optional
+- targetPrincipalCents
+- priority/order
+- status
+- createdAt
+- updatedAt
+
+Potential statuses:
+
+active
+completed
+archived
+
+Do not over-engineer workflow states unless needed.
+
+Organizer controls goal creation/editing/order.
+
+Members can view goals.
+
+For MVP, members do not create/edit Jar Goals unless existing product permissions clearly justify it.
+
+==================================================
+2. TOTAL GOAL AMOUNT VS JAR TARGET
+==================================================
+
+Audit the current Jar goal/target amount field.
+
+We need a deterministic rule between:
+
+Jar target principal
+and
+sum of active named Jar Goals
+
+Preferred MVP invariant:
+
+SUM(active goal targetPrincipalCents)
+must equal the Jar's total target principal.
+
+Example:
+
+Jar target:
+$10,000
+
+Goals must total:
+$10,000
+
+Do NOT silently allow:
+Jar target = $10,000
+Goals = $8,000
+
+unless there is an intentional "Unallocated" bucket.
+
+Preferred UX:
+
+If named goals total less than Jar target, automatically show:
+
+Unallocated
+$2,000
+
+as a CALCULATED display bucket, not necessarily a persisted goal row.
+
+This gives us flexibility while keeping the Jar target authoritative.
+
+Audit which model is cleaner:
+
+A.
+Require named goals to equal Jar target exactly
+
+OR
+
+B.
+Allow named goals ≤ Jar target and compute:
+Unallocated Target = Jar target − named goal targets
+
+My preference is B.
+
+But named goals must NEVER exceed Jar target.
+
+==================================================
+3. GOAL FUNDING MODEL — DETERMINISTIC WATERFALL
+==================================================
+
+For MVP, do NOT let users manually assign each Drip to a goal.
+
+Do NOT split Stripe contributions at payment time.
+
+Do NOT add per-goal payment routing.
+
+Instead:
+
+Use a deterministic priority waterfall based on CURRENT ELIGIBLE JAR PRINCIPAL.
+
+Example:
+
+Goals by priority:
+
+1. Flights — $2,500
+2. Hotel — $3,500
+3. Rental Car — $1,000
+
+Current eligible principal:
+$4,000
+
+Display:
+
+Flights:
+$2,500 / $2,500
+FUNDED
+
+Hotel:
+$1,500 / $3,500
+
+Rental Car:
+$0 / $1,000
+
+This is planning allocation only.
+
+No ledger movement occurs when a goal becomes funded.
+
+No financial_transaction should be created merely because the waterfall changes.
+
+==================================================
+4. WHICH PRINCIPAL FUNDS GOALS?
+==================================================
+
+This requires careful architectural review.
+
+We currently track:
+
+- refundable principal
+- committed principal
+- refund pending
+- refunded principal
+
+For planning progress, decide which balance should count toward Jar Goals.
+
+My preferred distinction:
+
+TOTAL SAVED / CURRENT JAR PRINCIPAL:
+refundable + committed + refundPending
+
+But:
+
+AVAILABLE / SECURELY COMMITTED:
+committed only
+
+Refund-pending principal is technically still in the refund process and should probably NOT be displayed as safely available for goals.
+
+Therefore I currently prefer:
+
+Goal funding progress =
+refundablePrincipal + committedPrincipal
+
+EXCLUDE:
+- refundPending
+- refunded
+- fees
+- processing fees
+
+But I want the architecture plan to assess this carefully.
+
+We may want TWO conceptual progress values:
+
+Saved toward goal:
+refundable + committed
+
+Locked toward goal:
+committed only
+
+Example:
+
+Flights target:
+$2,500
+
+Saved:
+$2,500
+
+Committed:
+$1,800
+
+This lets the UI communicate:
+
+"Fully saved"
+but
+"$700 still refundable"
+
+Do NOT change ledger semantics merely to support goal UI.
+
+==================================================
+5. GOAL ALLOCATION MUST BE DERIVED
+==================================================
+
+Goal allocations should be recomputable from:
+
+- ordered goal targets
+- authoritative Jar/member financial balances
+
+Do not create mutable "goalBalance" columns that become another monetary source of truth.
+
+If a persisted projection/cache is proposed for performance:
+ledger remains authoritative.
+
+For MVP, prefer deterministic calculation over redundant monetary state.
+
+==================================================
+6. REFUNDS + GOALS
+==================================================
+
+Goals must respond naturally to refunds.
+
+Example:
+
+Flights target:
+$2,500 — funded
+
+Hotel:
+$1,500 / $3,500
+
+Contributor refunds:
+$1,000
+
+New current saved principal:
+$3,000
+
+Waterfall recalculates:
+
+Flights:
+$2,500 funded
+
+Hotel:
+$500 / $3,500
+
+No "reverse goal transaction" is required.
+
+Goal progress is a projection over current principal.
+
+==================================================
+7. COMMITMENTS + GOALS
+==================================================
+
+A commitment should NOT permanently bind a specific contribution to a goal in Phase 4D.
+
+Commitment answers:
+"Can this principal still be refunded?"
+
+Goals answer:
+"What is the Jar planning to use current principal for?"
+
+Keep those concepts separate.
+
+However the UI may display:
+
+Goal Target
+Saved
+Committed
+
+using the deterministic waterfall.
+
+Example:
+
+Hotel
+Target: $3,500
+Saved: $3,500
+Committed: $2,000
+
+Do not add goal-specific commitment routes in Phase 4D.
+
+==================================================
+8. GOAL ORDER / PRIORITY
+==================================================
+
+Organizer should be able to reorder goals.
+
+Priority determines the waterfall.
+
+Example:
+
+Before:
+1 Flights
+2 Hotel
+3 Activities
+
+After:
+1 Hotel
+2 Flights
+3 Activities
+
+The displayed funding allocation recalculates immediately.
+
+No ledger changes.
+
+No Stripe changes.
+
+No historical financial entries mutated.
+
+Audit clean implementation options:
+
+- integer position
+- sort_order
+- priority
+
+Use a deterministic unique order inside each Jar.
+
+Plan race-safe reorder updates.
+
+==================================================
+9. COMPLETED GOALS
+==================================================
+
+Goal "completed" should ideally be DERIVED when:
+
+allocatedSavedPrincipal >= targetPrincipalCents
+
+Do not require organizer to manually mark a fully funded goal complete.
+
+If a refund later drops allocated principal below target:
+the goal should become not-fully-funded again.
+
+Therefore distinguish:
+
+Funding state:
+derived
+
+Administrative state:
+active / archived
+
+Preferred:
+
+Persist only:
+active
+archived
+
+Derive:
+unfunded
+partially_funded
+funded
+
+Do not persist a mutable "completed" state that can drift.
+
+==================================================
+10. ARCHIVING / DELETING GOALS
+==================================================
+
+Organizer may archive goals.
+
+Avoid destructive deletion if the goal has been visible historically.
+
+Plan:
+
+- active goals participate in waterfall
+- archived goals do not
+- archived goals remain available for audit/history
+
+For brand-new unused goals, hard delete may be acceptable if architecture already has a safe pattern.
+
+Recommend the cleanest MVP.
+
+==================================================
+11. EDITING GOAL TARGETS
+==================================================
+
+Organizer may edit:
+
+- name
+- description
+- target
+- order
+
+But named active goals must not exceed Jar target in aggregate.
+
+If lowering/raising a goal target:
+waterfall recalculates.
+
+No financial mutation.
+
+If Jar total target changes:
+audit how schedules/per-person savings targets currently behave.
+
+Do NOT silently modify scheduling logic in Phase 4D unless required.
+
+If changing the Jar total target currently has broader implications:
+document them.
+
+Goal editing should not bypass existing Jar target permissions.
+
+==================================================
+12. FINANCIAL TRANSPARENCY — MEMBER VIEW
+==================================================
+
+Each contributor should clearly understand THEIR money.
+
+Member financial card should show at minimum:
+
+Total Dripped Principal
+Refundable
+Committed
+Refund Pending
+Refunded
+
+DripJar Fees Paid
+Processing Fees Paid
+
+Potentially:
+
+Total Charged
+
+Use plain language.
+
+Example:
+
+Your Money
+
+Total Dripped
+$1,500
+
+Still Refundable
+$500
+
+Locked In
+$1,000
+
+Refund Pending
+$0
+
+Already Refunded
+$200
+
+Fees Paid
+DripJar: $45
+Processing: $18.42
+
+Do not combine fees into principal.
+
+==================================================
+13. FINANCIAL TRANSPARENCY — JAR VIEW
+==================================================
+
+Organizer and members should understand aggregate Jar state.
+
+Potential summary:
+
+Jar Goal:
+$10,000
+
+Current Saved Principal:
+$7,500
+
+Locked In:
+$5,500
+
+Still Refundable:
+$2,000
+
+Refund Pending:
+$300
+
+Refunded:
+$1,200 lifetime
+
+Remaining to Save:
+$2,500
+
+Do NOT count:
+
+- DripJar fees
+- Stripe fees
+
+toward Jar goal progress.
+
+Do not use total customer charged amount as savings progress.
+
+Principal only.
+
+==================================================
+14. PROGRESS PERCENTAGES
+==================================================
+
+Define percentages clearly.
+
+Suggested:
+
+Saved Progress %
+=
+current saved principal / Jar target principal
+
+Committed Progress %
+=
+committed principal / Jar target principal
+
+Clamp display values safely if historical edge cases exceed target.
+
+Do not mutate balances to fit percentages.
+
+For goals:
+
+Goal Saved %
+=
+allocated saved principal / goal target
+
+Goal Committed %
+=
+allocated committed principal / goal target
+
+==================================================
+15. MEMBER CONTRIBUTION BREAKDOWN
+==================================================
+
+Jar detail should optionally show members with:
+
+Member name/avatar
+Expected share
+Total Dripped principal
+Refundable
+Committed
+Refund pending
+Remaining expected contribution
+
+Audit current per-person split architecture.
+
+Important:
+
+Do NOT assume every Jar always has equal shares if current model allows otherwise.
+
+If current architecture only supports equal split:
+state that.
+
+Do not redesign unequal-share support in Phase 4D unless necessary.
+
+==================================================
+16. "AVAILABLE TO SPEND" LANGUAGE
+==================================================
+
+Be careful with wording.
+
+Until payout / DripJar Card is built, do not imply organizers can spend committed money directly.
+
+Avoid misleading UI like:
+
+"Available Cash"
+
+Preferred:
+
+Committed Principal
+Locked In
+Saved Toward Jar
+
+If a future payout/spend destination does not exist yet, do not create a fake "spendable balance."
+
+==================================================
+17. GOAL CARD UX
+==================================================
+
+Plan an intuitive goal card.
+
+Example concept:
+
+Flights
+$2,500 target
+
+Saved
+$2,500
+
+Locked In
+$1,800
+
+[██████████] 100% saved
+
+$700 of this goal's planned funding is still refundable.
+
+Funded
+
+The exact copy can evolve.
+
+Keep visual hierarchy simple.
+
+Do not overload each card with accounting jargon.
+
+==================================================
+18. JAR OVERVIEW UX
+==================================================
+
+Plan the Jar Overview around three levels:
+
+LEVEL 1 — simple
+Jar progress bar
+$7,500 of $10,000 saved
+
+LEVEL 2 — goals
+Flights
+Hotel
+Rental Car
+Activities
+
+LEVEL 3 — financial details
+Refundable
+Committed
+Pending refunds
+Fees
+Member breakdown
+
+The default screen should not feel like an accounting dashboard.
+
+Financial detail can be expandable / separate section.
+
+==================================================
+19. GOAL CREATION UX
+==================================================
+
+Organizer flow concept:
+
+Manage Goals
+
+Add Goal
+
+Name
+Flights
+
+Target
+$2,500
+
+Optional description
+
+Priority
+
+Save
+
+Show:
+
+Jar target:
+$10,000
+
+Currently allocated:
+$8,500
+
+Unallocated:
+$1,500
+
+Prevent total named-goal targets > Jar target.
+
+Make reordering easy.
+
+Audit whether drag/drop is appropriate in React Native or simple up/down ordering is safer for MVP.
+
+Prefer robust MVP over fancy gesture dependencies.
+
+==================================================
+20. DEFAULT GOALS / TEMPLATES
+==================================================
+
+Do NOT build a complex template system in Phase 4D.
+
+But audit whether a few client-side suggestions are cheap:
+
+Travel:
+Flights
+Hotel
+Transportation
+Activities
+Spending Money
+
+Wedding:
+Venue
+Food
+Photography
+Decor
+Other
+
+These should be suggestions only.
+
+No new database template subsystem.
+
+If it adds unnecessary scope, leave it out.
+
+==================================================
+21. ACTIVITY FEED
+==================================================
+
+Plan activity events for organizer goal changes:
+
+goal_created
+goal_updated
+goal_archived
+goal_reordered
+
+Do NOT create financial activity entries every time deterministic waterfall allocations shift.
+
+Example:
+a refund causes Hotel progress to drop
+
+That is financial consequence, not a separate organizer goal-edit event.
+
+Existing refund activity is sufficient.
+
+==================================================
+22. NOTIFICATIONS
+==================================================
+
+Do NOT expand notifications heavily.
+
+Potentially useful:
+- goal funded milestone
+- Jar reaches 100%
+
+But goal funding is derived and can move backward after a refund.
+
+For MVP, I prefer NO automatic "goal funded" notification unless dedup/reversal semantics are clean.
+
+Audit and recommend.
+
+==================================================
+23. FINANCIAL API DESIGN
+==================================================
+
+Plan server-authoritative endpoints.
+
+Potential:
+
+GET
+/jars/:jarId/financial-summary
+
+GET
+/jars/:jarId/goals
+
+POST
+/jars/:jarId/goals
+
+PATCH
+/jars/:jarId/goals/:goalId
+
+POST
+/jars/:jarId/goals/reorder
+
+DELETE or POST archive
+/jars/:jarId/goals/:goalId
+
+GET
+/jars/:jarId/members/financial-summary
+
+Use existing route conventions where possible.
+
+Prefer one aggregate read endpoint if it reduces mobile N+1 calls.
+
+Do not expose internal ledger account IDs.
+
+==================================================
+24. GOAL ALLOCATION SERVICE
+==================================================
+
+Plan a pure deterministic service such as conceptually:
+
+allocatePrincipalToGoals({
+  goals,
+  savedPrincipalCents,
+  committedPrincipalCents
+})
+
+Output:
+
+goalId
+targetCents
+savedAllocatedCents
+committedAllocatedCents
+savedPercent
+committedPercent
+fundingState
+
+Important:
+
+Committed allocation should not exceed saved allocation for any goal.
+
+Use the SAME goal priority waterfall independently but consistently.
+
+Example:
+
+Saved principal:
+$4,000
+
+Committed:
+$2,000
+
+Goals:
+Flights $2,500
+Hotel $3,500
+
+Saved allocation:
+Flights $2,500
+Hotel $1,500
+
+Committed allocation:
+Flights $2,000
+Hotel $0
+
+That is intuitive.
+
+Do not try to map commitment source lots to goal source lots.
+
+==================================================
+25. SOURCE OF TRUTH
+==================================================
+
+Authoritative monetary data remains:
+
+ledger entries
++
+existing immutable financial provenance records
+
+Jar Goals store PLANNING METADATA only:
+
+name
+target
+order
+archive state
+
+Never store:
+
+Stripe balance
+refundable balance
+committed balance
+refund pending balance
+
+on the Jar Goal row.
+
+==================================================
+26. CONCURRENCY
+==================================================
+
+Plan for:
+
+- two organizer goal edits
+- reorder + edit
+- archive + reorder
+- changing target while another organizer request is in-flight
+
+If one organizer only is currently supported, still keep updates transaction-safe.
+
+Use server validation inside transaction:
+
+SUM(active named targets) <= Jar target
+
+Do not trust client-calculated remaining allocation.
+
+==================================================
+27. SECURITY
+==================================================
+
+Mutation routes:
+
+Organizer only.
+
+Members:
+read-only goals.
+
+Verify:
+
+- member cannot create/edit/archive/reorder
+- outsider cannot view Jar financial details
+- organizer cannot use goal mutations to alter financial ledger
+- client cannot submit allocatedSaved/allocatedCommitted amounts
+- no Stripe/provider identifiers in goal APIs
+- no arbitrary user/member ID mutation
+- aggregate member financial view follows existing privacy/authorization rules
+
+==================================================
+28. PRIVACY
+==================================================
+
+Audit how much financial detail every Jar member should see about OTHER members.
+
+This is a product decision requiring explicit recommendation.
+
+Possible models:
+
+A.
+Every member sees every other member's exact:
+contributed/refundable/committed/refunded amounts
+
+B.
+Organizer sees exact financial detail;
+regular members see:
+- group totals
+- their own exact numbers
+- other members' progress percentage/status only
+
+I currently prefer B for privacy.
+
+Example regular member sees:
+
+Alex
+75% of share saved
+Locked in
+
+not:
+
+Alex has $1,243.17 refundable.
+
+Organizer may need exact figures for coordination.
+
+Analyze existing UX/permissions and recommend.
+
+DO NOT silently choose without surfacing this decision.
+
+==================================================
+29. FEES UX
+==================================================
+
+Clearly distinguish:
+
+Jar principal
+DripJar fee
+processing fee
+
+Per-member and transaction history should never imply fees counted toward the Jar.
+
+Potential copy:
+
+"You've Dripped $1,000 into the Jar."
+
+not:
+
+"You've paid $1,040 into the Jar"
+
+if $40 was fees.
+
+Total charged may be shown separately.
+
+==================================================
+30. TRANSACTION HISTORY
+==================================================
+
+Audit current activity/transaction screens.
+
+Phase 4D may benefit from a user-friendly financial history:
+
+Drip
+$200 principal
+
+DripJar fee
+$6
+
+Processing
+$6.46
+
+Total charged
+$212.46
+
+Status:
+Completed
+
+Then:
+
+Committed $200
+or
+Refund requested $100
+Refund completed $100
+
+Do NOT expose raw ledger debit/credit jargon to consumers.
+
+Plan whether this belongs in 4D or should remain a later polish phase.
+
+==================================================
+31. EMPTY / EDGE STATES
+==================================================
+
+Plan UX for:
+
+- no goals
+- zero funded
+- Jar overfunded beyond target
+- all goals funded
+- some money unallocated
+- refund causes previously funded goal to drop
+- archived goal
+- target = $0 invalid
+- goal target = $0 invalid
+- Jar cancelled
+- Jar completed
+- no financial transactions yet
+
+==================================================
+32. OVERFUNDING
+==================================================
+
+If current principal exceeds Jar target:
+
+Example:
+Jar target $10,000
+Current saved $10,500
+
+Do not discard the extra $500 in calculations.
+
+Display:
+
+Goal progress:
+100%
+
+Jar:
+$10,500 saved of $10,000 target
+
+Over target:
+$500
+
+Goals should cap their allocated display at goal targets.
+
+Excess becomes:
+
+Unallocated / Above Goal
+
+Do not create phantom new goal rows.
+
+==================================================
+33. JAR TARGET CHANGES
+==================================================
+
+Audit current ability to edit Jar target after contributions exist.
+
+This may be dangerous.
+
+If current product allows it:
+report exact behavior.
+
+Recommend whether:
+
+- target may increase
+- target may decrease
+- target cannot drop below current saved/committed amount
+- goal targets must remain valid after target change
+
+Do NOT change this behavior in the planning step.
+
+Surface any required Phase 4D invariant.
+
+==================================================
+34. PERFORMANCE
+==================================================
+
+Avoid N+1 ledger queries.
+
+The Jar detail screen may need:
+
+Jar financial totals
+goals
+member progress
+current user financial state
+
+Plan an efficient aggregate-query/service approach.
+
+Do not sacrifice ledger correctness for caching.
+
+==================================================
+35. MIGRATION DESIGN
+==================================================
+
+Expected new persisted financial-planning schema should be SMALL.
+
+Likely one primary table:
+
+jar_goals
+
+Potential fields:
+
+id
+jar_id
+name
+description
+target_principal_cents
+sort_order
+status
+created_at
+updated_at
+archived_at
+
+Potential constraints:
+
+target > 0
+unique(jar_id, sort_order) or safe reorder strategy
+
+Do not create allocation tables unless a real product requirement requires persisted allocations.
+
+Derived allocations are preferred.
+
+Current migration chain ends at:
+
+0017
+
+Phase 4D likely begins at:
+
+0018
+
+Audit exact migration count needed.
+
+==================================================
+36. TEST STRATEGY — GOALS
+==================================================
+
+Plan tests for:
+
+- organizer creates goal
+- member cannot create goal
+- outsider rejected
+- edit goal
+- archive goal
+- reorder goals
+- sum of active targets cannot exceed Jar target
+- unallocated target calculation
+- waterfall allocation
+- refunds reduce derived goal progress
+- commitments do not alter total saved progress
+- committed waterfall correct
+- fees excluded
+- refundPending excluded if selected policy
+- refunded excluded
+- overfunded Jar
+- goal fully funded
+- goal returns to partially funded after refund
+- archived goal removed from active allocation
+- concurrency on target edits
+- deterministic order
+
+==================================================
+37. TEST STRATEGY — TRANSPARENCY
+==================================================
+
+Plan tests for:
+
+- Jar principal totals correct
+- refundable correct
+- committed correct
+- pending refund correct
+- refunded lifetime correct
+- fees separate
+- remaining-to-save correct
+- percentages correct
+- current-user finance correct
+- organizer exact member finance access
+- normal-member privacy policy enforced
+- no fees counted toward progress
+- no refunded principal counted toward current saved
+- transaction values shown as principal vs fees correctly
+- zero-state responses
+- over-target response
+
+==================================================
+38. NO FINANCIAL MUTATION FROM GOALS
+==================================================
+
+Add an explicit architecture invariant:
+
+Creating, editing, archiving, or reordering a Jar Goal MUST NOT create:
+
+- financial_transactions
+- ledger_transactions
+- ledger_entries
+- Stripe calls
+- refund records
+- commitment records
+
+Goals are metadata/projection only.
+
+Add tests proving ledger counts and balances are unchanged by goal mutations.
+
+==================================================
+39. OUT OF SCOPE
+==================================================
+
+DO NOT plan implementation of:
+
+- live Stripe
+- production Stripe activation
+- Connect payouts
+- organizer bank payout
+- DripJar Card / Issuing
+- AutoDrip
+- saved payment methods
+- goal-specific Stripe routing
+- goal-specific bank accounts
+- goal-specific commitment
+- goal-specific refunds
+- production deployment
+- Task #37 refund scheduler
+- Task #38 notifications
+- Task #39 organizer refund dashboard
+
+Phase 4D is goals + transparency only.
+
+==================================================
+40. ARCHITECTURE DECISIONS TO RETURN
+==================================================
+
+Create a Draft implementation task:
+
+Phase 4D — Jar Goals and Financial Transparency
+
+Do NOT execute it.
+
+Return a concise plan summary containing:
+
+- proposed jar_goals schema
+- whether unallocated target is persisted or derived
+- exact goal waterfall formula
+- which principal states count toward "Saved"
+- which principal states count toward "Committed"
+- how overfunding works
+- goal CRUD/reorder API
+- aggregate financial-summary API
+- member privacy recommendation
+- Jar target-change recommendation
+- mobile Jar Overview structure
+- goal management UX
+- transaction-history recommendation
+- activity/notification recommendation
+- migration(s) expected
+- concurrency strategy
+- security strategy
+- test plan
+- any architectural decision requiring my approval
+
+Do not generate a PDF for this planning-only step.
+
+The implementation task itself MUST require:
+
+phase4d-final-report.pdf
+
+as the ABSOLUTE FINAL ACTION after:
+- implementation
+- testing
+- security/privacy review
+- fresh migrations
+- commit
+- push
+- origin verification
+- final git status
+
+Do not start implementation until I explicitly accept the updated Task.

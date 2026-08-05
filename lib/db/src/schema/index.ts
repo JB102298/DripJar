@@ -140,6 +140,8 @@ export const jarsRelations = relations(jars, ({ one, many }) => ({
   agreements: many(agreements),
   activityEvents: many(activityEvents),
   notifications: many(notifications),
+  // Phase 4D
+  goals: many(jarGoals),
 }));
 
 // ─── Jar Members ─────────────────────────────────────────────────────────────
@@ -948,3 +950,39 @@ export type RefundRequest = typeof refundRequests.$inferSelect;
 export type NewRefundRequest = typeof refundRequests.$inferInsert;
 export type RefundAllocation = typeof refundAllocations.$inferSelect;
 export type NewRefundAllocation = typeof refundAllocations.$inferInsert;
+
+// ─── Jar Goals — Phase 4D ─────────────────────────────────────────────────────
+//
+// Planning metadata only. No ledger_entries, financial_transactions, or Stripe
+// calls are created by goal mutations. All funding allocation is derived at
+// query time via a pure waterfall function over the existing ledger.
+//
+// Invariants enforced server-side:
+//   SUM(active goal targets) ≤ jars.goalAmountCents  (locked in FOR UPDATE txn)
+//   Archived goals do not participate in the waterfall
+//   Hard delete only when jar.status IN ('Draft','Inviting')
+//   Soft archive otherwise (preserve for history/audit)
+
+export const jarGoals = pgTable("jar_goals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jarId: uuid("jar_id").notNull().references(() => jars.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  targetPrincipalCents: integer("target_principal_cents").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  // 'active' | 'archived'
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  archivedAt: timestamp("archived_at"),
+}, (t) => [
+  index("jar_goals_jar_id_status_sort_idx").on(t.jarId, t.status, t.sortOrder),
+]);
+
+export const jarGoalsRelations = relations(jarGoals, ({ one }) => ({
+  jar: one(jars, { fields: [jarGoals.jarId], references: [jars.id] }),
+}));
+
+// Phase 4D
+export type JarGoal = typeof jarGoals.$inferSelect;
+export type NewJarGoal = typeof jarGoals.$inferInsert;

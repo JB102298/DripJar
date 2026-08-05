@@ -1,0 +1,341 @@
+Perform a READ-ONLY Phase 4C conformance audit first.
+
+Do NOT start follow-up Tasks #37, #38, or #39.
+Do NOT start Phase 4D.
+Do NOT enable live Stripe.
+Do NOT change files yet.
+Do NOT commit or push yet.
+
+Current reported Phase 4C commit:
+52f1eab
+
+We need to resolve several Phase 4C conformance questions before approval.
+
+==================================================
+A. REFUND CUTOFF GATE — CRITICAL PRODUCT RULE
+==================================================
+
+The final report states:
+
+D3 — status='Saving' AND cutoffDate exists AND today >= cutoffDate
+"Same check for both commitment and refund routes."
+
+Audit the ACTUAL runtime implementation.
+
+Our intended business rule is:
+
+COMMITMENT:
+- only available at/after the commitment cutoff/phase
+- explicit contributor action required
+
+REFUND:
+- eligible Stripe-backed principal remains refundable UNTIL that specific principal is explicitly committed
+- refund eligibility should NOT require waiting until cutoff merely because the Jar is still before the commitment phase
+
+Determine:
+
+1. Does refund preview currently require today >= cutoffDate?
+2. Does refund creation currently require today >= cutoffDate?
+3. Does either route block otherwise-refundable principal before cutoff?
+4. Where exactly is the gate enforced?
+
+If refunds are currently cutoff-gated, classify this as a Phase 4C product-rule bug.
+
+Recommended correction:
+
+Refunds should be allowed for authenticated active contributors whenever eligible refundable Stripe-backed principal exists, subject to normal Jar lifecycle restrictions.
+
+Do NOT allow refunds if:
+- principal is committed
+- principal is already REFUND_PENDING
+- principal was already refunded
+- source payment is not eligible
+- Jar lifecycle genuinely forbids financial mutations for another explicit reason
+
+But cutoff date alone must NOT block a refund.
+
+Commitment remains cutoff-gated.
+
+Do not edit yet during the audit.
+
+==================================================
+B. AGREEMENT / COMMITMENT RULE
+==================================================
+
+Verify the actual implementation requires:
+
+- current active agreement exists
+- authenticated contributor accepted that exact agreement/version
+- snapshot stores exact agreement ID/version
+- confirmation rejects if a newer required agreement version became active
+- fund_commitments permanently preserve that exact agreement ID/version
+- agreement fields are NOT NULL for real fund commitments
+
+Report exact schema constraints and route behavior.
+
+==================================================
+C. COMMITMENT SNAPSHOT PROVENANCE
+==================================================
+
+Verify:
+
+1. preview stores exact source financial-transaction lots
+2. confirm validates those exact lots remain available
+3. new Drip after preview does NOT invalidate the snapshot merely because total refundable increased
+4. new Drip after preview remains refundable
+5. old snapshotted dollars cannot be substituted with newly-arrived principal
+6. successful duplicate confirm with same snapshotToken returns the existing commitment without a second ledger posting
+
+Report tests proving each.
+
+==================================================
+D. REFUND GATING / LOT PROVENANCE
+==================================================
+
+Verify refund FIFO remaining per source FT correctly subtracts:
+
+- commitment allocations
+- pending/requires_action refund allocations
+- succeeded refund allocations
+
+Verify completed/failed allocation behavior cannot cause the same source principal to be refunded twice.
+
+Verify simulated/manual contributions are completely excluded.
+
+==================================================
+E. REFUND STATE MACHINE
+==================================================
+
+Verify Stripe v22.4.0 handling:
+
+refund.updated:
+- pending
+- requires_action
+- succeeded
+- failed
+- canceled
+
+refund.failed:
+- supplemental idempotent terminal failure handling
+
+Verify mapping:
+
+Stripe "canceled"
+→ internal "cancelled"
+
+Verify unknown Stripe refund statuses:
+- do not mutate financial state
+- are handled safely
+
+Verify terminal states cannot regress.
+
+==================================================
+F. MULTI-ALLOCATION REFUNDS
+==================================================
+
+For a request spanning two original Drips, verify aggregate behavior:
+
+All succeeded
+→ completed
+
+Some terminal succeeded + some terminal failed/cancelled
+→ partially_failed
+
+All terminal failed/cancelled
+→ failed
+
+Any allocation pending/requires_action
+→ processing
+
+Verify ledger transitions occur PER ALLOCATION, not for the whole request at once.
+
+==================================================
+G. REFUND DISPATCH CRASH SAFETY
+==================================================
+
+Verify:
+
+- reservation commits before Stripe call
+- undispatched allocations are durable
+- dispatcher uses stable:
+  dripjar-refund:<allocationId>
+- retry may call Stripe again but uses same idempotency key
+- same logical Stripe Refund is recovered
+- one stripeRefundId becomes authoritative
+- exactly one ledger terminal posting occurs
+
+No scheduler is required for test correctness.
+
+==================================================
+H. BALANCE INVARIANT CLARIFICATION
+==================================================
+
+The final report says:
+
+contributedPrincipal =
+CTRB_REFUNDABLE + CTRB_COMMITTED + REFUND_PENDING
+
+Audit what `contributedPrincipal` actually means.
+
+After a completed refund, refunded principal moves to REFUND_CLR and is no longer in those three liability buckets.
+
+Therefore distinguish clearly between:
+
+1. lifetime successfully contributed principal
+2. current retained/outstanding principal
+3. refunded principal
+
+A sensible accounting relationship may be conceptually:
+
+lifetime contributed principal =
+current refundable
++ committed
++ refund pending
++ refunded
+
+depending on how the existing balance service defines these fields.
+
+Do NOT change accounting yet.
+
+Report the exact current formulas and whether the report's invariant is incomplete or whether `contributedPrincipal` actually means "currently held principal."
+
+==================================================
+I. SNAPSHOT TTL
+==================================================
+
+Approved architecture previously specified a 15-minute commitment snapshot TTL.
+
+The implementation report says 10 minutes.
+
+Determine:
+- actual runtime TTL
+- whether 10 minutes was deliberate or accidental
+- whether tests depend on 10
+
+Do not change merely for consistency if 10 minutes is safe.
+
+Recommend which value should be canonical.
+
+==================================================
+J. MIGRATION REPRODUCIBILITY
+==================================================
+
+Do a CLEAN disposable database/schema verification.
+
+Run committed migrations only:
+
+0000 → 0017
+
+No manual SQL patches.
+
+Verify resulting schema includes:
+
+- REFUND_PENDING
+- commitment_snapshots
+- commitment_snapshot_allocations
+- fund_commitments
+- commitment_allocations
+- refund_requests
+- refund_allocations
+- all required indexes
+- agreement NOT NULL requirements
+- expanded ft_transaction_type_check
+- all refund status constraints
+
+Confirm _journal.json correctly registers every migration.
+
+==================================================
+K. FINAL TEST TOTALS
+==================================================
+
+Report actual test totals.
+
+Run:
+
+- Phase 4C commitment suite
+- Phase 4C refund suite
+- full API suite
+- full API suite a second time
+- mobile suite
+- API typecheck
+- mobile typecheck
+- lib/db typecheck
+- API production build
+
+Do NOT use historical 359/359 as the expected total.
+
+Report actual totals after adding Phase 4C.
+
+==================================================
+L. GIT / PUSH STATE
+==================================================
+
+Verify:
+
+git rev-parse HEAD
+git rev-parse origin/main
+
+Report exact hashes.
+
+Determine whether 52f1eab was pushed.
+
+Do NOT attempt a PAT.
+
+If push is needed later, use only the normal Replit managed GitHub integration.
+
+==================================================
+M. SECURITY / CONCURRENCY AUDIT
+==================================================
+
+Audit:
+
+- organizer cannot commit contributor funds
+- organizer cannot initiate contributor refund
+- no mutation route accepts authoritative memberId
+- no client PI/Charge/Refund ID authority
+- stale agreement/version blocked
+- stale source-lot snapshot blocked
+- refund vs commit race
+- concurrent double refund
+- concurrent double commit
+- new Drip vs commit
+- refund dispatcher retry
+- duplicate refund webhooks
+- different webhook event IDs for same Refund
+- terminal state regression
+- negative refundable balance
+- refunding fees
+- refunding committed principal
+- refunding REFUND_PENDING principal
+- nested transaction mistakes
+- Stripe test-mode guard remains intact
+
+==================================================
+N. REPORTING
+==================================================
+
+This is a READ-ONLY audit.
+
+Do not generate a PDF yet.
+
+Return ONLY a concise summary containing:
+
+- Refund cutoff gate: correct / bug
+- Agreement binding: pass/fail
+- Snapshot provenance: pass/fail
+- Refund state machine: pass/fail
+- Balance invariant explanation
+- Snapshot TTL
+- Fresh 0000→0017 migration: pass/fail
+- Phase 4C focused tests
+- Full API run 1
+- Full API run 2
+- Mobile tests
+- Typechecks/build
+- local HEAD
+- origin/main
+- whether push is needed
+- security blockers
+- recommended corrections
+
+Do not modify code until I approve the audit findings.

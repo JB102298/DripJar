@@ -257,6 +257,49 @@ export async function getJarFinancialBalance(
   };
 }
 
+// ─── Phase 4D: Jar-level principal breakdown ──────────────────────────────────
+
+/**
+ * Derive the jar-level principal breakdown for goal waterfall and progress display.
+ *
+ * savedPrincipalCents = refundable + committed
+ *   — the canonical "currently saved" figure used for the Jar progress bar,
+ *     goal waterfall allocation, and financial summary.
+ *   — excludes refundPending, refunded, and all fee accounts.
+ *
+ * Uses a single ledger aggregation query.
+ */
+export async function getJarPrincipalBreakdown(jarId: string): Promise<{
+  savedPrincipalCents: number;
+  committedPrincipalCents: number;
+  refundablePrincipalCents: number;
+  refundPendingCents: number;
+  refundedPrincipalCents: number;
+}> {
+  const agg = await aggregateLedger(jarId);
+  const refundable = Math.max(0, get(agg, "CTRB_REFUNDABLE", "credit") - get(agg, "CTRB_REFUNDABLE", "debit"));
+  const committed = get(agg, "CTRB_COMMITTED", "credit");
+  const refundPending = Math.max(0, get(agg, "REFUND_PENDING", "credit") - get(agg, "REFUND_PENDING", "debit"));
+  const refunded = get(agg, "REFUND_CLR", "credit");
+  return {
+    savedPrincipalCents: refundable + committed,
+    committedPrincipalCents: committed,
+    refundablePrincipalCents: refundable,
+    refundPendingCents: refundPending,
+    refundedPrincipalCents: refunded,
+  };
+}
+
+/**
+ * Get just the saved principal for a jar (refundable + committed).
+ * Ledger-backed replacement for the contributions-table getTotalSaved function.
+ * Used by Jar summary, health, and progress endpoints.
+ */
+export async function getJarSavedPrincipalCents(jarId: string): Promise<number> {
+  const { savedPrincipalCents } = await getJarPrincipalBreakdown(jarId);
+  return savedPrincipalCents;
+}
+
 /**
  * Derive the full detail view for a single financial transaction.
  * Used by the internal dev transparency endpoint.

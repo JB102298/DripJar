@@ -1,0 +1,123 @@
+Accept Task #40 — Phase 4D Jar Goals and Financial Transparency.
+
+The three outstanding architecture decisions are APPROVED as follows:
+
+1. totalSavedCents SOURCE OF TRUTH
+
+YES — update getTotalSaved / equivalent Jar progress calculations to be ledger-backed.
+
+Canonical current saved principal:
+
+totalSavedCents =
+refundablePrincipalCents
++ committedPrincipalCents
+
+EXCLUDE:
+
+- refundPendingPrincipalCents
+- refundedPrincipalCents
+- DripJar fees
+- processing fees
+- simulated/manual contribution rows that never entered the real financial ledger
+
+The Jar progress bar, financial-summary API, remaining-to-save calculation, and Jar Goals waterfall must all use the SAME ledger-backed definition.
+
+Do not maintain a competing contributions-table definition of real saved principal.
+
+If simulated contribution UI still exists for old development/demo flows, keep it clearly separate from real financial progress.
+
+2. GOAL sort_order
+
+Use sequential integers.
+
+Canonical ordering:
+
+1, 2, 3, ...
+
+On reorder:
+
+- organizer sends the complete intended active-goal order
+- server validates every goal belongs to that Jar
+- server validates no duplicates/missing IDs
+- perform reorder inside one DB transaction
+- lock appropriate Jar/goal rows
+- rewrite sequential sort_order values atomically
+- return the canonical reordered list
+
+Do NOT use fractional/float ordering in Phase 4D.
+
+Goal counts are small enough that deterministic full reassignment is simpler and safer.
+
+3. GOAL DELETION / ARCHIVING
+
+Approved rule:
+
+If Jar status is:
+
+Draft
+or
+Inviting
+
+a goal may be hard deleted.
+
+Once the Jar has launched beyond those pre-launch states:
+
+do NOT hard delete historical goals.
+
+Use soft archive instead.
+
+Archived goals:
+
+- remain persisted for history/audit
+- do not participate in active waterfall allocation
+- do not count toward active named-goal target totals
+- are hidden from the default active-goal view unless history is requested
+
+If archiving an active goal changes the unallocated target amount, recalculate the derived projection only.
+
+No ledger mutation occurs.
+
+GENERAL PHASE 4D INVARIANTS REMAIN:
+
+- Jar Goals are planning metadata only
+- no Stripe calls from goal mutations
+- no financial_transactions from goal mutations
+- no ledger_transactions from goal mutations
+- no ledger_entries from goal mutations
+- allocations are derived, not stored as monetary balances
+- refundPending does NOT count as saved
+- refunded principal does NOT count as saved
+- fees never count toward Jar progress
+- committed is a subset of current saved principal
+- regular members should not receive other members' exact private dollar balances unless the approved Task #40 plan explicitly implements the privacy model already proposed
+- organizer may receive exact member financial detail where authorized
+- Stripe TEST MODE only
+- no Phase 4D work outside goals + financial transparency
+
+Proceed with Task #40 implementation.
+
+Before coding, preserve the accepted architecture in the task description.
+
+At completion require:
+
+- all Phase 4D focused tests pass
+- all existing API tests pass
+- all mobile tests pass
+- all typechecks clean
+- production build passes
+- fresh migration chain from 0000 through latest passes
+- security/privacy review passes
+- goal mutations proven not to change ledger counts/balances
+- commit
+- push using Replit managed GitHub integration only
+- HEAD === origin/main
+
+Do not use a PAT.
+
+Generate:
+
+phase4d-final-report.pdf
+
+as the ABSOLUTE FINAL ACTION after all implementation, validation, commit, push, origin verification, and final git-status checks.
+
+After generating the PDF, perform no further project actions.
