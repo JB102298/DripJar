@@ -585,6 +585,84 @@ describe("Phase 4C Commitment — PART F: Stale/expired snapshots", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PART G — Snapshot TTL (15 minutes)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Phase 4C Commitment — PART G: Snapshot TTL = 15 minutes", () => {
+  let token: string;
+  let userId: string;
+  let jarId: string;
+  let memberId: string;
+
+  beforeAll(async () => {
+    clearLedgerAccountCache();
+    ({ token, userId } = await register("ttl-g"));
+    ({ id: jarId } = await createJar(token, "TTL Jar"));
+    await launchJar(token, jarId);
+    await setCutoffPast(jarId);
+    memberId = await getMemberId(jarId, userId);
+    await seedAgreement(jarId, userId);
+    await seedStripeFt(jarId, memberId, 5_000);
+  });
+
+  it("preview expiresAt is approximately 15 minutes from now (±60 s)", async () => {
+    const before = Date.now();
+    const res = await request(app)
+      .post(`${BASE}/jars/${jarId}/commitment/preview`)
+      .set("Authorization", `Bearer ${token}`);
+    const after = Date.now();
+    expect(res.status).toBe(200);
+    const expiresAt = new Date(res.body.expiresAt).getTime();
+    // Must be between 14 min and 16 min from the request window
+    expect(expiresAt).toBeGreaterThan(before + 14 * 60_000);
+    expect(expiresAt).toBeLessThan(after  + 16 * 60_000);
+  });
+
+  it("confirm succeeds when snapshot is within the 15-minute window", async () => {
+    const preview = await request(app)
+      .post(`${BASE}/jars/${jarId}/commitment/preview`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(preview.status).toBe(200);
+    // Immediately confirm — well within the 15-minute TTL
+    const res = await request(app)
+      .post(`${BASE}/jars/${jarId}/commitment/confirm`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ snapshotToken: preview.body.snapshotToken });
+    expect(res.status).toBe(200);
+    expect(res.body.fundCommitmentId).toBeTruthy();
+  });
+
+  it("confirm rejects (409 snapshot_stale) when snapshot is force-expired beyond 15 minutes", async () => {
+    // Fresh jar so it has no existing commitment
+    const { token: t2, userId: u2 } = await register("ttl-expire-g");
+    const { id: j2 } = await createJar(t2, "TTL Expire Jar");
+    await launchJar(t2, j2);
+    await setCutoffPast(j2);
+    const m2 = await getMemberId(j2, u2);
+    await seedAgreement(j2, u2);
+    await seedStripeFt(j2, m2, 3_000);
+
+    const preview = await request(app)
+      .post(`${BASE}/jars/${j2}/commitment/preview`)
+      .set("Authorization", `Bearer ${t2}`);
+    const { snapshotToken } = preview.body as { snapshotToken: string };
+
+    // Manually push expiresAt past the 15-minute mark (simulate timeout)
+    await db
+      .update(commitmentSnapshots)
+      .set({ expiresAt: new Date(Date.now() - 16 * 60_000) })
+      .where(eq(commitmentSnapshots.snapshotToken, snapshotToken));
+
+    const res = await request(app)
+      .post(`${BASE}/jars/${j2}/commitment/confirm`)
+      .set("Authorization", `Bearer ${t2}`)
+      .send({ snapshotToken });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("snapshot_stale");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PART H — Financial balance after commitment
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -635,6 +713,87 @@ describe("Phase 4C Commitment — PART H: Financial balance", () => {
     expect(
       b.refundablePrincipalCents + b.refundPendingCents + b.committedPrincipalCents + b.refundedPrincipalCents
     ).toBe(b.contributedPrincipalCents);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PART J — Concurrent duplicate commit (race safety)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Phase 4C Commitment — PART J: Concurrent duplicate commit race", () => {
+  let token: string;
+  let jarId: string;
+  let memberId: string;
+  let snapshotToken: string;
+
+  beforeAll(async () => {
+    clearLedgerAccountCache();
+    const { token: t, userId } = await register("concurrent-j");
+    token = t;
+    ({ id: jarId } = await createJar(token, "Concurrent Jar"));
+    await launchJar(token, jarId);
+    await setCutoffPast(jarId);
+    memberId = await getMemberId(jarId, userId);
+    await seedAgreement(jarId, userId);
+    await seedStripeFt(jarId, memberId, 12_000);
+
+    const preview = await request(app)
+      .post(`${BASE}/jars/${jarId}/commitment/preview`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(preview.status).toBe(200);
+    snapshotToken = preview.body.snapshotToken;
+  });
+
+  it("two concurrent confirms with the same snapshotToken both return 2xx (no HTTP 500)", async () => {
+    const [r1, r2] = await Promise.all([
+      request(app)
+        .post(`${BASE}/jars/${jarId}/commitment/confirm`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({ snapshotToken }),
+      request(app)
+        .post(`${BASE}/jars/${jarId}/commitment/confirm`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({ snapshotToken }),
+    ]);
+    // Both must be 2xx — never 500
+    expect(r1.status).toBeGreaterThanOrEqual(200);
+    expect(r1.status).toBeLessThan(300);
+    expect(r2.status).toBeGreaterThanOrEqual(200);
+    expect(r2.status).toBeLessThan(300);
+    // Both return a fundCommitmentId and the same commitment ID
+    expect(r1.body.fundCommitmentId).toBeTruthy();
+    expect(r2.body.fundCommitmentId).toBeTruthy();
+    expect(r1.body.fundCommitmentId).toBe(r2.body.fundCommitmentId);
+    // Exactly one of them is the "new" commit, the other is idempotent
+    const bothIdempotent = r1.body.idempotent === true && r2.body.idempotent === true;
+    const oneIdempotent = r1.body.idempotent !== r2.body.idempotent;
+    expect(bothIdempotent || oneIdempotent).toBe(true);
+  });
+
+  it("exactly one fund_commitments row exists for the member/jar pair", async () => {
+    const rows = await db
+      .select({ id: fundCommitments.id })
+      .from(fundCommitments)
+      .where(and(eq(fundCommitments.memberId, memberId), eq(fundCommitments.jarId, jarId)));
+    expect(rows.length).toBe(1);
+  });
+
+  it("exactly one commitment_transfer financial_transaction exists", async () => {
+    const rows = await db
+      .select({ id: financialTransactions.id })
+      .from(financialTransactions)
+      .where(and(
+        eq(financialTransactions.memberId, memberId),
+        eq(financialTransactions.transactionType, "commitment_transfer"),
+      ));
+    expect(rows.length).toBe(1);
+  });
+
+  it("refundable balance is not negative after concurrent commit", async () => {
+    const { getMemberFinancialBalance } = await import("../lib/financial-balance.js");
+    const b = await getMemberFinancialBalance(jarId, memberId);
+    expect(b.refundablePrincipalCents).toBeGreaterThanOrEqual(0);
+    expect(b.invariantHolds).toBe(true);
   });
 });
 

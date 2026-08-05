@@ -398,6 +398,9 @@ router.get("/jars/:jarId/refunds/:refundId", requireAuth, async (req, res) => {
 // refund for the same allocation.
 //
 // No scheduler is wired in Phase 4C; tests call this endpoint directly.
+// IMPORTANT: A production cron job calling this endpoint (authenticated with
+// INTERNAL_REMINDER_TOKEN) is a pre-go-live prerequisite before enabling live
+// Stripe refunds. Phase 4C remains in TEST MODE until that scheduler is in place.
 
 router.post("/internal/dispatch-refunds", requireInternalToken, async (_req, res) => {
   const stats = {

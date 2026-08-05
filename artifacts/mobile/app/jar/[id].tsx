@@ -354,10 +354,12 @@ export default function JarDetailScreen() {
     const cutoffDate = (jar as any)?.cutoffDate as string | null | undefined;
     const todayUtc = new Date().toISOString().slice(0, 10);
     const cutoffReached = !!cutoffDate && todayUtc >= cutoffDate;
-    // Show commitment/refund actions when the phase gate is likely open.
-    // The API enforces the exact gate rules; these flags just control button visibility.
+    // The API enforces the exact gate rules; these flags control button visibility.
+    // Commit (Lock In) requires the commitment cutoff to have been reached.
+    // Refund is available throughout the full Saving lifecycle — the API has no cutoff-date
+    // requirement for refunds, only that the jar is in an active Saving/Commitment state.
     const showCommitBtn = cutoffReached && (phase === 'Saving' || phase === 'Commitment');
-    const showRefundBtn = cutoffReached && (phase === 'Saving' || phase === 'Commitment');
+    const showRefundBtn = phase === 'Saving' || phase === 'Commitment';
     return (
       <View style={styles.tabContent}>
         <View style={styles.overviewTopRow}>
@@ -427,6 +429,7 @@ export default function JarDetailScreen() {
           <View style={[styles.actionRow, { marginTop: 8 }]}>
             {showCommitBtn && (
               <Pressable
+                testID="commit-button"
                 style={[styles.actionButton, { backgroundColor: colors.darkGreen, flex: 1 }]}
                 onPress={() => router.push(`/commitment/${jar.id}`)}
               >
@@ -436,6 +439,7 @@ export default function JarDetailScreen() {
             )}
             {showRefundBtn && (
               <Pressable
+                testID="refund-button"
                 style={[
                   styles.actionButton,
                   { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, flex: 1 },

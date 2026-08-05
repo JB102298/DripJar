@@ -4,14 +4,24 @@
  * Derives all financial balances from immutable ledger entries.
  * NEVER trusts client-provided numbers or independently editable columns.
  *
- * Invariant verified by this service (Phase 4C):
- *   refundable + refundPending + committed + refunded = contributedPrincipal
+ * Balance invariant verified by this service (Phase 4C):
  *
- * contributedPrincipal is computed as the sum of all principal currently
- * tracked in the system across all accounts:
- *   net(CTRB_REFUNDABLE) + CTRB_COMMITTED + net(REFUND_PENDING) + REFUND_CLR
- * This equals the original contributed amount because all ledger entries are
- * balanced and no principal is created or destroyed between accounts.
+ *   lifetimeContributedPrincipalCents =
+ *     refundablePrincipalCents        (CTRB_REFUNDABLE net — currently free to refund or commit)
+ *   + committedPrincipalCents         (CTRB_COMMITTED — locked for payout)
+ *   + refundPendingCents              (REFUND_PENDING net — reserved for in-flight refunds)
+ *   + refundedPrincipalCents          (REFUND_CLR — completed refund outflows)
+ *
+ * This is a LIFETIME total, not a "currently held" total. Once principal is
+ * refunded it moves from REFUND_PENDING to REFUND_CLR and is no longer
+ * retained by the system, but it still counts toward lifetimeContributed.
+ *
+ * currentlyRetainedPrincipalCents = refundable + committed + refundPending
+ *   (i.e. excludes refundedPrincipalCents which has left the system)
+ *
+ * The four-term invariant always holds because all ledger postings are
+ * balanced and principal only moves between accounts — never created or
+ * destroyed.
  *
  * Simulated contributions (contributions.status = 'simulated') are completely
  * separate from ledger-backed balances. This service queries ledger_entries
@@ -35,9 +45,16 @@ export interface MemberFinancialBalance {
   memberId: string;
   currency: string;
 
-  /** Total principal ever dripped (net of all principal accounts). */
+  /**
+   * Lifetime contributed principal: the total principal ever successfully
+   * contributed by this member to this jar. Equals the sum of all four
+   * principal-account buckets:
+   *   refundable + committed + refundPending + refunded
+   * This value does NOT decrease when refunds are completed — refunded
+   * principal moves from refundPending to refunded but the sum is unchanged.
+   */
   contributedPrincipalCents: number;
-  /** Current refundable = contributed − pending − committed − refunded. */
+  /** Currently refundable principal — eligible for a new refund or commitment. */
   refundablePrincipalCents: number;
   /** Principal reserved for in-flight Stripe refunds (REFUND_PENDING net). */
   refundPendingCents: number;
@@ -153,10 +170,11 @@ function deriveFromLedger(
   const committedPrincipalCents = ctrbCommCr;
   const refundedPrincipalCents = refundClrCr;
 
-  // contributedPrincipal = sum of all principal currently tracked anywhere.
-  // This equals the original contribution amount because all ledger postings
-  // are balanced and principal only moves between accounts (never created/destroyed).
-  // Formula holds across all Phase 4A/4B/4C posting patterns.
+  // lifetimeContributedPrincipalCents = refundable + committed + refundPending + refunded
+  // This is a LIFETIME total. Refunded principal moves CTRB_REFUNDABLE→REFUND_PENDING→REFUND_CLR
+  // but remains in the sum — it never leaves the four-term equation.
+  // The formula holds across all Phase 4A/4B/4C posting patterns because all
+  // ledger transactions are balanced and principal only moves between accounts.
   const contributedPrincipalCents =
     refundablePrincipalCents + refundPendingCents + committedPrincipalCents + refundedPrincipalCents;
 

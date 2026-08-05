@@ -52,8 +52,8 @@ const router = Router();
 
 type DbOrTx = typeof db;
 
-/** Snapshot TTL in milliseconds (5 minutes). */
-const SNAPSHOT_TTL_MS = 5 * 60_000;
+/** Snapshot TTL in milliseconds (15 minutes — per approved Phase 4C architecture). */
+const SNAPSHOT_TTL_MS = 15 * 60_000;
 
 /** Fetch the current active agreement for a jar. */
 async function getCurrentAgreement(
@@ -398,6 +398,9 @@ router.post("/jars/:jarId/commitment/confirm", requireAuth, async (req, res) => 
 
   // Execute commitment within a single atomic transaction
   let fundCommitmentId: string;
+  // Captures the winning commitment when a concurrent request already committed under lock.
+  // Set inside the transaction callback; checked after the try/catch block.
+  let concurrentWinner: { id: string; snapshotId: string; totalCommittedCents: number } | null = null;
 
   try {
     await db.transaction(async (tx) => {
@@ -411,6 +414,29 @@ router.post("/jars/:jarId/commitment/confirm", requireAuth, async (req, res) => 
         .for("update");
 
       if (!locked) throw new Error("Member not found");
+
+      // Under lock: detect a concurrent confirm that already committed for this member/jar.
+      // This covers the race where two requests both pass the pre-tx idempotency check,
+      // Request A commits first, and Request B picks up the lock to find the job done.
+      const [existingUnderLock] = await txDb
+        .select({
+          id: fundCommitments.id,
+          snapshotId: fundCommitments.snapshotId,
+          totalCommittedCents: fundCommitments.totalCommittedCents,
+        })
+        .from(fundCommitments)
+        .where(and(eq(fundCommitments.memberId, member.id), eq(fundCommitments.jarId, jarId)))
+        .limit(1);
+
+      if (existingUnderLock) {
+        // Record the winner and exit the transaction cleanly (no-op commit, no ledger changes).
+        concurrentWinner = {
+          id: existingUnderLock.id,
+          snapshotId: existingUnderLock.snapshotId,
+          totalCommittedCents: Number(existingUnderLock.totalCommittedCents),
+        };
+        return;
+      }
 
       // Re-verify refundable balance within the locked transaction
       const refundable = await computeRefundableBalanceInTx(txDb, jarId, member.id);
@@ -467,6 +493,34 @@ router.post("/jars/:jarId/commitment/confirm", requireAuth, async (req, res) => 
       res.status(409).json({ error: "InsufficientBalance", code: "balance_changed", message });
     } else {
       res.status(500).json({ error: "InternalError", message: "Failed to confirm commitment" });
+    }
+    return;
+  }
+
+  // Handle concurrent commitment detected under lock (transaction exited cleanly, no error thrown).
+  // Use an explicit `as` cast to preserve the declared type (TypeScript loses the union when a
+  // let-variable is written inside an async closure and cannot narrow it reliably afterwards).
+  // Extract the snapshot comparison to a const boolean to prevent further property-based
+  // discriminant narrowing that would otherwise collapse winner to `never` inside the if branch.
+  type WinnerShape = { id: string; snapshotId: string; totalCommittedCents: number };
+  const winner = concurrentWinner as WinnerShape | null;
+  if (winner !== null) {
+    const isSameSnapshot = winner.snapshotId === snapshot.id;
+    if (isSameSnapshot) {
+      // Same snapshot committed by the winning concurrent request — idempotent result.
+      logger.info({ jarId, memberId: member.id, fundCommitmentId: winner.id }, "Concurrent confirm: returning idempotent result");
+      res.json({
+        fundCommitmentId: winner.id,
+        totalCommittedCents: winner.totalCommittedCents,
+        idempotent: true,
+      });
+    } else {
+      // Different snapshot — funds already committed via another snapshot.
+      res.status(409).json({
+        error: "AlreadyCommitted",
+        message: "You have already committed your funds to this jar.",
+        fundCommitmentId: winner.id,
+      });
     }
     return;
   }
