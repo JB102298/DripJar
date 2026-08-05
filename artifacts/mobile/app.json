@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "M3Jar",
-    "slug": "m3jar",
+    "name": "DripJar",
+    "slug": "dripjar",
     "version": "1.0.0",
-    "scheme": "m3jar",
+    "scheme": "dripjar",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "automatic",

@@ -75,7 +75,7 @@ export default function ResetPasswordScreen() {
         <View style={styles.header}>
           <Text style={[styles.title, { color: colors.foreground }]}>Choose a new password</Text>
           <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-            Enter a new password for your M3Jar account.
+            Enter a new password for your DripJar account.
           </Text>
         </View>
 

@@ -33,36 +33,36 @@ function buildApp(allowedOrigins: string[]) {
 }
 
 describe("CORS exact origin matching", () => {
-  const app = buildApp(["https://m3jar.com", "https://app.m3jar.com"]);
+  const app = buildApp(["https://thedripjar.com", "https://www.thedripjar.com"]);
 
-  it("allows https://m3jar.com when configured", async () => {
+  it("allows https://thedripjar.com when configured", async () => {
     const res = await request(app)
       .get("/test")
-      .set("Origin", "https://m3jar.com");
+      .set("Origin", "https://thedripjar.com");
     expect(res.status).toBe(200);
-    expect(res.headers["access-control-allow-origin"]).toBe("https://m3jar.com");
+    expect(res.headers["access-control-allow-origin"]).toBe("https://thedripjar.com");
   });
 
-  it("allows https://app.m3jar.com when separately configured", async () => {
+  it("allows https://www.thedripjar.com when separately configured", async () => {
     const res = await request(app)
       .get("/test")
-      .set("Origin", "https://app.m3jar.com");
+      .set("Origin", "https://www.thedripjar.com");
     expect(res.status).toBe(200);
-    expect(res.headers["access-control-allow-origin"]).toBe("https://app.m3jar.com");
+    expect(res.headers["access-control-allow-origin"]).toBe("https://www.thedripjar.com");
   });
 
-  it("rejects https://m3jar.com.evil.example (subdomain attack)", async () => {
+  it("rejects https://thedripjar.com.evil.example (subdomain attack)", async () => {
     const res = await request(app)
       .get("/test")
-      .set("Origin", "https://m3jar.com.evil.example");
+      .set("Origin", "https://thedripjar.com.evil.example");
     // CORS policy should deny — access-control-allow-origin should be absent
     expect(res.headers["access-control-allow-origin"]).toBeUndefined();
   });
 
-  it("rejects https://evilm3jar.com (prefix match attack)", async () => {
+  it("rejects https://evilthedripjar.com (prefix match attack)", async () => {
     const res = await request(app)
       .get("/test")
-      .set("Origin", "https://evilm3jar.com");
+      .set("Origin", "https://evilthedripjar.com");
     expect(res.headers["access-control-allow-origin"]).toBeUndefined();
   });
 

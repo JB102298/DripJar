@@ -1,5 +1,5 @@
 /**
- * Generates M3Jar-Codebase.pdf — a formatted source listing of every
+ * Generates DripJar-Codebase.pdf — a formatted source listing of every
  * application file, suitable for code review and archival.
  *
  * Security properties
@@ -36,7 +36,7 @@ import PDFDocument from "pdfkit";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_ROOT = path.resolve(__dirname, "../../");
-const OUTPUT_PATH = path.resolve(WORKSPACE_ROOT, "M3Jar-Codebase.pdf");
+const OUTPUT_PATH = path.resolve(WORKSPACE_ROOT, "DripJar-Codebase.pdf");
 
 // ─── Sanity-check: OUTPUT_PATH must stay inside WORKSPACE_ROOT ────────────────
 // Belt-and-suspenders: prevents path-traversal if WORKSPACE_ROOT is somehow
@@ -275,7 +275,7 @@ const PAGE_W = doc.page.width - MARGIN * 2;
 
 const generatedAt = new Date().toUTCString();
 
-doc.font(FONT_TITLE).fontSize(SZ_TITLE).fillColor("#111").text("M3Jar", { align: "center" });
+doc.font(FONT_TITLE).fontSize(SZ_TITLE).fillColor("#111").text("DripJar", { align: "center" });
 doc.moveDown(0.3);
 doc.font(FONT_HEADING).fontSize(SZ_SUBTITLE).fillColor("#444")
    .text("Complete Codebase Report", { align: "center" });
@@ -423,8 +423,8 @@ for (const entry of tocEntries) {
 // ─── Footer: page numbers ─────────────────────────────────────────────────────
 
 const footerText = commitHash !== "(git unavailable)"
-  ? `M3Jar Codebase Report  •  commit ${commitHash}  •  generated ${generatedAt}`
-  : `M3Jar Codebase Report  •  generated ${generatedAt}`;
+  ? `DripJar Codebase Report  •  commit ${commitHash}  •  generated ${generatedAt}`
+  : `DripJar Codebase Report  •  generated ${generatedAt}`;
 
 for (let i = 0; i < totalPages; i++) {
   doc.switchToPage(i);
@@ -443,7 +443,7 @@ writeStream.on("finish", () => {
   const bytes = fs.statSync(OUTPUT_PATH).size;
   const totalFiles = allSections.reduce((n, s) => n + s.files.length, 0);
 
-  console.log(`✅  M3Jar-Codebase.pdf written`);
+  console.log(`✅  DripJar-Codebase.pdf written`);
   console.log(`   Path:     ${OUTPUT_PATH}`);
   console.log(`   Size:     ${(bytes / 1024).toFixed(1)} KB`);
   console.log(`   Pages:    ~${totalPages}`);

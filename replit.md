@@ -1,6 +1,8 @@
-# M3Jar
+# DripJar
 
 Making Meaningful Moments Happen. A mobile-first collaborative group savings app for shared travel — family vacations, cruises, honeymoons, and group trips. Members contribute toward a shared jar, track progress against milestones, and coordinate through in-app notifications and schedules.
+
+> DripJar was previously developed under the working names M3Jar and TripJar.
 
 ## Run & Operate
 
@@ -10,9 +12,9 @@ Making Meaningful Moments Happen. A mobile-first collaborative group savings app
 | `pnpm --filter @workspace/mobile run dev` | Start Expo mobile app |
 | `pnpm run typecheck` | Full typecheck across all packages |
 | `pnpm --filter @workspace/db run push` | Push DB schema changes (dev only — requires TTY) |
-| `pnpm --filter @workspace/scripts run seed` | Seed dev DB (user: `jordan@m3jar.dev` / `password123`) |
+| `pnpm --filter @workspace/scripts run seed` | Seed dev DB (user: `jordan@dripjar.dev` / `password123`) |
 | `pnpm --filter @workspace/api-server run test` | Run security + unit test suite (`NODE_ENV=test`) |
-| `pnpm --filter @workspace/scripts run generate-pdf` | Regenerate `M3Jar-Codebase.pdf` (see below) |
+| `pnpm --filter @workspace/scripts run generate-pdf` | Regenerate `DripJar-Codebase.pdf` (see below) |
 
 ## Required Environment Variables
 
@@ -29,9 +31,16 @@ Making Meaningful Moments Happen. A mobile-first collaborative group savings app
 | `DEV_SHOW_RESET_TOKEN` | `false` | When `true`, forgot-password response includes the raw reset token for local testing |
 | `ALLOWED_ORIGINS` | `(allow all)` | Comma-separated exact origins for CORS; **required in production** |
 
+**Production (owner must set)**
+| Variable | Desired value | Purpose |
+|---|---|---|
+| `APP_BASE_URL` | `https://TheDripJar.com` | Canonical production URL used in email links |
+| `EMAIL_FROM` | `DripJar <noreply@updates.thedripjar.com>` | Transactional email sender (requires Resend DNS verification) |
+| `ALLOWED_ORIGINS` | `https://thedripjar.com,https://www.thedripjar.com` | Production CORS allowlist |
+
 ## Regenerating the Codebase Report
 
-The `M3Jar-Codebase.pdf` file is a formatted source listing used for code review and archival.
+The `DripJar-Codebase.pdf` file is a formatted source listing used for code review and archival.
 
 ```bash
 pnpm --filter @workspace/scripts run generate-pdf
@@ -55,13 +64,13 @@ The download endpoint (`GET /api/download/codebase`) always serves the most rece
 - **Auth**: JWT Bearer tokens (15 min access + 30-day refresh rotation), `expo-secure-store`
 - **Validation**: Zod (v3) on all auth routes
 - **Security**: Helmet, express-rate-limit, exact CORS origin matching, hashed reset tokens
-- **Tests**: Vitest + Supertest (67 security tests)
+- **Tests**: Vitest + Supertest
 
 ## Where Things Live
 
 | Area | Path |
 |---|---|
-| DB schema (16 tables) | `lib/db/src/schema/index.ts` |
+| DB schema | `lib/db/src/schema/index.ts` |
 | Auth middleware + token helpers | `artifacts/api-server/src/lib/auth.ts` |
 | Zod validation schemas | `artifacts/api-server/src/lib/validation.ts` |
 | Rate limiters | `artifacts/api-server/src/lib/rate-limit.ts` |
@@ -86,3 +95,4 @@ The download endpoint (`GET /api/download/codebase`) always serves the most rece
 - `orval` 8.x generates Zod v4 syntax; workspace uses Zod v3 — `lib/api-zod` is intentionally empty/disabled
 - Calendar dates use local ISO format (`YYYY-MM-DD`) via `toLocalISO` helper — never `.toISOString()` which UTC-shifts in US timezones
 - `ALLOWED_ORIGINS` must be set before deploying to production or CORS accepts all origins
+- `bundleIdentifier` / `android.package` in `artifacts/mobile/app.json` still read `com.m3jar.app` — update to `com.dripjar.app` before any App Store / Play Store submission

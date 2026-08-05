@@ -26,7 +26,7 @@
  *     → Resend send failure → false → row becomes/stays 'failed' → retried
  *
  * HTML TEMPLATE:
- *   Full M3Jar transactional layout — white card, #178B57 green header,
+ *   Full DripJar transactional layout — white card, #178B57 green header,
  *   CTA button, footer with manage-preferences link. Plain-text fallback
  *   always included.
  */
@@ -107,8 +107,8 @@ function buildHtml(opts: {
                style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
           <tr>
             <td style="background:#178B57;padding:32px;text-align:center;">
-              <p style="margin:0;color:#ffffff;font-size:28px;font-weight:bold;">🫙 M3Jar</p>
-              <p style="margin:8px 0 0;color:#E8F6EF;font-size:15px;">Group Travel Savings</p>
+              <p style="margin:0;color:#ffffff;font-size:28px;font-weight:bold;">🫙 DripJar</p>
+              <p style="margin:8px 0 0;color:#E8F6EF;font-size:15px;">Group Savings, Simplified</p>
             </td>
           </tr>
           <tr>
@@ -122,7 +122,7 @@ function buildHtml(opts: {
           <tr>
             <td style="padding:24px 32px;border-top:1px solid #E5E7EB;text-align:center;">
               <p style="margin:0;font-size:12px;color:#9CA3AF;">
-                M3Jar &middot;
+                DripJar &middot;
                 <a href="${opts.baseUrl}/profile" style="color:#178B57;">Manage email preferences</a>
               </p>
             </td>
@@ -179,7 +179,7 @@ export async function sendContributionDueEmail(opts: {
         ctaLabel: "View Your Jar",
         baseUrl: base,
       }),
-      text: `Hi ${displayName},\n\nYour ${amount} contribution to ${jarName} is due on ${dueDateISO}.\n\nKeep your savings on track — view your jar:\n${link}\n\nM3Jar`,
+      text: `Hi ${displayName},\n\nYour ${amount} contribution to ${jarName} is due on ${dueDateISO}.\n\nKeep your savings on track — view your jar:\n${link}\n\nDripJar`,
     });
     return true;
   } catch (err) {
@@ -221,10 +221,10 @@ export async function sendContributionMissedEmail(opts: {
         </p>`,
         ctaUrl: link,
         ctaLabel: "Add a Contribution",
-        noteHtml: "Note: M3Jar is currently in simulated mode. No real money is transferred.",
+        noteHtml: "Note: DripJar is currently in simulated mode. No real money is transferred.",
         baseUrl: base,
       }),
-      text: `Hi ${displayName},\n\nYour scheduled contribution to ${jarName} has an outstanding balance of ${outstanding}.\n\nAdd a contribution: ${link}\n\nNote: M3Jar is currently in simulated mode.\n\nM3Jar`,
+      text: `Hi ${displayName},\n\nYour scheduled contribution to ${jarName} has an outstanding balance of ${outstanding}.\n\nAdd a contribution: ${link}\n\nNote: DripJar is currently in simulated mode.\n\nDripJar`,
     });
     return true;
   } catch (err) {
@@ -272,7 +272,7 @@ export async function sendCutoffUpcomingEmail(opts: {
         ctaLabel: "View Your Jar",
         baseUrl: base,
       }),
-      text: `Hi ${displayName},\n\nThe commitment date for ${jarName} is in ${dayWord} (${cutoffDateISO}).\n\nAfter this date the jar enters the Commitment phase — schedules can no longer be changed.\n\nView your jar: ${link}\n\nM3Jar`,
+      text: `Hi ${displayName},\n\nThe commitment date for ${jarName} is in ${dayWord} (${cutoffDateISO}).\n\nAfter this date the jar enters the Commitment phase — schedules can no longer be changed.\n\nView your jar: ${link}\n\nDripJar`,
     });
     return true;
   } catch (err) {
@@ -316,10 +316,10 @@ export async function sendCutoffReachedEmail(opts: {
         </p>`,
         ctaUrl: link,
         ctaLabel: "Open Your Jar",
-        noteHtml: "M3Jar is currently in simulated mode. No real money is held or transferred.",
+        noteHtml: "DripJar is currently in simulated mode. No real money is held or transferred.",
         baseUrl: base,
       }),
-      text: `Hi ${displayName},\n\n${jarName} reached its commitment date on ${cutoffDateISO} and is now in the Commitment phase.\n\nSchedules are locked; contributions remain open.\n\nOpen your jar: ${link}\n\nM3Jar`,
+      text: `Hi ${displayName},\n\n${jarName} reached its commitment date on ${cutoffDateISO} and is now in the Commitment phase.\n\nSchedules are locked; contributions remain open.\n\nOpen your jar: ${link}\n\nDripJar`,
     });
     return true;
   } catch (err) {
@@ -365,7 +365,7 @@ export async function sendAgreementRequiredEmail(opts: {
         ctaLabel: "Review & Accept",
         baseUrl: base,
       }),
-      text: `Hi ${displayName},\n\nThe savings agreement for ${jarName} (v${version}) requires your acceptance before you can make contributions or update your schedule.\n\nNote: the jar's phase is determined by the commitment date — not by whether you've accepted.\n\nReview and accept: ${link}\n\nM3Jar`,
+      text: `Hi ${displayName},\n\nThe savings agreement for ${jarName} (v${version}) requires your acceptance before you can make contributions or update your schedule.\n\nNote: the jar's phase is determined by the commitment date — not by whether you've accepted.\n\nReview and accept: ${link}\n\nDripJar`,
     });
     return true;
   } catch (err) {

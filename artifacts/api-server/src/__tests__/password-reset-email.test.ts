@@ -1,5 +1,5 @@
 /**
- * Phase 3A coverage: password-reset email behavior, m3jar.com fallbacks,
+ * Phase 3A coverage: password-reset email behavior, thedripjar.com fallbacks,
  * production reset-token guard, and delivery-failure anti-enumeration.
  *
  * The email module itself is exercised as pure helpers (URL/sender/base-url
@@ -58,30 +58,30 @@ describe("email base-url and sender fallbacks", () => {
 
   it("uses APP_BASE_URL when no dev domain (production override)", () => {
     delete process.env["REPLIT_DEV_DOMAIN"];
-    process.env["APP_BASE_URL"] = "https://m3jar.com";
-    expect(getAppBaseUrl()).toBe("https://m3jar.com");
+    process.env["APP_BASE_URL"] = "https://thedripjar.com";
+    expect(getAppBaseUrl()).toBe("https://thedripjar.com");
   });
 
-  it("falls back to https://m3jar.com when no env overrides exist", () => {
+  it("falls back to https://thedripjar.com when no env overrides exist", () => {
     delete process.env["REPLIT_DEV_DOMAIN"];
     delete process.env["APP_BASE_URL"];
-    expect(getAppBaseUrl()).toBe("https://m3jar.com");
+    expect(getAppBaseUrl()).toBe("https://thedripjar.com");
   });
 
   it("EMAIL_FROM env var overrides the sender fallback", () => {
-    process.env["EMAIL_FROM"] = "M3Jar <hello@m3jar.com>";
-    expect(getFromAddress()).toBe("M3Jar <hello@m3jar.com>");
+    process.env["EMAIL_FROM"] = "DripJar <hello@thedripjar.com>";
+    expect(getFromAddress()).toBe("DripJar <hello@thedripjar.com>");
   });
 
-  it("sender fallback is the m3jar.com transactional subdomain", () => {
+  it("sender fallback is the thedripjar.com transactional subdomain", () => {
     delete process.env["EMAIL_FROM"];
-    expect(getFromAddress()).toBe("M3Jar <noreply@updates.m3jar.com>");
+    expect(getFromAddress()).toBe("DripJar <noreply@updates.thedripjar.com>");
   });
 
   it("builds the reset URL as {base}/reset-password/{rawToken}", () => {
     delete process.env["REPLIT_DEV_DOMAIN"];
     delete process.env["APP_BASE_URL"];
-    expect(buildPasswordResetUrl("tok123")).toBe("https://m3jar.com/reset-password/tok123");
+    expect(buildPasswordResetUrl("tok123")).toBe("https://thedripjar.com/reset-password/tok123");
   });
 });
 

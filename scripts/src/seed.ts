@@ -1,5 +1,5 @@
 /**
- * M3Jar Seed Script
+ * DripJar Seed Script
  * Creates realistic demo data: Jordan Barrett's Hawaii 2027 jar
  * Run: pnpm --filter @workspace/scripts run seed
  */
@@ -46,11 +46,11 @@ function daysAgo(n: number): string {
 // ─── Clear existing seed data ──────────────────────────────────────────────
 async function clearSeedData() {
   const seedEmails = [
-    "jordan@m3jar.dev",
-    "caitlyn@m3jar.dev",
-    "mom@m3jar.dev",
-    "dad@m3jar.dev",
-    "tyler@m3jar.dev",
+    "jordan@dripjar.dev",
+    "caitlyn@dripjar.dev",
+    "mom@dripjar.dev",
+    "dad@dripjar.dev",
+    "tyler@dripjar.dev",
   ];
   for (const email of seedEmails) {
     const [u] = await db.select().from(users).where(eq(users.email, email)).limit(1);
@@ -99,35 +99,35 @@ async function createUser(data: {
 }
 
 async function main() {
-  console.log("🌱 Seeding M3Jar demo data...\n");
+  console.log("🌱 Seeding DripJar demo data...\n");
 
   await clearSeedData();
 
   // ── Create Users ────────────────────────────────────────────────────────
   const { user: jordan } = await createUser({
-    email: "jordan@m3jar.dev",
+    email: "jordan@dripjar.dev",
     firstName: "Jordan",
     lastName: "Barrett",
   });
   const { user: caitlyn } = await createUser({
-    email: "caitlyn@m3jar.dev",
+    email: "caitlyn@dripjar.dev",
     firstName: "Caitlyn",
     lastName: "Brooks",
   });
   const { user: mary } = await createUser({
-    email: "mom@m3jar.dev",
+    email: "mom@dripjar.dev",
     firstName: "Mary",
     lastName: "Barrett",
     displayName: "Mom",
   });
   const { user: robert } = await createUser({
-    email: "dad@m3jar.dev",
+    email: "dad@dripjar.dev",
     firstName: "Robert",
     lastName: "Barrett",
     displayName: "Dad",
   });
   const { user: tyler } = await createUser({
-    email: "tyler@m3jar.dev",
+    email: "tyler@dripjar.dev",
     firstName: "Tyler",
     lastName: "Barrett",
     displayName: "Brother",
@@ -425,13 +425,13 @@ async function main() {
   // ── Summary ──────────────────────────────────────────────────────────────
   console.log("\n🎉 Seed complete!\n");
   console.log("Demo account:");
-  console.log("  Email:    jordan@m3jar.dev");
+  console.log("  Email:    jordan@dripjar.dev");
   console.log("  Password: password123\n");
   console.log("Other accounts (same password):");
-  console.log("  caitlyn@m3jar.dev");
-  console.log("  mom@m3jar.dev");
-  console.log("  dad@m3jar.dev");
-  console.log("  tyler@m3jar.dev");
+  console.log("  caitlyn@dripjar.dev");
+  console.log("  mom@dripjar.dev");
+  console.log("  dad@dripjar.dev");
+  console.log("  tyler@dripjar.dev");
   console.log("\nJar: Hawaii 2027");
   console.log("  Goal: $10,000 | Saved: ~$7,170 (71.7%)");
   console.log(`  Target Date: ${targetDateStr}`);
@@ -439,10 +439,10 @@ async function main() {
   process.exit(0);
 }
 
-const AGREEMENT_TEXT = `M3Jar Savings Agreement — Hawaii 2027
+const AGREEMENT_TEXT = `DripJar Savings Agreement — Hawaii 2027
 
 1. SAVING PHASE
-All contributions recorded in M3Jar during the Saving Phase are simulated transactions. No real money is transferred through this application. This agreement establishes the agreed principles for how the group will manage real funds outside of this platform.
+All contributions recorded in DripJar during the Saving Phase are simulated transactions. No real money is transferred through this application. This agreement establishes the agreed principles for how the group will manage real funds outside of this platform.
 
 2. REFUND POLICY
 During the Saving Phase, any member may withdraw from the jar and request a refund of amounts they have contributed to the group fund, minus any amounts already paid to third-party vendors on behalf of the group.

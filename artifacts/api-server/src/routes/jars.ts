@@ -543,7 +543,7 @@ router.get("/jars/:jarId/health", requireAuth, async (req, res) => {
   res.json(health);
 });
 
-const DEFAULT_AGREEMENT_TEXT = `M3Jar Savings Agreement
+const DEFAULT_AGREEMENT_TEXT = `DripJar Savings Agreement
 
 1. SAVING PHASE: All contributions are made voluntarily. During the Saving Phase, contributions remain under the contributing member's control and may be refunded upon request, subject to the terms below.
 
@@ -551,11 +551,11 @@ const DEFAULT_AGREEMENT_TEXT = `M3Jar Savings Agreement
 
 3. COMMITTED FUNDS: Once a Commitment Request is approved and the Lock Date has passed, designated funds become committed to the specified purpose. Committed funds may not be unilaterally reclaimed by individual members.
 
-4. CANCELLATION: If the Jar is cancelled before any Commitment Request is approved, all members may request a full refund of their simulated contributions. M3Jar does not guarantee refunds for amounts already paid to third-party vendors.
+4. CANCELLATION: If the Jar is cancelled before any Commitment Request is approved, all members may request a full refund of their simulated contributions. DripJar does not guarantee refunds for amounts already paid to third-party vendors.
 
-5. REFUNDS: Refund requests are subject to review. M3Jar is not responsible for amounts already transferred to external vendors, airlines, hotels, or other service providers.
+5. REFUNDS: Refund requests are subject to review. DripJar is not responsible for amounts already transferred to external vendors, airlines, hotels, or other service providers.
 
-6. SIMULATED PAYMENTS: This version of M3Jar uses simulated payment data. No real money is transferred. This agreement will be updated before real financial transactions are enabled.
+6. SIMULATED PAYMENTS: This version of DripJar uses simulated payment data. No real money is transferred. This agreement will be updated before real financial transactions are enabled.
 
 7. DISCLAIMER: The exact legal and financial terms governing real-money transactions will be provided separately before production payment processing is enabled.
 

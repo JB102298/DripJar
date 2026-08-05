@@ -7,11 +7,11 @@ const router = Router();
 // Resolve once at startup so every request serves the same locked path.
 // Using path.resolve + explicit validation prevents any path-traversal scenario
 // even if process.cwd() were somehow manipulated at runtime.
-const PDF_PATH = path.resolve(process.cwd(), "../../M3Jar-Codebase.pdf");
+const PDF_PATH = path.resolve(process.cwd(), "../../DripJar-Codebase.pdf");
 
 // Belt-and-suspenders: assert the resolved path is the file we expect and
 // that it stays inside the workspace root (two directories above cwd).
-const EXPECTED_BASENAME = "M3Jar-Codebase.pdf";
+const EXPECTED_BASENAME = "DripJar-Codebase.pdf";
 const WORKSPACE_ROOT = path.resolve(process.cwd(), "../..");
 
 if (path.basename(PDF_PATH) !== EXPECTED_BASENAME) {
@@ -28,7 +28,7 @@ if (!PDF_PATH.startsWith(WORKSPACE_ROOT + path.sep)) {
 }
 
 // GET /download/codebase
-// Serves the most recently generated M3Jar-Codebase.pdf.
+// Serves the most recently generated DripJar-Codebase.pdf.
 // No query parameters or user-supplied path segments are accepted.
 // The file is re-read on every request so regeneration is reflected immediately.
 router.get("/download/codebase", (_req, res) => {

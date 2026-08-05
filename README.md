@@ -1,35 +1,41 @@
-# M3Jar
+# DripJar
 
 Save Together. Travel Together.
 
-M3Jar is a collaborative savings platform that helps friends, families, and groups save together for shared experiences.
+DripJar is a collaborative savings platform that helps friends, families, and groups save together for shared experiences — family vacations, cruises, honeymoons, and group trips.
+
+> DripJar was previously developed under the working names M3Jar and TripJar.
 
 ## Current Status
 
 🚧 Private development
 
-Sprint 1 Complete
-
 ## Features
 
 - Collaborative savings jars
+- Named jar goals with progress tracking
 - Group invitations
 - Secure authentication
 - Refresh token rotation
+- Scheduled contribution reminders
 - Activity tracking
 - Notifications
+- Financial transparency reports
 
 ## Tech Stack
 
-- React
+- React Native / Expo
 - TypeScript
 - Node.js
 - PostgreSQL
 - Drizzle ORM
-- Expo
+- Express 5
+
+## Domain
+
+Production: [TheDripJar.com](https://TheDripJar.com)
 
 ## Roadmap
 
-- Sprint 2
 - Beta
 - Public Launch

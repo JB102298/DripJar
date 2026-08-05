@@ -57,7 +57,7 @@ function stripProtocol(domain) {
 }
 
 function getDeploymentDomain() {
-  // Explicit override wins: setting EXPO_PUBLIC_DOMAIN=m3jar.com for a
+  // Explicit override wins: setting EXPO_PUBLIC_DOMAIN=thedripjar.com for a
   // production build makes the web bundle call the same-origin custom domain
   // instead of the platform-provided deployment hostname.
   if (process.env.EXPO_PUBLIC_DOMAIN) {
