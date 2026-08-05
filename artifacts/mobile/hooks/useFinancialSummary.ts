@@ -47,6 +47,13 @@ export interface MemberFinancialSummary {
 export interface FinancialSummaryResponse {
   jar: JarFinancials;
   goals: GoalAllocation[];
+  /** Jar target minus sum of active named goal targets (planning gap). */
+  unallocatedTargetCents: number;
+  /** Saved principal flowing into the unallocated target bucket. */
+  savedTowardUnallocatedCents: number;
+  /** Saved principal genuinely above the jar target. */
+  overTargetCents: number;
+  // Legacy aliases:
   unallocatedCents: number;
   surplusCents: number;
   members: MemberFinancialSummary[];

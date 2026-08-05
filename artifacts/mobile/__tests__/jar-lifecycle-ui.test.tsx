@@ -125,6 +125,13 @@ vi.mock("@/components/EmptyState", () => ({
   },
 }));
 vi.mock("@/components/ScheduleSetupSheet", () => ({ ScheduleSetupSheet: () => null }));
+// Phase 4D hooks — return empty state so the Overview tab renders without a QueryClientProvider
+vi.mock("@/hooks/useJarGoals", () => ({
+  useJarGoals: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
+}));
+vi.mock("@/hooks/useFinancialSummary", () => ({
+  useFinancialSummary: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
+}));
 
 import JarDetailScreen from "../app/jar/[id]";
 

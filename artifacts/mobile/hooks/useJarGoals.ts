@@ -22,11 +22,20 @@ export interface GoalAllocation {
 
 export interface JarGoalsResponse {
   goals: GoalAllocation[];
-  unallocatedCents: number;
-  surplusCents: number;
+  /** Whether the authenticated viewer is the jar organizer. */
+  isOrganizer: boolean;
+  goalAmountCents: number;
   savedPrincipalCents: number;
   committedPrincipalCents: number;
-  goalAmountCents: number;
+  /** Jar target minus sum of active named goal targets (planning gap). */
+  unallocatedTargetCents: number;
+  /** Saved principal flowing into the unallocated target bucket (≤ unallocatedTargetCents). */
+  savedTowardUnallocatedCents: number;
+  /** Saved principal genuinely above the jar target (true over-target). */
+  overTargetCents: number;
+  // Legacy aliases kept for backward compatibility:
+  unallocatedCents: number;
+  surplusCents: number;
 }
 
 export const getJarGoalsQueryKey = (jarId: string) => ['jar-goals', jarId] as const;

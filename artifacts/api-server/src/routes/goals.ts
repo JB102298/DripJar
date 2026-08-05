@@ -29,6 +29,10 @@ const router = Router();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Jar statuses that permanently close the jar — goal mutations are rejected for these. */
+const TERMINAL_STATUSES = ["Cancelled", "Completed"] as const;
+const isTerminal = (status: string) => (TERMINAL_STATUSES as readonly string[]).includes(status);
+
 async function getJarAccess(jarId: string, userId: string) {
   const [jar] = await db.select().from(jars).where(eq(jars.id, jarId)).limit(1);
   if (!jar) return { jar: null, member: null, isOrganizer: false };
@@ -77,14 +81,27 @@ router.get("/jars/:jarId/goals", requireAuth, async (req, res) => {
     breakdown.committedPrincipalCents,
   );
 
+  const unallocatedTargetCents = unallocatedCents;
+  const savedTowardUnallocatedCents = Math.min(
+    Math.max(0, breakdown.savedPrincipalCents - activeGoalTargetSum),
+    unallocatedTargetCents,
+  );
+  const overTargetCents = Math.max(0, breakdown.savedPrincipalCents - jar.goalAmountCents);
+
   res.json({
     goals: waterfall.goals,
     ...(includeArchived && { archivedGoals }),
-    unallocatedCents,
-    surplusCents: waterfall.surplusCents,
+    isOrganizer,
+    goalAmountCents: jar.goalAmountCents,
     savedPrincipalCents: breakdown.savedPrincipalCents,
     committedPrincipalCents: breakdown.committedPrincipalCents,
-    goalAmountCents: jar.goalAmountCents,
+    // Semantic fields (preferred):
+    unallocatedTargetCents,
+    savedTowardUnallocatedCents,
+    overTargetCents,
+    // Legacy aliases (backward compat):
+    unallocatedCents,
+    surplusCents: waterfall.surplusCents,
   });
 });
 
@@ -226,6 +243,7 @@ router.patch("/jars/:jarId/goals/:goalId", requireAuth, async (req, res) => {
     | typeof jarGoals.$inferSelect
     | "not_found"
     | "forbidden"
+    | "inactive"
     | "archived"
     | { constraintViolation: true; otherSum: number; jarTarget: number };
 
@@ -233,6 +251,7 @@ router.patch("/jars/:jarId/goals/:goalId", requireAuth, async (req, res) => {
     const [jar] = await tx.select().from(jars).where(eq(jars.id, jarId)).limit(1).for("update");
     if (!jar) return "not_found" as const;
     if (jar.organizerId !== userId) return "forbidden" as const;
+    if (isTerminal(jar.status)) return "inactive" as const;
 
     const [goal] = await tx
       .select()
@@ -277,6 +296,7 @@ router.patch("/jars/:jarId/goals/:goalId", requireAuth, async (req, res) => {
 
   if (txResult === "not_found") { res.status(404).json({ error: "NotFound", message: "Goal not found" }); return; }
   if (txResult === "forbidden") { res.status(403).json({ error: "Forbidden", message: "Only the jar organizer can edit goals" }); return; }
+  if (txResult === "inactive") { res.status(400).json({ error: "BadRequest", message: "Cannot edit goals on a cancelled or completed jar" }); return; }
   if (txResult === "archived") { res.status(400).json({ error: "BadRequest", message: "Cannot edit an archived goal" }); return; }
   if ("constraintViolation" in txResult) {
     res.status(409).json({
@@ -306,6 +326,7 @@ router.post("/jars/:jarId/goals/:goalId/archive", requireAuth, async (req, res) 
   const [jar] = await db.select().from(jars).where(eq(jars.id, jarId)).limit(1);
   if (!jar) { res.status(404).json({ error: "NotFound", message: "Jar not found" }); return; }
   if (jar.organizerId !== userId) { res.status(403).json({ error: "Forbidden", message: "Only the jar organizer can archive goals" }); return; }
+  if (isTerminal(jar.status)) { res.status(400).json({ error: "BadRequest", message: "Cannot modify goals on a cancelled or completed jar" }); return; }
 
   const [goal] = await db
     .select()
@@ -366,6 +387,7 @@ router.post("/jars/:jarId/goals/reorder", requireAuth, async (req, res) => {
     | (typeof jarGoals.$inferSelect)[]
     | "not_found"
     | "forbidden"
+    | "inactive"
     | "incomplete"
     | `invalid_id:${string}`;
 
@@ -373,6 +395,7 @@ router.post("/jars/:jarId/goals/reorder", requireAuth, async (req, res) => {
     const [jar] = await tx.select().from(jars).where(eq(jars.id, jarId)).limit(1).for("update");
     if (!jar) return "not_found" as const;
     if (jar.organizerId !== userId) return "forbidden" as const;
+    if (isTerminal(jar.status)) return "inactive" as const;
 
     const activeGoals = await tx
       .select({ id: jarGoals.id })
@@ -409,6 +432,7 @@ router.post("/jars/:jarId/goals/reorder", requireAuth, async (req, res) => {
 
   if (txResult === "not_found") { res.status(404).json({ error: "NotFound", message: "Jar not found" }); return; }
   if (txResult === "forbidden") { res.status(403).json({ error: "Forbidden", message: "Only the jar organizer can reorder goals" }); return; }
+  if (txResult === "inactive") { res.status(400).json({ error: "BadRequest", message: "Cannot modify goals on a cancelled or completed jar" }); return; }
   if (txResult === "incomplete") {
     res.status(400).json({ error: "BadRequest", message: "goalIds must include all active goals — none may be omitted" });
     return;

@@ -78,6 +78,12 @@ router.get("/jars/:jarId/financial-summary", requireAuth, async (req, res) => {
   const waterfall = computeGoalWaterfall(activeGoals, savedPrincipalCents, committedPrincipalCents);
   const activeGoalTargetSum = activeGoals.reduce((s, g) => s + g.targetPrincipalCents, 0);
   const unallocatedCents = Math.max(0, jar.goalAmountCents - activeGoalTargetSum);
+  const unallocatedTargetCents = unallocatedCents;
+  const savedTowardUnallocatedCents = Math.min(
+    Math.max(0, savedPrincipalCents - activeGoalTargetSum),
+    unallocatedTargetCents,
+  );
+  const overTargetCents = Math.max(0, savedPrincipalCents - jar.goalAmountCents);
 
   // Jar summary
   const savedPercent =
@@ -171,6 +177,11 @@ router.get("/jars/:jarId/financial-summary", requireAuth, async (req, res) => {
       overTargetByCents,
     },
     goals: waterfall.goals,
+    // Semantic fields (preferred):
+    unallocatedTargetCents,
+    savedTowardUnallocatedCents,
+    overTargetCents,
+    // Legacy aliases:
     unallocatedCents,
     surplusCents: waterfall.surplusCents,
     members,
