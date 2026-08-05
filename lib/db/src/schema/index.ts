@@ -427,22 +427,177 @@ export const paymentMethodPlaceholdersRelations = relations(paymentMethodPlaceho
   user: one(users, { fields: [paymentMethodPlaceholders.userId], references: [users.id] }),
 }));
 
-// ─── Refund Request Placeholders ─────────────────────────────────────────────
+// ─── Commitment Snapshots ─────────────────────────────────────────────────────
+//
+// A commitment_snapshot records the server's FIFO-lot computation at preview
+// time. snapshotToken is a random hex string returned to the client; the
+// client submits it at confirm time. The confirm step re-validates all
+// snapshotted lots before posting the commitment transfer.
+//
+// agreementId / agreementVersion are NOT NULL: a contributor can only
+// preview a commitment after accepting the current jar agreement.
 
-export const refundRequestPlaceholders = pgTable("refund_request_placeholders", {
+export const commitmentSnapshots = pgTable("commitment_snapshots", {
   id: uuid("id").primaryKey().defaultRandom(),
-  jarId: uuid("jar_id").notNull().references(() => jars.id),
-  memberId: uuid("member_id").notNull().references(() => jarMembers.id),
-  amountCents: integer("amount_cents").notNull(),
-  reason: text("reason"),
+  jarId: uuid("jar_id").notNull().references(() => jars.id, { onDelete: "cascade" }),
+  memberId: uuid("member_id").notNull().references(() => jarMembers.id, { onDelete: "cascade" }),
+  agreementId: uuid("agreement_id").notNull().references(() => agreements.id, { onDelete: "restrict" }),
+  agreementVersion: text("agreement_version").notNull(),
+  snapshotToken: text("snapshot_token").notNull(),
+  totalPrincipalCents: bigint("total_principal_cents", { mode: "number" }).notNull(),
+  // 'pending' | 'confirmed' | 'expired' | 'stale'
   status: text("status").notNull().default("pending"),
+  expiresAt: timestamp("expires_at").notNull(),
+  confirmedAt: timestamp("confirmed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("commitment_snapshots_token_idx").on(t.snapshotToken),
+  index("commitment_snapshots_member_jar_idx").on(t.memberId, t.jarId),
+]);
+
+export const commitmentSnapshotsRelations = relations(commitmentSnapshots, ({ one, many }) => ({
+  jar: one(jars, { fields: [commitmentSnapshots.jarId], references: [jars.id] }),
+  member: one(jarMembers, { fields: [commitmentSnapshots.memberId], references: [jarMembers.id] }),
+  agreement: one(agreements, { fields: [commitmentSnapshots.agreementId], references: [agreements.id] }),
+  allocations: many(commitmentSnapshotAllocations),
+}));
+
+// ─── Commitment Snapshot Allocations ──────────────────────────────────────────
+
+export const commitmentSnapshotAllocations = pgTable("commitment_snapshot_allocations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  snapshotId: uuid("snapshot_id").notNull().references(() => commitmentSnapshots.id, { onDelete: "cascade" }),
+  sourceFtId: uuid("source_ft_id").notNull().references(() => financialTransactions.id, { onDelete: "restrict" }),
+  allocatedCents: bigint("allocated_cents", { mode: "number" }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("commitment_snapshot_allocations_snapshot_idx").on(t.snapshotId),
+]);
+
+export const commitmentSnapshotAllocationsRelations = relations(commitmentSnapshotAllocations, ({ one }) => ({
+  snapshot: one(commitmentSnapshots, { fields: [commitmentSnapshotAllocations.snapshotId], references: [commitmentSnapshots.id] }),
+  sourceFt: one(financialTransactions, { fields: [commitmentSnapshotAllocations.sourceFtId], references: [financialTransactions.id] }),
+}));
+
+// ─── Fund Commitments ─────────────────────────────────────────────────────────
+//
+// One row per (member, jar): a member can only commit once per jar.
+// agreementId / agreementVersion are NOT NULL and immutable — preserved even
+// if the jar agreement changes later. financialTransactionId links to the
+// commitment_transfer FT (CTRB_REFUNDABLE DR / CTRB_COMMITTED CR).
+
+export const fundCommitments = pgTable("fund_commitments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jarId: uuid("jar_id").notNull().references(() => jars.id, { onDelete: "restrict" }),
+  memberId: uuid("member_id").notNull().references(() => jarMembers.id, { onDelete: "restrict" }),
+  snapshotId: uuid("snapshot_id").notNull().references(() => commitmentSnapshots.id, { onDelete: "restrict" }),
+  agreementId: uuid("agreement_id").notNull().references(() => agreements.id, { onDelete: "restrict" }),
+  agreementVersion: text("agreement_version").notNull(),
+  totalCommittedCents: bigint("total_committed_cents", { mode: "number" }).notNull(),
+  financialTransactionId: uuid("financial_transaction_id").references(() => financialTransactions.id, { onDelete: "restrict" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("fund_commitments_member_jar_idx").on(t.memberId, t.jarId),
+  index("fund_commitments_jar_idx").on(t.jarId),
+  index("fund_commitments_snapshot_idx").on(t.snapshotId),
+]);
+
+export const fundCommitmentsRelations = relations(fundCommitments, ({ one, many }) => ({
+  jar: one(jars, { fields: [fundCommitments.jarId], references: [jars.id] }),
+  member: one(jarMembers, { fields: [fundCommitments.memberId], references: [jarMembers.id] }),
+  snapshot: one(commitmentSnapshots, { fields: [fundCommitments.snapshotId], references: [commitmentSnapshots.id] }),
+  agreement: one(agreements, { fields: [fundCommitments.agreementId], references: [agreements.id] }),
+  financialTransaction: one(financialTransactions, { fields: [fundCommitments.financialTransactionId], references: [financialTransactions.id] }),
+  allocations: many(commitmentAllocations),
+}));
+
+// ─── Commitment Allocations ────────────────────────────────────────────────────
+
+export const commitmentAllocations = pgTable("commitment_allocations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  fundCommitmentId: uuid("fund_commitment_id").notNull().references(() => fundCommitments.id, { onDelete: "cascade" }),
+  sourceFtId: uuid("source_ft_id").notNull().references(() => financialTransactions.id, { onDelete: "restrict" }),
+  allocatedCents: bigint("allocated_cents", { mode: "number" }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("commitment_allocations_commitment_idx").on(t.fundCommitmentId),
+  index("commitment_allocations_source_ft_idx").on(t.sourceFtId),
+]);
+
+export const commitmentAllocationsRelations = relations(commitmentAllocations, ({ one }) => ({
+  fundCommitment: one(fundCommitments, { fields: [commitmentAllocations.fundCommitmentId], references: [fundCommitments.id] }),
+  sourceFt: one(financialTransactions, { fields: [commitmentAllocations.sourceFtId], references: [financialTransactions.id] }),
+}));
+
+// ─── Refund Requests ──────────────────────────────────────────────────────────
+//
+// One row per contributor refund request. Replaces refund_request_placeholders
+// (dropped in migration 0015). Tracks aggregate status across all allocations.
+//
+// Aggregate status lifecycle:
+//   pending_provider → processing → completed | partially_failed | failed | cancelled
+//
+// reservationFtId links to the refund_reservation FT that posted:
+//   CTRB_REFUNDABLE DR / REFUND_PENDING CR (at request creation time)
+
+export const refundRequests = pgTable("refund_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jarId: uuid("jar_id").notNull().references(() => jars.id, { onDelete: "restrict" }),
+  memberId: uuid("member_id").notNull().references(() => jarMembers.id, { onDelete: "restrict" }),
+  requestedCents: bigint("requested_cents", { mode: "number" }).notNull(),
+  // 'pending_provider'|'processing'|'completed'|'partially_failed'|'failed'|'cancelled'
+  status: text("status").notNull().default("pending_provider"),
+  reservationFtId: uuid("reservation_ft_id").references(() => financialTransactions.id, { onDelete: "restrict" }),
+  reason: text("reason"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  index("refund_requests_member_jar_idx").on(t.memberId, t.jarId),
+  index("refund_requests_status_idx").on(t.status),
+]);
 
-export const refundRequestPlaceholdersRelations = relations(refundRequestPlaceholders, ({ one }) => ({
-  jar: one(jars, { fields: [refundRequestPlaceholders.jarId], references: [jars.id] }),
-  member: one(jarMembers, { fields: [refundRequestPlaceholders.memberId], references: [jarMembers.id] }),
+export const refundRequestsRelations = relations(refundRequests, ({ one, many }) => ({
+  jar: one(jars, { fields: [refundRequests.jarId], references: [jars.id] }),
+  member: one(jarMembers, { fields: [refundRequests.memberId], references: [jarMembers.id] }),
+  reservationFt: one(financialTransactions, { fields: [refundRequests.reservationFtId], references: [financialTransactions.id] }),
+  allocations: many(refundAllocations),
+}));
+
+// ─── Refund Allocations ────────────────────────────────────────────────────────
+//
+// One row per source Stripe PI. Each allocation is dispatched as a separate
+// Stripe refund call (idempotency key: dripjar-refund:<allocationId>).
+//
+// provider_status lifecycle (per-allocation):
+//   pending → requires_action | succeeded | failed | cancelled
+//   Terminal states (no regression): succeeded, failed, cancelled
+//
+// stripeRefundId: populated by the dispatcher after Stripe confirms.
+// finalizationFtId: populated on finalization (succeeded) or reversal
+//   (failed/cancelled) — the FT that posts the complementary ledger entry.
+
+export const refundAllocations = pgTable("refund_allocations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  refundRequestId: uuid("refund_request_id").notNull().references(() => refundRequests.id, { onDelete: "cascade" }),
+  sourceFtId: uuid("source_ft_id").notNull().references(() => financialTransactions.id, { onDelete: "restrict" }),
+  allocatedCents: bigint("allocated_cents", { mode: "number" }).notNull(),
+  // 'pending'|'requires_action'|'succeeded'|'failed'|'cancelled'
+  providerStatus: text("provider_status").notNull().default("pending"),
+  stripeRefundId: text("stripe_refund_id"),
+  // FK to finalization or reversal FT (posted when terminal state is reached)
+  finalizationFtId: uuid("finalization_ft_id").references(() => financialTransactions.id, { onDelete: "restrict" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("refund_allocations_request_idx").on(t.refundRequestId),
+  index("refund_allocations_source_ft_idx").on(t.sourceFtId),
+  uniqueIndex("refund_allocations_stripe_refund_unique_idx").on(t.stripeRefundId),
+]);
+
+export const refundAllocationsRelations = relations(refundAllocations, ({ one }) => ({
+  refundRequest: one(refundRequests, { fields: [refundAllocations.refundRequestId], references: [refundRequests.id] }),
+  sourceFt: one(financialTransactions, { fields: [refundAllocations.sourceFtId], references: [financialTransactions.id] }),
+  finalizationFt: one(financialTransactions, { fields: [refundAllocations.finalizationFtId], references: [financialTransactions.id] }),
 }));
 
 // ─── Reminder Sent Events ─────────────────────────────────────────────────────
@@ -770,7 +925,6 @@ export type NewNotification = typeof notifications.$inferInsert;
 export type ActivityEvent = typeof activityEvents.$inferSelect;
 export type NewActivityEvent = typeof activityEvents.$inferInsert;
 export type PaymentMethodPlaceholder = typeof paymentMethodPlaceholders.$inferSelect;
-export type RefundRequestPlaceholder = typeof refundRequestPlaceholders.$inferSelect;
 export type LedgerAccount = typeof ledgerAccounts.$inferSelect;
 export type NewLedgerAccount = typeof ledgerAccounts.$inferInsert;
 export type FinancialTransaction = typeof financialTransactions.$inferSelect;
@@ -781,3 +935,16 @@ export type LedgerEntry = typeof ledgerEntries.$inferSelect;
 export type NewLedgerEntry = typeof ledgerEntries.$inferInsert;
 export type StripeWebhookEvent = typeof stripeWebhookEvents.$inferSelect;
 export type NewStripeWebhookEvent = typeof stripeWebhookEvents.$inferInsert;
+// Phase 4C
+export type CommitmentSnapshot = typeof commitmentSnapshots.$inferSelect;
+export type NewCommitmentSnapshot = typeof commitmentSnapshots.$inferInsert;
+export type CommitmentSnapshotAllocation = typeof commitmentSnapshotAllocations.$inferSelect;
+export type NewCommitmentSnapshotAllocation = typeof commitmentSnapshotAllocations.$inferInsert;
+export type FundCommitment = typeof fundCommitments.$inferSelect;
+export type NewFundCommitment = typeof fundCommitments.$inferInsert;
+export type CommitmentAllocation = typeof commitmentAllocations.$inferSelect;
+export type NewCommitmentAllocation = typeof commitmentAllocations.$inferInsert;
+export type RefundRequest = typeof refundRequests.$inferSelect;
+export type NewRefundRequest = typeof refundRequests.$inferInsert;
+export type RefundAllocation = typeof refundAllocations.$inferSelect;
+export type NewRefundAllocation = typeof refundAllocations.$inferInsert;

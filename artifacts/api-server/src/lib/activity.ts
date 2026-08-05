@@ -22,7 +22,13 @@ export type ActivityEventType =
   | "agreement_accepted"
   | "cutoff_changed"
   | "jar_commitment_phase"
-  | "agreement_version_changed";
+  | "agreement_version_changed"
+  // Phase 4C
+  | "fund_committed"
+  | "refund_requested"
+  | "refund_completed"
+  | "refund_partially_failed"
+  | "refund_failed";
 
 export async function logActivity(params: {
   jarId: string;

@@ -351,6 +351,13 @@ export default function JarDetailScreen() {
     if (!jar) return null;
     const phase = (jar as any)?.phase as string | undefined;
     const isCommitment = phase === 'Commitment';
+    const cutoffDate = (jar as any)?.cutoffDate as string | null | undefined;
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    const cutoffReached = !!cutoffDate && todayUtc >= cutoffDate;
+    // Show commitment/refund actions when the phase gate is likely open.
+    // The API enforces the exact gate rules; these flags just control button visibility.
+    const showCommitBtn = cutoffReached && (phase === 'Saving' || phase === 'Commitment');
+    const showRefundBtn = cutoffReached && (phase === 'Saving' || phase === 'Commitment');
     return (
       <View style={styles.tabContent}>
         <View style={styles.overviewTopRow}>
@@ -415,6 +422,32 @@ export default function JarDetailScreen() {
             <Text style={[styles.actionButtonText, { color: colors.primaryForeground }]}>Add Funds</Text>
           </Pressable>
         </View>
+
+        {(showCommitBtn || showRefundBtn) && (
+          <View style={[styles.actionRow, { marginTop: 8 }]}>
+            {showCommitBtn && (
+              <Pressable
+                style={[styles.actionButton, { backgroundColor: colors.darkGreen, flex: 1 }]}
+                onPress={() => router.push(`/commitment/${jar.id}`)}
+              >
+                <Feather name="lock" size={18} color={colors.primaryForeground} />
+                <Text style={[styles.actionButtonText, { color: colors.primaryForeground }]}>Lock In</Text>
+              </Pressable>
+            )}
+            {showRefundBtn && (
+              <Pressable
+                style={[
+                  styles.actionButton,
+                  { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, flex: 1 },
+                ]}
+                onPress={() => router.push(`/refund/${jar.id}`)}
+              >
+                <Feather name="rotate-ccw" size={18} color={colors.foreground} />
+                <Text style={[styles.actionButtonText, { color: colors.foreground }]}>Refund</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
       </View>
     );
   };

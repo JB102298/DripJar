@@ -1,0 +1,614 @@
+Before I accept Task #36, amend the Phase 4C architecture plan.
+
+Do NOT begin implementation yet.
+
+Keep the existing Phase 4C plan, but apply the following corrections.
+
+==================================================
+1. COMMITMENT SNAPSHOT MUST PRESERVE SOURCE PROVENANCE
+==================================================
+
+The current plan has a contradiction.
+
+It says:
+
+- commitment snapshot stores refundablePrincipalCents
+- confirmation rejects if current refundable differs from snapshot
+
+But it also says:
+
+- if a new Drip arrives after the snapshot, the contributor should still be able to commit the previously-reviewed amount
+- the new Drip must remain refundable
+
+Those requirements cannot be satisfied safely using only a snapshot total.
+
+Example:
+
+At preview:
+Drip A refundable = $100
+
+Snapshot:
+$100
+
+After preview:
+Drip B succeeds for $50
+
+Current refundable:
+$150
+
+The user reviewed and acknowledged only $100.
+
+Correct behavior:
+- allow commitment of the original $100
+- Drip B's $50 remains refundable
+- do NOT silently commit $150
+- do NOT reject merely because the total increased
+
+Therefore add SOURCE-LOT SNAPSHOT PROVENANCE.
+
+Preferred design:
+
+Add:
+
+commitment_snapshot_allocations
+
+Fields conceptually:
+
+id
+commitment_snapshot_id
+source_financial_transaction_id
+principal_cents
+created_at
+
+At commitment-preview time:
+
+1. Lock/read current financial state consistently.
+2. Determine the FIFO refundable Stripe-backed source lots that make up the previewed refundable amount.
+3. Persist those exact source allocations with the snapshot.
+4. Snapshot amount = SUM(snapshot allocations).
+
+At confirmation:
+
+- lock jar_members
+- validate snapshot owner/jar/version/expiry/status
+- verify every snapshotted allocation is STILL refundable and unreserved/uncommitted
+- do NOT require total current refundable == snapshot amount
+- require that the exact snapshotted source amounts remain available
+
+If new principal arrived after preview:
+- it is not present in commitment_snapshot_allocations
+- therefore it remains refundable
+
+If part of the snapshotted principal was refunded/reserved/otherwise consumed before confirm:
+- reject 409 balance_changed / snapshot_stale
+- require a fresh preview
+
+fund_commitment allocations should be copied/derived from the validated snapshot allocations rather than recomputed from the current global FIFO pool.
+
+This guarantees the explicit acknowledgement applies only to money that existed when the user reviewed the commitment.
+
+Update schema/migration plan accordingly.
+
+This likely means an additional table or combining it cleanly into migration 0013/0014.
+
+==================================================
+2. SNAPSHOT IDEMPOTENCY SEMANTICS
+==================================================
+
+The current plan says a second confirmation of an already-consumed snapshot returns 409, while also saying snapshotToken is the idempotency key.
+
+For a true idempotent confirmation endpoint:
+
+If:
+
+snapshotToken was already successfully consumed
+AND
+the authenticated user/jar matches
+AND
+a fund_commitments row exists for that snapshot/idempotency key
+
+then a harmless client retry should return the EXISTING successful commitment result.
+
+Do NOT execute another commitment.
+
+Do NOT return 409 for an exact retry of a successful request.
+
+Use 409 for:
+- expired snapshot
+- stale snapshot
+- snapshot belongs to different user/jar
+- snapshot invalidated before successful commit
+
+But successful duplicate request using the same snapshotToken should be idempotent.
+
+Add tests.
+
+==================================================
+3. STRIPE REFUND EVENT MODEL
+==================================================
+
+Do not build Phase 4C around an assumed event named:
+
+charge.refund.updated
+
+Before implementation, inspect the actual Stripe SDK/API version installed and Stripe's supported refund events.
+
+Current Stripe documentation exposes refund lifecycle events including:
+
+refund.updated
+refund.failed
+
+and Refund.status may include:
+
+pending
+requires_action
+succeeded
+failed
+canceled
+
+Use the actual supported Refund-object webhook events for the installed Stripe version.
+
+Plan the state machine around the Refund object itself.
+
+At minimum account for:
+
+pending
+requires_action
+succeeded
+failed
+canceled
+
+Do not assume refunds transition directly from API-created → succeeded.
+
+Document exactly which webhook event(s) trigger reconciliation.
+
+If refund.updated covers state transitions:
+use it.
+
+If refund.failed is emitted separately:
+handle it idempotently as well.
+
+Reuse the existing stripe_webhook_events infrastructure.
+
+Do not create a second webhook authentication/dedup system.
+
+==================================================
+4. REFUND REQUEST AGGREGATE STATUS
+==================================================
+
+One refund request may allocate across multiple original Stripe payments.
+
+Example:
+
+Refund request = $175
+Drip A refund allocation = $100
+Drip B refund allocation = $75
+
+Therefore refund_requests.status cannot simply become completed or failed based on the first allocation webhook.
+
+Define deterministic aggregate behavior.
+
+Recommended:
+
+pending_provider
+processing
+completed
+partially_failed
+failed
+cancelled
+
+Or an equivalent model that represents mixed allocation outcomes.
+
+Rules:
+
+- completed only when ALL allocations succeeded
+- failed only when no allocation succeeded and terminal failure occurred
+- partially_failed when some succeeded and some failed/canceled
+- processing while at least one allocation is non-terminal
+
+Do not hide partial provider outcomes.
+
+The balance API must accurately reflect:
+- amount still refund-pending
+- amount refunded
+- amount returned to refundable because an allocation failed
+
+Activity/UX must not say "Refund Completed" if only part succeeded.
+
+==================================================
+5. REFUND FAILURE REVERSAL MUST BE PER ALLOCATION
+==================================================
+
+Reservation may span multiple source FTs.
+
+Every refund allocation owns its own reserved principal amount.
+
+On provider success for allocation X:
+
+REFUND_PENDING DR
+REFUND_CLR CR
+
+for exactly allocation X principal.
+
+On provider failure/cancel for allocation X:
+
+REFUND_PENDING DR
+CTRB_REFUNDABLE CR
+
+for exactly allocation X principal.
+
+Do not reverse or finalize the entire refund_request amount when only one allocation changes status.
+
+Every allocation transition must be idempotent.
+
+==================================================
+6. STRIPE REFUND CREATION CRASH SAFETY
+==================================================
+
+The plan currently says:
+
+reserve in DB
+commit
+call Stripe
+background reconciler retries rows with stripeRefundId NULL
+
+That is sound in principle, but Phase 4C must NOT introduce an unimplemented "background reconciler" dependency and then claim crash safety.
+
+Choose one of these for Phase 4C:
+
+A. Implement a small internal refund-dispatch/reconciliation processor using the existing internal-job pattern.
+
+OR
+
+B. Make POST /refunds safely retry undispatched allocations and also provide an internal retry endpoint/job hook.
+
+Preferred:
+implement a narrowly-scoped internal refund processor consistent with the existing Phase 3 reminder processor architecture.
+
+The DB reservation must be durable BEFORE Stripe.
+
+The processor finds:
+
+refund_allocations
+provider_status='pending'
+stripe_refund_id IS NULL
+
+and calls Stripe using the stable per-allocation idempotency key.
+
+This processor must be safely retryable.
+
+Do not require an external scheduler for correctness during tests.
+
+Tests should directly invoke the processor.
+
+No production scheduler/deployment configuration in Phase 4C.
+
+==================================================
+7. REFUND ALLOCATION IDEMPOTENCY KEY FORMAT
+==================================================
+
+Use a stable Stripe idempotency key.
+
+Do not rely on an unbounded raw concatenation if avoidable.
+
+Concept:
+
+dripjar-refund:<refundAllocationId>
+
+The allocation UUID itself is sufficient and immutable.
+
+Stripe Refund metadata should include safe internal routing identifiers such as:
+
+refundRequestId
+refundAllocationId
+financialTransactionId
+
+Metadata is a routing hint only.
+
+Authoritative lookup must still use stored provider relationships/IDs.
+
+==================================================
+8. REFUND PROVIDER OBJECT LINKAGE
+==================================================
+
+Audit whether Stripe Refund creation should target:
+
+payment_intent
+
+or
+charge
+
+for the installed/current Stripe API.
+
+Use the provider linkage Stripe recommends for the API version.
+
+The server must derive the provider ID from the stored source financial_transaction.
+
+The client must never submit:
+
+PaymentIntent ID
+Charge ID
+Refund ID
+
+as authoritative values.
+
+==================================================
+9. PLACEHOLDER TABLE MIGRATION — D2
+==================================================
+
+Approved direction:
+
+Replace refund_request_placeholders with the real refund model.
+
+However, migration 0015 must NOT blindly DROP the table based only on an assumption.
+
+Before DROP:
+
+check whether refund_request_placeholders contains rows.
+
+Because this is pre-production, expected count is test/dev data only.
+
+Use an explicit migration safety guard.
+
+If rows exist:
+either
+- migrate compatible data if meaningful
+OR
+- abort with a clear migration error requiring deliberate cleanup
+
+Do not silently destroy rows.
+
+Then drop the placeholder and create the real tables.
+
+==================================================
+10. D1 APPROVED — REFUND_PENDING
+==================================================
+
+Approve D1.
+
+Add:
+
+REFUND_PENDING
+
+as a liability / credit-normal ledger account.
+
+Reservation:
+
+CTRB_REFUNDABLE DR
+REFUND_PENDING CR
+
+Provider success:
+
+REFUND_PENDING DR
+REFUND_CLR CR
+
+Provider failure/cancel:
+
+REFUND_PENDING DR
+CTRB_REFUNDABLE CR
+
+All postings immutable.
+
+Add dedicated ledger primitives such as:
+
+postRefundReservationInTx
+postRefundFinalizationInTx
+postRefundReservationReversalInTx
+
+or equivalent.
+
+IMPORTANT:
+
+Do not call a helper that starts its own DB transaction from inside another locked transaction.
+
+Refactor existing primitives where needed so the mutation route can pass the SAME transaction/client through the entire operation.
+
+Avoid nested transaction/lock ambiguity.
+
+==================================================
+11. D3 APPROVED — COMMITMENT GATE
+==================================================
+
+Approve:
+
+jar.status = 'Saving'
+AND
+cutoffDate exists
+AND
+today >= cutoffDate using the existing UTC phase semantics
+
+But:
+
+cutoff reaching does NOT move money automatically.
+
+Only explicit Commit My Funds moves ledger principal.
+
+Agreement acceptance remains separate from fund commitment.
+
+==================================================
+12. D4 APPROVED — PARTIAL REFUND UX
+==================================================
+
+Approve:
+
+- amount input defaults to full refundable
+- user may edit to smaller positive principal amount
+- "Refund All" shortcut restores full refundable amount
+
+Backend remains authoritative.
+
+The UI must clearly show:
+
+Available refundable principal
+Requested principal refund
+
+NOT refunded:
+- DripJar service fees
+- processing fees
+
+Do not promise exact bank/card arrival dates as guarantees.
+
+Use approximate/provider-dependent wording.
+
+==================================================
+13. COMMITMENT ALLOCATION VS SIMULATED FUNDS
+==================================================
+
+Clarify an important rule.
+
+Real-money fund commitment should operate only on ledger-backed Stripe TEST principal.
+
+Simulated/manual contributions remain outside the real financial ledger and must not appear in:
+
+commitment_snapshots
+commitment_snapshot_allocations
+fund_commitments
+refund allocations
+
+Do not mix simulated values with real-money commitment.
+
+==================================================
+14. ORGANIZER READ-ONLY VISIBILITY
+==================================================
+
+Approved.
+
+Organizer may view:
+
+contributed
+refundable
+refund pending
+committed
+refunded
+
+Organizer may NOT:
+
+commit member funds
+request member refund
+cancel member refund
+change allocation
+change provider destination
+override commitment
+
+Mutation routes derive member exclusively from authenticated user.
+
+==================================================
+15. UPDATE MIGRATION PLAN
+==================================================
+
+Update the migration plan to accommodate snapshot allocations and any improved refund statuses.
+
+Prefer coherent migrations over artificially forcing exactly 0012–0016.
+
+Example:
+
+0012 refund pending ledger account
+0013 commitment snapshots + snapshot allocations
+0014 fund commitments + commitment allocations
+0015 refund requests + refund allocations + guarded placeholder replacement
+0016 indexes / constraints
+
+But adjust if a cleaner grouping is safer.
+
+Every hand-written migration must be registered in:
+
+lib/db/drizzle/meta/_journal.json
+
+Fresh migration chain from 0000 → latest must be part of final validation.
+
+==================================================
+16. TEST PLAN ADDITIONS
+==================================================
+
+Add tests for:
+
+COMMITMENT SNAPSHOT PROVENANCE
+
+- snapshot $100 from Drip A
+- new $50 Drip B lands
+- confirm snapshot
+- only Drip A $100 committed
+- Drip B $50 remains refundable
+
+- snapshot source principal becomes refund-reserved before confirmation
+- confirm rejects stale snapshot
+- new unrelated principal must NOT substitute for the old snapshotted dollars
+
+IDEMPOTENT COMMIT RETRY
+
+- successful commitment
+- network/client retry with same snapshot token
+- returns same commitment
+- no second ledger posting
+
+MULTI-ALLOCATION REFUND
+
+- one refund request spans two Drips
+- allocation A succeeds
+- allocation B remains pending
+- request remains processing
+- balances reflect one completed + one pending allocation
+
+- allocation A succeeds
+- allocation B fails
+- request becomes partially_failed
+- A amount remains refunded
+- B amount returns to refundable
+- no over-reversal
+
+REFUND PROCESS CRASH
+
+- reservation committed
+- no stripeRefundId yet
+- dispatcher invoked
+- Stripe success simulated
+- DB persistence failure
+- dispatcher retried using same Stripe idempotency key
+- no duplicate Stripe refund
+
+REFUND WEBHOOK
+
+- refund.updated pending
+- refund.updated succeeded
+- refund.failed
+- canceled if supported
+- duplicate delivery
+- out-of-order delivery
+- terminal state must not regress
+
+==================================================
+17. FINAL IMPLEMENTATION TASK REQUIREMENT
+==================================================
+
+Keep all other approved Phase 4C requirements.
+
+Do NOT implement yet.
+
+Update Task #36 and return ONLY:
+
+- updated commitment snapshot/provenance design
+- updated idempotent commit behavior
+- actual Stripe refund events/state model selected
+- refund aggregate-status model
+- refund dispatcher/retry design
+- D1 confirmation
+- D2 guarded-migration approach
+- D3 confirmation
+- D4 confirmation
+- updated migration count/tags
+- any remaining decision requiring my approval
+
+The task must still require:
+
+phase4c-final-report.pdf
+
+as the ABSOLUTE LAST implementation action after:
+implementation
+tests
+security review
+commit
+push
+origin verification
+final git status
+
+Do not begin implementation until I accept the updated Task #36.

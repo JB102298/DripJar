@@ -34,13 +34,18 @@ import {
   financialTransactions,
   contributions,
   stripeWebhookEvents,
+  refundAllocations,
+  refundRequests,
 } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { getStripeClient } from "../lib/stripe.js";
 import {
   postContributionAccounting,
   clearLedgerAccountCache,
+  postRefundFinalizationInTx,
+  postRefundReversalInTx,
 } from "../lib/ledger.js";
+import { mapStripeRefundStatus, recomputeRefundRequestStatus, TERMINAL_ALLOCATION_STATES } from "../lib/refund-helpers.js";
 import { logger } from "../lib/logger.js";
 import type Stripe from "stripe";
 
@@ -142,6 +147,12 @@ router.post("/webhooks/stripe", async (req, res) => {
         break;
       case "payment_intent.canceled":
         await handlePaymentIntentCanceled(event, eventRowId);
+        break;
+      case "refund.updated":
+        await handleRefundUpdated(event, eventRowId);
+        break;
+      case "refund.failed":
+        await handleRefundFailed(event, eventRowId);
         break;
       default:
         // Unknown event type — acknowledge and ignore
@@ -405,6 +416,205 @@ async function handlePaymentIntentCanceled(
       processedAt: new Date(),
     })
     .where(eq(stripeWebhookEvents.id, eventRowId));
+}
+
+// ─── refund.updated ───────────────────────────────────────────────────────────
+
+async function handleRefundUpdated(
+  event: Stripe.Event,
+  eventRowId: string,
+): Promise<void> {
+  const stripeRefund = event.data.object as Stripe.Refund;
+  type DbOrTx = typeof db;
+
+  // Map Stripe status to internal domain status
+  const internalStatus = mapStripeRefundStatus(stripeRefund.status ?? "pending");
+
+  if (internalStatus === null) {
+    // Unknown Stripe status — log and acknowledge safely without state mutation
+    logger.warn(
+      { stripeRefundId: stripeRefund.id, stripeStatus: stripeRefund.status, eventId: event.id },
+      "Stripe webhook: unknown refund status — no state change applied",
+    );
+    await db
+      .update(stripeWebhookEvents)
+      .set({ processingStatus: "ignored", processedAt: new Date() })
+      .where(eq(stripeWebhookEvents.id, eventRowId));
+    return;
+  }
+
+  // Find refund_allocation by stripe_refund_id
+  const [alloc] = await db
+    .select()
+    .from(refundAllocations)
+    .where(eq(refundAllocations.stripeRefundId, stripeRefund.id))
+    .limit(1);
+
+  if (!alloc) {
+    // Not our refund or not yet dispatched — mark ignored
+    await db
+      .update(stripeWebhookEvents)
+      .set({
+        processingStatus: "ignored",
+        errorMessage: `No refund_allocation found for Stripe refund ${stripeRefund.id}`,
+        processedAt: new Date(),
+      })
+      .where(eq(stripeWebhookEvents.id, eventRowId));
+    return;
+  }
+
+  // Guard: terminal states cannot regress
+  if (TERMINAL_ALLOCATION_STATES.has(alloc.providerStatus)) {
+    // Already at a terminal state — idempotent duplicate delivery
+    await db
+      .update(stripeWebhookEvents)
+      .set({ processingStatus: "processed", processedAt: new Date() })
+      .where(eq(stripeWebhookEvents.id, eventRowId));
+    return;
+  }
+
+  // Load the parent refund_request to get member/jar context for ledger posting
+  const [rr] = await db
+    .select()
+    .from(refundRequests)
+    .where(eq(refundRequests.id, alloc.refundRequestId))
+    .limit(1);
+
+  if (!rr) {
+    logger.error({ allocationId: alloc.id }, "Stripe webhook: refund_request not found for allocation");
+    await db
+      .update(stripeWebhookEvents)
+      .set({ processingStatus: "failed", errorMessage: "refund_request not found", processedAt: new Date() })
+      .where(eq(stripeWebhookEvents.id, eventRowId));
+    return;
+  }
+
+  // Mark event processing
+  await db
+    .update(stripeWebhookEvents)
+    .set({ processingStatus: "processing" })
+    .where(eq(stripeWebhookEvents.id, eventRowId));
+
+  // Handle by status
+  if (internalStatus === "succeeded") {
+    // Finalization: REFUND_PENDING DR / REFUND_CLR CR
+    await db.transaction(async (tx) => {
+      const txDb = tx as unknown as DbOrTx;
+
+      // Guard inside tx: check terminal state again under lock (concurrent delivery)
+      const [lockedAlloc] = await txDb
+        .select({ providerStatus: refundAllocations.providerStatus, finalizationFtId: refundAllocations.finalizationFtId })
+        .from(refundAllocations)
+        .where(eq(refundAllocations.id, alloc.id))
+        .for("update");
+
+      if (lockedAlloc && TERMINAL_ALLOCATION_STATES.has(lockedAlloc.providerStatus)) {
+        // Race: already finalized by concurrent delivery
+        await txDb
+          .update(stripeWebhookEvents)
+          .set({ processingStatus: "processed", processedAt: new Date() })
+          .where(eq(stripeWebhookEvents.id, eventRowId));
+        return;
+      }
+
+      const { financialTransactionId } = await postRefundFinalizationInTx(txDb, {
+        jarId: rr.jarId,
+        memberId: rr.memberId,
+        amountCents: Number(alloc.allocatedCents),
+        idempotencyKey: `refund-finalize:${alloc.id}`,
+      });
+
+      await txDb
+        .update(refundAllocations)
+        .set({
+          providerStatus: "succeeded",
+          finalizationFtId: financialTransactionId,
+          updatedAt: new Date(),
+        })
+        .where(eq(refundAllocations.id, alloc.id));
+
+      const aggregateStatus = await recomputeRefundRequestStatus(rr.id, txDb);
+      await txDb
+        .update(refundRequests)
+        .set({ status: aggregateStatus, updatedAt: new Date() })
+        .where(eq(refundRequests.id, rr.id));
+
+      await txDb
+        .update(stripeWebhookEvents)
+        .set({ processingStatus: "processed", processedAt: new Date() })
+        .where(eq(stripeWebhookEvents.id, eventRowId));
+    });
+  } else if (internalStatus === "failed" || internalStatus === "cancelled") {
+    // Reversal: REFUND_PENDING DR / CTRB_REFUNDABLE CR
+    await db.transaction(async (tx) => {
+      const txDb = tx as unknown as DbOrTx;
+
+      const [lockedAlloc] = await txDb
+        .select({ providerStatus: refundAllocations.providerStatus })
+        .from(refundAllocations)
+        .where(eq(refundAllocations.id, alloc.id))
+        .for("update");
+
+      if (lockedAlloc && TERMINAL_ALLOCATION_STATES.has(lockedAlloc.providerStatus)) {
+        await txDb
+          .update(stripeWebhookEvents)
+          .set({ processingStatus: "processed", processedAt: new Date() })
+          .where(eq(stripeWebhookEvents.id, eventRowId));
+        return;
+      }
+
+      const { financialTransactionId } = await postRefundReversalInTx(txDb, {
+        jarId: rr.jarId,
+        memberId: rr.memberId,
+        amountCents: Number(alloc.allocatedCents),
+        idempotencyKey: `refund-reversal:${alloc.id}`,
+      });
+
+      await txDb
+        .update(refundAllocations)
+        .set({
+          providerStatus: internalStatus,
+          finalizationFtId: financialTransactionId,
+          updatedAt: new Date(),
+        })
+        .where(eq(refundAllocations.id, alloc.id));
+
+      const aggregateStatus = await recomputeRefundRequestStatus(rr.id, txDb);
+      await txDb
+        .update(refundRequests)
+        .set({ status: aggregateStatus, updatedAt: new Date() })
+        .where(eq(refundRequests.id, rr.id));
+
+      await txDb
+        .update(stripeWebhookEvents)
+        .set({ processingStatus: "processed", processedAt: new Date() })
+        .where(eq(stripeWebhookEvents.id, eventRowId));
+    });
+  } else {
+    // Non-terminal status (pending, requires_action) — update status only, no ledger
+    await db
+      .update(refundAllocations)
+      .set({ providerStatus: internalStatus, updatedAt: new Date() })
+      .where(eq(refundAllocations.id, alloc.id));
+
+    await db
+      .update(stripeWebhookEvents)
+      .set({ processingStatus: "processed", processedAt: new Date() })
+      .where(eq(stripeWebhookEvents.id, eventRowId));
+  }
+}
+
+// ─── refund.failed ────────────────────────────────────────────────────────────
+//
+// Stripe sends refund.failed as a supplemental event; it carries the same
+// information as refund.updated with status=failed. Route through the same
+// handler to keep logic in one place.
+
+async function handleRefundFailed(
+  event: Stripe.Event,
+  eventRowId: string,
+): Promise<void> {
+  return handleRefundUpdated(event, eventRowId);
 }
 
 // ─── Actual fee reconciliation (best-effort) ──────────────────────────────────

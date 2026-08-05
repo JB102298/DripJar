@@ -1,0 +1,864 @@
+Begin planning DripJar Phase 4C:
+
+CONTRIBUTOR FUND COMMITMENT + PRINCIPAL REFUNDS
+
+THIS IS A READ-ONLY ARCHITECTURE / IMPLEMENTATION-PLANNING TASK FIRST.
+
+Do NOT implement Phase 4C yet.
+Do NOT modify files.
+Do NOT create migrations.
+Do NOT commit.
+Do NOT push.
+Do NOT change Stripe configuration.
+Do NOT enable live Stripe.
+Do NOT touch production or external infrastructure.
+
+Current expected repository state:
+
+Branch:
+main
+
+Expected local HEAD / origin/main:
+d91c9b5 — Stabilize Phase 3 automation test isolation
+
+Expected baseline:
+- API tests: 359/359
+- Mobile tests: 45/45
+- Mobile typecheck: 0 errors
+- API typecheck: 0 errors
+- lib/db typecheck: 0 errors
+- API production build: pass
+- Stripe TEST MODE only
+- Phase 4B hardened and complete
+
+==================================================
+PHASE 4C PRODUCT RULES — THESE ARE AUTHORITATIVE
+==================================================
+
+1. WHAT IS REFUNDABLE
+
+Only CONTRIBUTION PRINCIPAL is refundable.
+
+Example:
+
+Customer chooses:
+$200.00 Jar principal
+
+DripJar service fee:
+$6.00
+
+Payment processing:
+$6.46 card example
+
+Total charged:
+$212.46
+
+Before commitment:
+
+Refundable principal:
+$200.00
+
+Non-refundable:
+$6.00 DripJar fee
+$6.46 processing fee
+
+If the contributor requests a full refund before commitment:
+
+Stripe refund amount:
+$200.00
+
+NOT:
+$212.46
+
+The DripJar fee remains non-refundable.
+
+The customer-paid processing fee remains non-refundable from DripJar.
+
+Principal refund must never reduce or reverse the original DripJar fee revenue or original processing-fee accounting.
+
+2. EXPLICIT CONTRIBUTOR COMMITMENT
+
+A cutoff date by itself MUST NOT make real principal non-refundable.
+
+The contributor must explicitly take an action equivalent to:
+
+"Commit My Funds"
+
+Only the authenticated contributor may commit their own funded principal.
+
+THE ORGANIZER MUST NEVER BE ABLE TO COMMIT ANOTHER CONTRIBUTOR'S MONEY.
+
+Organizer role is irrelevant to ownership of another member's principal.
+
+If a jar has five people with $2,000 each and four members commit:
+
+Committed:
+$8,000
+
+Still refundable / awaiting commitment:
+$2,000 belonging to the fifth contributor
+
+Do not implement all-or-nothing jar commitment.
+
+3. AGREEMENT VERSION
+
+Commitment must be tied to the exact agreement/version the contributor is acknowledging.
+
+The commitment record must preserve:
+
+- jar
+- member
+- authenticated user
+- agreement/version identifier
+- amount committed
+- timestamp
+- acknowledgement/version context
+- idempotency information
+
+Do not infer commitment merely from agreement acceptance.
+
+Agreement acceptance and FUND COMMITMENT are distinct actions.
+
+4. SOURCE OF TRUTH
+
+Refundability and committed balances must come from the immutable financial ledger.
+
+Existing Phase 4A accounts include:
+
+CTRB_REFUNDABLE
+CTRB_COMMITTED
+
+Existing primitives already include internal:
+
+postRefundPrincipal
+postCommitPrincipal
+
+Audit them rather than reinventing the ledger.
+
+Expected ledger movements:
+
+COMMIT PRINCIPAL:
+
+CTRB_REFUNDABLE  DR
+CTRB_COMMITTED   CR
+
+REFUND PRINCIPAL:
+
+CTRB_REFUNDABLE  DR
+REFUND_CLR       CR
+
+Commitment does NOT create or destroy principal.
+
+Refund removes refundable principal from DripJar liability.
+
+Never mutate historical contribution ledger entries.
+
+5. CONTRIBUTOR-ONLY SECURITY
+
+Before exposing postCommitPrincipal publicly, enforce:
+
+jar_members.id = requested memberId
+AND
+jar_members.userId = authenticated req.userId
+
+Do not merely verify:
+"caller is an active jar member."
+
+Do not allow:
+
+- organizer commits contributor
+- organizer selects arbitrary memberId
+- contributor commits another member
+- client provides authoritative commit amount for another member
+
+The server determines the authenticated member record.
+
+Prefer no client-supplied memberId at all if unnecessary.
+
+6. COMMITMENT AMOUNT FOR MVP
+
+Public "Commit My Funds" should commit the contributor's CURRENT REFUNDABLE PRINCIPAL for the relevant agreement version.
+
+Do not expose an arbitrary user-entered partial commitment amount in Phase 4C UI.
+
+Example:
+
+Funded refundable principal:
+$1,350
+
+User taps:
+Commit My Funds
+
+Server commits:
+$1,350
+
+If the contributor later adds another successful Drip after that commitment:
+
+the NEW principal is refundable again until explicitly committed.
+
+Do NOT automatically commit future contributions merely because the member previously committed.
+
+This means a member may have multiple explicit fund-commitment events over time.
+
+Internal ledger primitives may continue supporting partial amounts for accounting/testing.
+
+7. CUTOFF / PHASE RULE
+
+Audit the existing Phase 3 cutoff and phase semantics.
+
+Intended public behavior:
+
+"Commit My Funds" becomes available only when the Jar has reached the appropriate cutoff/commitment phase under the existing Jar rules.
+
+Do not invent a second competing phase engine.
+
+However:
+
+time/cutoff alone does NOT change ledger balances.
+
+Only the explicit contributor action moves:
+
+CTRB_REFUNDABLE → CTRB_COMMITTED.
+
+8. REFUNDS BEFORE COMMITMENT
+
+Authenticated contributor may request a refund of THEIR OWN refundable principal.
+
+Never committed principal.
+
+Never another member's principal.
+
+Never DripJar fees.
+
+Never processing fees.
+
+Refund amount may be:
+
+- full refundable principal
+OR
+- partial refundable principal
+
+Phase 4C should support partial principal refunds at the backend.
+
+Mobile MVP may offer:
+- Refund All Available
+and/or
+- custom principal refund
+
+Recommend the cleanest UX in the plan.
+
+9. STRIPE TEST MODE REFUNDS
+
+Phase 4C remains STRICTLY Stripe TEST MODE.
+
+Use Stripe's refund API.
+
+A refund must be tied to the original Stripe-backed payment(s).
+
+Do not invent a generic transfer of money back to the user.
+
+Stripe supports partial refunds against a payment.
+
+Because a member may have multiple successful Drips, define a deterministic allocation rule for an aggregate principal refund.
+
+PREFERRED RULE:
+
+OLDEST ELIGIBLE SUCCESSFUL DRIP FIRST (FIFO)
+
+Reason:
+- clear auditability
+- minimizes risk of an older ACH contribution aging out of its provider refund window
+- deterministic under retry
+
+Example:
+
+Drip A principal:
+$100
+
+Drip B principal:
+$150
+
+Refund request:
+$175
+
+Allocate:
+
+Drip A:
+$100 principal refund
+
+Drip B:
+$75 principal refund
+
+Remaining refundable:
+$75 from Drip B
+
+Audit whether FIFO is straightforward with the current financial_transaction model.
+
+If another allocation policy is materially safer, explain why before implementation.
+
+10. REFUND ELIGIBILITY PER ORIGINAL PAYMENT
+
+For each original successful Stripe TEST payment, track:
+
+- original principal
+- principal already refunded
+- principal committed if allocation tracking requires it
+- remaining provider-refundable principal
+- PaymentIntent / Charge linkage
+- payment method category
+- provider refund status
+
+Do not refund more principal through Stripe than remains refundable against that payment.
+
+Do not allow aggregate member refund logic to over-refund a source PaymentIntent.
+
+11. COMMITMENT ALLOCATION TO ORIGINAL DRIPS
+
+This is important.
+
+The ledger tells us the member's total refundable principal, but Stripe refunds operate against individual original payments.
+
+Therefore Phase 4C needs a deterministic way to know which source contributions remain refundable.
+
+Audit the cleanest model.
+
+PREFERRED POLICY:
+
+Commitment consumes refundable contribution lots OLDEST FIRST.
+
+Example:
+
+Drip A:
+$100
+
+Drip B:
+$150
+
+Member commits current $250:
+
+A committed allocation:
+$100
+
+B committed allocation:
+$150
+
+If later a new Drip C adds $50:
+
+C remains refundable until the contributor commits again.
+
+If only $175 were internally committed in a future partial-capability scenario:
+
+A $100 + B $75 would become committed.
+
+Even though public MVP commits all current refundable principal, design the allocation layer so accounting remains deterministic.
+
+The ledger remains monetary source of truth.
+
+Contribution-lot allocation is the provider/refund provenance layer.
+
+12. DO NOT REFUND COMMITTED PRINCIPAL
+
+Once a principal amount is explicitly committed:
+
+DripJar refund API must reject any attempt to refund it.
+
+This must remain true even if Stripe technically still allows a refund.
+
+Business-rule enforcement belongs in DripJar before calling Stripe.
+
+13. REFUND REQUEST / PROVIDER STATE MACHINE
+
+Plan a durable refund model.
+
+Likely needs a table such as:
+
+refund_requests
+and/or
+refund_allocations
+
+Potential fields:
+
+refund_request:
+- id
+- jarId
+- memberId
+- userId
+- requestedPrincipalCents
+- status
+- idempotencyKey
+- createdAt
+- completedAt
+- failure metadata
+
+refund_allocation:
+- refundRequestId
+- financialTransactionId
+- principalCents
+- stripeRefundId
+- providerStatus
+- createdAt
+- completedAt
+
+Do not assume these exact names if the existing placeholder tables or schema provide a better migration path.
+
+Audit existing:
+
+refund_request_placeholders
+
+before designing new tables.
+
+Do not delete historical placeholders without migration rationale.
+
+14. STRIPE REFUND LIFECYCLE
+
+Audit current Stripe Test Mode refund semantics.
+
+The API request succeeding does NOT necessarily mean DripJar should blindly assume every asynchronous provider state is final.
+
+Determine which Stripe events/states should drive:
+
+- refund pending
+- refund succeeded/completed
+- refund failed/cancelled
+
+Plan webhook handling accordingly.
+
+Reuse the existing durable Stripe event infrastructure where appropriate.
+
+Do not create a second unrelated webhook system.
+
+15. ATOMICITY — REFUND
+
+This is critical.
+
+Avoid this failure:
+
+Stripe refund succeeds
+→ DB crashes
+→ DripJar forgets refund
+→ retry sends another refund
+
+Use stable Stripe idempotency keys per refund allocation.
+
+Design for:
+
+- API retry
+- process crash after Stripe success
+- webhook retry
+- DB transaction rollback
+- multiple refund allocations
+- concurrent refund requests
+
+The provider refund and ledger refund must reconcile exactly once.
+
+16. WHEN LEDGER REFUND IS POSTED
+
+Plan carefully whether DripJar posts:
+
+CTRB_REFUNDABLE DR
+REFUND_CLR CR
+
+when:
+
+A. Stripe refund request is created
+
+or
+
+B. Stripe confirms successful refund
+
+Preferred financial rule:
+
+Do not mark principal as fully refunded until provider success is authoritative.
+
+But once a refund request is accepted, that principal must be RESERVED so the contributor cannot:
+
+- request another refund for the same dollars
+- commit those same dollars while refund is pending
+
+Therefore consider a reservation/pending-refund mechanism.
+
+Do NOT solve this by prematurely treating pending provider refunds as completed ledger refunds.
+
+17. REFUND VS COMMIT RACE
+
+Must explicitly solve:
+
+Request A:
+Refund $500
+
+Request B:
+Commit My Funds
+
+arrive concurrently for same contributor.
+
+Exactly one operation may claim the same refundable principal.
+
+No dollar may become BOTH:
+
+committed
+and
+refunded/reserved for refund.
+
+Use PostgreSQL transaction locking.
+
+Existing Phase 4A postRefundPrincipal/postCommitPrincipal use:
+
+SELECT FOR UPDATE on jar_members
+
+Audit and build on that locking strategy.
+
+18. TWO REFUNDS CONCURRENTLY
+
+Example:
+
+Refundable:
+$500
+
+Two simultaneous requests:
+$400
+$400
+
+Maximum accepted total:
+$500
+
+Never $800.
+
+Provider calls and DB reservation must be designed so concurrency cannot create excess Stripe refund requests.
+
+19. TWO COMMIT REQUESTS CONCURRENTLY
+
+Two simultaneous:
+Commit My Funds
+
+must produce:
+
+one effective commitment of current refundable balance
+
+not duplicate commitments
+not negative refundable balance
+
+Use idempotency and locking.
+
+20. COMMIT + NEW DRIP RACE
+
+Audit:
+
+successful contribution webhook
+and
+Commit My Funds
+
+arriving concurrently.
+
+Final state must be deterministic.
+
+The user must never accidentally commit money that did not exist when their commitment acknowledgement was presented unless the UX/server contract explicitly defines that behavior.
+
+Preferred design:
+
+Commit endpoint operates against a server-generated commitment quote/snapshot:
+
+- agreementVersion
+- refundablePrincipalCents
+- createdAt
+- short expiry
+- commitmentToken/ID
+
+User reviews:
+
+"You are committing $X"
+
+Then confirms that exact server-side snapshot.
+
+If new principal arrives after the snapshot:
+it remains refundable and requires another explicit commitment.
+
+This is safer than "commit whatever balance happens to exist when POST executes."
+
+Include this in the architecture plan.
+
+21. COMMITMENT CONFIRMATION UX
+
+Before final confirmation show:
+
+You are committing:
+$X.XX
+
+After you commit:
+- this principal cannot be refunded through DripJar
+- your DripJar service fees were already non-refundable
+- payment processing fees were already non-refundable
+- future Drips are NOT automatically committed
+- you are accepting agreement version [X]
+
+Require a deliberate confirmation action.
+
+Do not use a passive toggle or ambiguous button.
+
+Plan an appropriate confirmation screen/modal.
+
+22. REFUND UX
+
+Before refund:
+
+Available refundable principal:
+$X.XX
+
+Show:
+
+Refund principal:
+$Y.YY
+
+Not refunded:
+DripJar fees
+Processing fees
+
+Explain provider timing.
+
+For ACH, plan messaging reflecting delayed bank refund behavior.
+
+Do not promise instant refunds.
+
+23. NOTIFICATIONS / ACTIVITY
+
+Plan activity entries for:
+
+- funds committed
+- refund requested
+- refund processing
+- refund completed
+- refund failed
+
+Plan in-app notification behavior.
+
+Email may be included only if it fits existing Phase 3 infrastructure cleanly.
+
+Do not expand into a new notification platform.
+
+24. FINANCIAL BALANCE API
+
+After Phase 4C the member/Jar financial model should expose at minimum:
+
+contributed principal
+refundable principal
+refund-pending/reserved principal
+committed principal
+refunded principal
+DripJar fees
+processing fees
+
+Audit whether the current Phase 4A balance service needs extension.
+
+Do not derive these balances from mutable summary columns.
+
+Ledger + durable reservation/allocation records remain authoritative.
+
+25. ADMIN / ORGANIZER VISIBILITY
+
+Organizer may SEE member financial state:
+
+- refundable
+- pending refund
+- committed
+- refunded
+
+Organizer may NOT:
+
+- commit member funds
+- initiate contributor refund
+- override non-refundable status
+- alter Stripe refund destination
+
+Plan read-only organizer visibility only.
+
+26. SIMULATED CONTRIBUTIONS
+
+Do not accidentally treat old simulated/manual contribution rows as Stripe-refundable money.
+
+Phase 4C provider refunds apply only to eligible Stripe TEST-backed successful contributions.
+
+Audit how simulated records should appear in commitment calculations.
+
+Preferred:
+
+Simulated contributions remain outside the real financial ledger and cannot enter real-money commitment/refund flows.
+
+27. DATABASE / MIGRATION DESIGN
+
+Audit likely migrations for:
+
+- commitment snapshots
+- explicit fund commitment records
+- contribution-lot/provenance allocation
+- refund requests
+- refund allocations
+- pending refund reservations
+- Stripe refund IDs/status
+- indexes/idempotency keys
+- agreement-version linkage
+
+Use explicit Drizzle migrations.
+
+Do not use ad hoc direct SQL as the source of truth.
+
+Migration files + journal must reproduce schema from fresh 0000 → latest.
+
+28. API DESIGN
+
+Plan server-authoritative endpoints.
+
+Possible structure:
+
+GET or POST
+/jars/:jarId/commitment-preview
+
+POST
+/jars/:jarId/commit-my-funds
+
+POST
+/jars/:jarId/refunds/preview
+
+POST
+/jars/:jarId/refunds
+
+GET
+/jars/:jarId/refunds/:refundRequestId
+
+These are examples.
+
+Prefer routes consistent with current API architecture.
+
+Important:
+
+Commit endpoints infer member from authenticated user.
+
+Refund endpoints infer member from authenticated user.
+
+Do not accept authoritative memberId.
+
+29. TEST PLAN — COMMITMENT
+
+Plan tests for:
+
+- preview amount correct
+- preview tied to exact agreement version
+- preview expires
+- contributor commits own funds
+- organizer cannot commit another member
+- contributor cannot commit another member
+- cutoff/phase gating
+- agreement/version mismatch
+- concurrent double commit
+- commit snapshot vs new Drip race
+- newly added principal remains refundable
+- commitment ledger balances
+- commitment does not alter fees
+- commitment does not choose payout destination
+
+30. TEST PLAN — REFUNDS
+
+Plan tests for:
+
+- full principal refund
+- partial principal refund
+- fees retained
+- processing retained
+- FIFO allocation
+- refund across multiple Drips
+- refund cannot exceed refundable principal
+- refund cannot touch committed principal
+- refund cannot touch pending-refund-reserved principal
+- organizer cannot refund another member
+- outsider rejected
+- simulated contribution not refundable via Stripe
+- Stripe idempotency
+- Stripe provider failure
+- provider success
+- webhook retry
+- DB failure after Stripe response
+- concurrent double refunds
+- refund vs commit race
+- refund against already partially refunded PaymentIntent
+- ACH/card provider behavior
+- exact ledger posting once
+- balance API after refund
+
+31. SECURITY / FINANCIAL RED FLAGS
+
+The plan must explicitly protect against:
+
+- organizer committing another member's principal
+- arbitrary memberId substitution
+- arbitrary refund amount tampering
+- arbitrary PaymentIntent/Charge substitution
+- refunding fees
+- refunding committed funds
+- refunding same principal twice
+- committing refund-reserved principal
+- refunding committed principal through direct provider-ID manipulation
+- stale commitment snapshots
+- agreement-version substitution
+- duplicate Stripe refunds
+- webhook spoofing
+- metadata-only trust
+- ledger/provider divergence
+- concurrent request races
+- negative refundable balances
+- client-authoritative balances
+
+32. OUT OF SCOPE
+
+DO NOT plan implementation of:
+
+- live Stripe
+- Connect payouts
+- organizer bank payout
+- DripJar Card / Issuing
+- Jar Goals
+- AutoDrip
+- saved payment methods
+- production release
+- fee-policy changes
+- Task #30
+- Task #31
+- Task #33/#34/#35 unless directly required for 4C correctness
+
+33. REPORTING / NEXT STEP
+
+Create a Replit implementation task for:
+
+Phase 4C — Contributor Commitment and Principal Refunds
+
+Do NOT execute it yet.
+
+Return a concise plan summary containing:
+
+- proposed schema
+- commitment snapshot design
+- commitment flow
+- refund reservation design
+- FIFO source-allocation strategy
+- Stripe refund lifecycle
+- webhook changes
+- API endpoints
+- mobile UX
+- concurrency strategy
+- test strategy
+- migrations expected
+- any architectural concern requiring my decision
+
+Do not generate a PDF for this planning-only step.
+
+The implementation task itself MUST state that when eventually executed:
+
+phase4c-final-report.pdf
+
+must be generated as the ABSOLUTE FINAL ACTION after:
+- implementation
+- tests
+- security review
+- commit
+- push
+- origin verification
+- final git status
+
+Do not start implementation until I explicitly accept the Phase 4C task.

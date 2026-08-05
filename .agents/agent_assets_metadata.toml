@@ -34,3 +34,24 @@ uri = "file://phase4b-final-report.pdf"
 type = "pdf"
 title = "Phase 4B Final Report"
 description = "Finalization & verification report for the Stripe test-mode Drip payment flow."
+
+[[outputs]]
+id = "4V4x_YDrGRR9z40y5v1BB"
+uri = "file://phase4b-hardening-final-report.pdf"
+type = "pdf"
+title = "Phase 4B Hardening Final Report"
+description = "Stripe webhook concurrency hardening + mobile TypeScript baseline — bugs found, fixes applied, validation results."
+
+[[outputs]]
+id = "xC6H-sGHmjw3znOY9ZWvz"
+uri = "file://phase4b-hardening-compliance-report.pdf"
+type = "pdf"
+title = "Phase 4B Hardening Compliance Report"
+description = "Final compliance report: 20-concurrent real-signature Scenario A, 5/5 stress runs, exact DB/ledger assertions, global activity audit, full API suite ×2."
+
+[[outputs]]
+id = "Qzr9aWYcSx5gXFTCIvniT"
+uri = "file://phase4b-hardening-closure-report.pdf"
+type = "pdf"
+title = "Phase 4B Hardening — Closure Report"
+description = "Final closure: 357/359 root cause, test isolation fix, 359/359 ×2, 5/5 stress, push via Replit integration. Local HEAD = origin/main = d91c9b5."

@@ -613,3 +613,278 @@ async function _computeRefundableBalance(
 
 // Re-export for use in balance service
 export { _computeRefundableBalance as computeRefundableBalanceInTx };
+
+// ─── Phase 4C: In-Transaction Ledger Primitives ───────────────────────────────
+//
+// These functions post a balanced ledger transaction + create the associated
+// financial_transaction row INSIDE an existing DB transaction provided by the
+// caller. They do NOT open a new transaction. The caller is responsible for:
+//   - Starting the enclosing transaction
+//   - Locking the jar_members row (SELECT FOR UPDATE) before calling
+//   - Verifying sufficient balance before calling
+//   - Rolling back on any error
+//
+// Each primitive creates exactly one financial_transaction + one
+// ledger_transaction + two ledger_entries, all within the provided txDb.
+
+export interface InTxPostResult {
+  financialTransactionId: string;
+  ledgerTransactionId: string;
+}
+
+async function _createFinancialTransactionInTx(
+  txDb: DbOrTx,
+  params: {
+    jarId: string;
+    memberId: string;
+    transactionType: string;
+    amountCents: number;
+    currency: string;
+    idempotencyKey: string;
+  },
+): Promise<string> {
+  // Check idempotency
+  const [existing] = await txDb
+    .select({ id: financialTransactions.id })
+    .from(financialTransactions)
+    .where(eq(financialTransactions.idempotencyKey, params.idempotencyKey));
+
+  if (existing) return existing.id;
+
+  const [finTx] = await txDb
+    .insert(financialTransactions)
+    .values({
+      jarId: params.jarId,
+      memberId: params.memberId,
+      transactionType: params.transactionType,
+      currency: params.currency,
+      requestedPrincipalCents: params.amountCents,
+      dripJarFeeCents: 0,
+      dripJarFeeRateBps: DRIPJAR_FEE_RATE_BPS,
+      processingFeeEstimatedCents: 0,
+      processingFeeActualCents: null,
+      totalQuotedCents: params.amountCents,
+      providerStatus: "not_applicable",
+      ledgerPostingStatus: "pending",
+      ledgerId: null,
+      idempotencyKey: params.idempotencyKey,
+    })
+    .returning({ id: financialTransactions.id });
+
+  if (!finTx) throw new Error(`Failed to insert ${params.transactionType} financial_transaction`);
+  return finTx.id;
+}
+
+async function _postTwoEntryInTx(
+  txDb: DbOrTx,
+  params: {
+    jarId: string;
+    memberId: string;
+    transactionType: string;
+    description: string;
+    amountCents: number;
+    currency: string;
+    idempotencyKey: string;
+    debitAccount: string;
+    creditAccount: string;
+  },
+): Promise<InTxPostResult> {
+  if (!Number.isInteger(params.amountCents) || params.amountCents <= 0) {
+    throw new Error(`amountCents must be a positive integer; got ${params.amountCents}`);
+  }
+
+  const financialTransactionId = await _createFinancialTransactionInTx(txDb, {
+    jarId: params.jarId,
+    memberId: params.memberId,
+    transactionType: params.transactionType,
+    amountCents: params.amountCents,
+    currency: params.currency,
+    idempotencyKey: params.idempotencyKey,
+  });
+
+  // If FT already existed (idempotent hit), check if it already has a ledger entry
+  const [existingFt] = await txDb
+    .select({ ledgerId: financialTransactions.ledgerId, ledgerPostingStatus: financialTransactions.ledgerPostingStatus })
+    .from(financialTransactions)
+    .where(eq(financialTransactions.id, financialTransactionId));
+
+  if (existingFt?.ledgerPostingStatus === "posted" && existingFt.ledgerId) {
+    return { financialTransactionId, ledgerTransactionId: existingFt.ledgerId };
+  }
+
+  const posted = await _postLedgerEntriesInTx(txDb, {
+    description: params.description,
+    currency: params.currency,
+    financialTransactionId,
+    entries: [
+      {
+        accountCode: params.debitAccount,
+        entryType: "debit",
+        amountCents: params.amountCents,
+        memo: `${params.description}: ${params.amountCents}¢`,
+      },
+      {
+        accountCode: params.creditAccount,
+        entryType: "credit",
+        amountCents: params.amountCents,
+        memo: `${params.description}: ${params.amountCents}¢`,
+      },
+    ],
+  });
+
+  await txDb
+    .update(financialTransactions)
+    .set({
+      ledgerPostingStatus: "posted",
+      ledgerId: posted.ledgerTransactionId,
+      updatedAt: new Date(),
+    })
+    .where(eq(financialTransactions.id, financialTransactionId));
+
+  return { financialTransactionId, ledgerTransactionId: posted.ledgerTransactionId };
+}
+
+/**
+ * Refund Reservation — Phase 4C
+ *
+ * Posts the reservation entry when a refund_request is created.
+ * Moves principal from refundable to in-flight reservation:
+ *   DR CTRB_REFUNDABLE   amountCents  (reduce refundable)
+ *   CR REFUND_PENDING    amountCents  (reserve for in-flight refund)
+ *
+ * Called INSIDE an existing transaction. Caller must lock jar_members row
+ * and verify sufficient refundable balance before calling.
+ *
+ * Idempotent via idempotencyKey.
+ */
+export async function postRefundReservationInTx(
+  txDb: DbOrTx,
+  params: {
+    jarId: string;
+    memberId: string;
+    amountCents: number;
+    currency?: string;
+    idempotencyKey?: string;
+  },
+): Promise<InTxPostResult> {
+  const { jarId, memberId, amountCents, currency = "USD", idempotencyKey = randomUUID() } = params;
+  return _postTwoEntryInTx(txDb, {
+    jarId,
+    memberId,
+    transactionType: "refund_reservation",
+    description: `Refund reservation: ${amountCents}¢`,
+    amountCents,
+    currency,
+    idempotencyKey,
+    debitAccount: "CTRB_REFUNDABLE",
+    creditAccount: "REFUND_PENDING",
+  });
+}
+
+/**
+ * Refund Finalization — Phase 4C
+ *
+ * Posts the finalization entry when Stripe confirms a refund.
+ * Clears the in-flight reservation and records the outflow:
+ *   DR REFUND_PENDING  amountCents  (clear reservation)
+ *   CR REFUND_CLR      amountCents  (refund outflow — money leaves platform)
+ *
+ * Called INSIDE an existing transaction. Must be idempotent — check
+ * allocation.finalizationFtId before calling.
+ */
+export async function postRefundFinalizationInTx(
+  txDb: DbOrTx,
+  params: {
+    jarId: string;
+    memberId: string;
+    amountCents: number;
+    currency?: string;
+    idempotencyKey?: string;
+  },
+): Promise<InTxPostResult> {
+  const { jarId, memberId, amountCents, currency = "USD", idempotencyKey = randomUUID() } = params;
+  return _postTwoEntryInTx(txDb, {
+    jarId,
+    memberId,
+    transactionType: "refund_finalization",
+    description: `Refund finalization: ${amountCents}¢`,
+    amountCents,
+    currency,
+    idempotencyKey,
+    debitAccount: "REFUND_PENDING",
+    creditAccount: "REFUND_CLR",
+  });
+}
+
+/**
+ * Refund Reversal — Phase 4C
+ *
+ * Posts the reversal entry when a Stripe refund fails or is cancelled.
+ * Returns the reserved principal back to refundable:
+ *   DR REFUND_PENDING    amountCents  (clear reservation)
+ *   CR CTRB_REFUNDABLE   amountCents  (restore refundable balance)
+ *
+ * Called INSIDE an existing transaction. Per-allocation terminal states
+ * cannot regress — caller must verify before calling.
+ */
+export async function postRefundReversalInTx(
+  txDb: DbOrTx,
+  params: {
+    jarId: string;
+    memberId: string;
+    amountCents: number;
+    currency?: string;
+    idempotencyKey?: string;
+  },
+): Promise<InTxPostResult> {
+  const { jarId, memberId, amountCents, currency = "USD", idempotencyKey = randomUUID() } = params;
+  return _postTwoEntryInTx(txDb, {
+    jarId,
+    memberId,
+    transactionType: "refund_reversal",
+    description: `Refund reversal: ${amountCents}¢`,
+    amountCents,
+    currency,
+    idempotencyKey,
+    debitAccount: "REFUND_PENDING",
+    creditAccount: "CTRB_REFUNDABLE",
+  });
+}
+
+/**
+ * Commit Principal (in-transaction) — Phase 4C
+ *
+ * In-transaction variant of postCommitPrincipal. Moves refundable principal
+ * to committed without opening its own transaction:
+ *   DR CTRB_REFUNDABLE  amountCents  (reduce refundable)
+ *   CR CTRB_COMMITTED   amountCents  (lock for payout)
+ *
+ * Called INSIDE an existing transaction. Caller must:
+ *   - Lock the jar_members row (FOR UPDATE)
+ *   - Verify sufficient refundable balance
+ *
+ * Idempotent via idempotencyKey.
+ */
+export async function postCommitPrincipalInTx(
+  txDb: DbOrTx,
+  params: {
+    jarId: string;
+    memberId: string;
+    amountCents: number;
+    currency?: string;
+    idempotencyKey?: string;
+  },
+): Promise<InTxPostResult> {
+  const { jarId, memberId, amountCents, currency = "USD", idempotencyKey = randomUUID() } = params;
+  return _postTwoEntryInTx(txDb, {
+    jarId,
+    memberId,
+    transactionType: "commitment_transfer",
+    description: `Fund commitment: ${amountCents}¢`,
+    amountCents,
+    currency,
+    idempotencyKey,
+    debitAccount: "CTRB_REFUNDABLE",
+    creditAccount: "CTRB_COMMITTED",
+  });
+}

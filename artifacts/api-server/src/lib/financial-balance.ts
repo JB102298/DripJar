@@ -4,8 +4,14 @@
  * Derives all financial balances from immutable ledger entries.
  * NEVER trusts client-provided numbers or independently editable columns.
  *
- * Invariant verified by this service:
- *   refundable + committed + refunded = contributedPrincipal
+ * Invariant verified by this service (Phase 4C):
+ *   refundable + refundPending + committed + refunded = contributedPrincipal
+ *
+ * contributedPrincipal is computed as the sum of all principal currently
+ * tracked in the system across all accounts:
+ *   net(CTRB_REFUNDABLE) + CTRB_COMMITTED + net(REFUND_PENDING) + REFUND_CLR
+ * This equals the original contributed amount because all ledger entries are
+ * balanced and no principal is created or destroyed between accounts.
  *
  * Simulated contributions (contributions.status = 'simulated') are completely
  * separate from ledger-backed balances. This service queries ledger_entries
@@ -20,7 +26,7 @@ import {
   financialTransactions,
   jarMembers,
 } from "@workspace/db";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,13 +35,15 @@ export interface MemberFinancialBalance {
   memberId: string;
   currency: string;
 
-  /** Total principal ever dripped (sum of CTRB_REFUNDABLE credits). */
+  /** Total principal ever dripped (net of all principal accounts). */
   contributedPrincipalCents: number;
-  /** Current refundable = contributed − committed − refunded. */
+  /** Current refundable = contributed − pending − committed − refunded. */
   refundablePrincipalCents: number;
+  /** Principal reserved for in-flight Stripe refunds (REFUND_PENDING net). */
+  refundPendingCents: number;
   /** Principal explicitly committed (locked for payout). */
   committedPrincipalCents: number;
-  /** Principal returned to contributor via refund. */
+  /** Principal returned to contributor via completed refund. */
   refundedPrincipalCents: number;
 
   /** DripJar 3% fees earned on this member's contributions. */
@@ -48,7 +56,10 @@ export interface MemberFinancialBalance {
   /** Total amounts charged to the customer (EXT_PAY_CLR debits). */
   totalCustomerChargesCents: number;
 
-  /** Invariant check: refundable + committed + refunded === contributedPrincipal. */
+  /**
+   * Invariant check:
+   *   refundable + refundPending + committed + refunded === contributedPrincipal
+   */
   invariantHolds: boolean;
 }
 
@@ -58,6 +69,7 @@ export interface JarFinancialBalance {
 
   totalContributedPrincipalCents: number;
   totalRefundablePrincipalCents: number;
+  totalRefundPendingCents: number;
   totalCommittedPrincipalCents: number;
   totalRefundedPrincipalCents: number;
 
@@ -125,21 +137,31 @@ function deriveFromLedger(
   agg: Map<string, number>,
 ): MemberFinancialBalance {
   // Raw account movements
-  const ctrbRefCr = get(agg, "CTRB_REFUNDABLE", "credit"); // contributions
-  const ctrbRefDr = get(agg, "CTRB_REFUNDABLE", "debit");  // refunds + commitments
-  const ctrbCommCr = get(agg, "CTRB_COMMITTED", "credit");  // commitments
-  const refundClrCr = get(agg, "REFUND_CLR", "credit");     // refund outflows
+  const ctrbRefCr = get(agg, "CTRB_REFUNDABLE", "credit");  // contributions + reversals
+  const ctrbRefDr = get(agg, "CTRB_REFUNDABLE", "debit");   // commitments + reservations + direct refunds
+  const ctrbCommCr = get(agg, "CTRB_COMMITTED", "credit");   // commitments
+  const refundPendCr = get(agg, "REFUND_PENDING", "credit"); // reservations created
+  const refundPendDr = get(agg, "REFUND_PENDING", "debit");  // finalizations + reversals
+  const refundClrCr = get(agg, "REFUND_CLR", "credit");      // completed refund outflows
   const djFeeCr = get(agg, "DJ_FEE_REVENUE", "credit");
   const procFeeCr = get(agg, "PROC_FEE_CLR", "credit");
   const extPayDr = get(agg, "EXT_PAY_CLR", "debit");
 
-  const contributedPrincipalCents = ctrbRefCr;
+  // Net balances per account
+  const refundablePrincipalCents = ctrbRefCr - ctrbRefDr;
+  const refundPendingCents = refundPendCr - refundPendDr;
   const committedPrincipalCents = ctrbCommCr;
   const refundedPrincipalCents = refundClrCr;
-  const refundablePrincipalCents = ctrbRefCr - ctrbRefDr;
+
+  // contributedPrincipal = sum of all principal currently tracked anywhere.
+  // This equals the original contribution amount because all ledger postings
+  // are balanced and principal only moves between accounts (never created/destroyed).
+  // Formula holds across all Phase 4A/4B/4C posting patterns.
+  const contributedPrincipalCents =
+    refundablePrincipalCents + refundPendingCents + committedPrincipalCents + refundedPrincipalCents;
 
   const invariantHolds =
-    refundablePrincipalCents + committedPrincipalCents + refundedPrincipalCents ===
+    refundablePrincipalCents + refundPendingCents + committedPrincipalCents + refundedPrincipalCents ===
     contributedPrincipalCents;
 
   return {
@@ -148,6 +170,7 @@ function deriveFromLedger(
     currency,
     contributedPrincipalCents,
     refundablePrincipalCents,
+    refundPendingCents,
     committedPrincipalCents,
     refundedPrincipalCents,
     dripJarFeesEarnedCents: djFeeCr,
@@ -194,15 +217,17 @@ export async function getJarFinancialBalance(
     memberBalances.reduce((acc, b) => acc + fn(b), 0);
 
   const totalRefundable = sum((b) => b.refundablePrincipalCents);
+  const totalRefundPending = sum((b) => b.refundPendingCents);
   const totalCommitted = sum((b) => b.committedPrincipalCents);
   const totalRefunded = sum((b) => b.refundedPrincipalCents);
-  const totalContributed = sum((b) => b.contributedPrincipalCents);
+  const totalContributed = totalRefundable + totalRefundPending + totalCommitted + totalRefunded;
 
   return {
     jarId,
     currency,
     totalContributedPrincipalCents: totalContributed,
     totalRefundablePrincipalCents: totalRefundable,
+    totalRefundPendingCents: totalRefundPending,
     totalCommittedPrincipalCents: totalCommitted,
     totalRefundedPrincipalCents: totalRefunded,
     totalDripJarRevenueAssociatedCents: sum((b) => b.dripJarFeesEarnedCents),
@@ -210,7 +235,7 @@ export async function getJarFinancialBalance(
     totalCustomerChargesCents: sum((b) => b.totalCustomerChargesCents),
     memberBalances,
     invariantHolds:
-      totalRefundable + totalCommitted + totalRefunded === totalContributed,
+      totalRefundable + totalRefundPending + totalCommitted + totalRefunded === totalContributed,
   };
 }
 

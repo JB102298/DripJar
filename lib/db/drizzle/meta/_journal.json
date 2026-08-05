@@ -85,6 +85,48 @@
       "when": 1754350060000,
       "tag": "0011_phase4b_stripe_events",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1754436000000,
+      "tag": "0012_phase4c_refund_pending_account",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1754436060000,
+      "tag": "0013_phase4c_commitment_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1754436120000,
+      "tag": "0014_phase4c_fund_commitments",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1754436180000,
+      "tag": "0015_phase4c_refund_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1754436240000,
+      "tag": "0016_phase4c_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1754436300000,
+      "tag": "0017_phase4c_ft_transaction_types",
+      "breakpoints": true
     }
   ]
 }

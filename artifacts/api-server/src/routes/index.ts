@@ -19,6 +19,8 @@ import preferencesRouter from "./preferences.js";
 import financeRouter from "./finance.js";
 import dripsRouter from "./drips.js";
 import stripeWebhooksRouter from "./stripe-webhooks.js";
+import fundCommitmentRouter from "./fund-commitment.js";
+import refundsRouter from "./refunds.js";
 
 const router: IRouter = Router();
 
@@ -42,5 +44,7 @@ router.use(preferencesRouter);
 router.use(financeRouter);
 router.use(dripsRouter);
 router.use(stripeWebhooksRouter);
+router.use(fundCommitmentRouter);
+router.use(refundsRouter);
 
 export default router;

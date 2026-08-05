@@ -1,0 +1,256 @@
+Perform a FINAL Phase 4B hardening sync and baseline-verification pass.
+
+DO NOT start Phase 4C.
+DO NOT start any proposed follow-up tasks.
+DO NOT enable live Stripe.
+DO NOT request or use a GitHub Personal Access Token.
+
+Expected local hardening commit:
+
+87d8a1d — Finalize Phase 4B concurrency hardening
+
+Current reported origin/main:
+
+26d0b5a — Harden Stripe webhook concurrency and mobile types
+
+There are TWO unresolved items only:
+
+1. push 87d8a1d safely using the existing Replit GitHub integration
+2. reconcile the Phase 3 test-result inconsistency
+
+--------------------------------------------------
+PART 1 — VERIFY REPOSITORY CONTEXT
+--------------------------------------------------
+
+Before changing anything, report internally:
+
+- pwd
+- git branch
+- local HEAD
+- origin/main
+- git remote -v
+- whether this is the native DripJar Replit project
+- whether Replit's managed GitHub integration is connected to:
+  github.com/JB102298/TripJar
+
+We previously pushed commits successfully from this real DripJar project using Replit's GitHub integration.
+
+Do NOT fall back to:
+- raw HTTPS credentials
+- PAT
+- temporary /tmp clone
+- changing remote URLs
+- adding secrets
+
+If the current environment is NOT the native DripJar project, STOP and report that instead of attempting authentication workarounds.
+
+--------------------------------------------------
+PART 2 — RECONCILE THE 357/359 VS 359/359 CONTRADICTION
+--------------------------------------------------
+
+The previous Phase 4B hardening report stated:
+
+359 / 359 API tests passed
+in two independent full-suite runs.
+
+The newest compliance report states:
+
+357 / 359
+with two Phase 3 automation failures
+and calls them pre-existing.
+
+Those statements cannot both describe the same baseline without explanation.
+
+Do a read-only comparison first.
+
+Verify:
+
+A. Run the two allegedly failing tests on commit 26d0b5a.
+
+B. Run the full API suite on 26d0b5a under the same test configuration used for 87d8a1d.
+
+C. Run those tests and full suite on 87d8a1d.
+
+Determine whether the failures are caused by:
+
+- 87d8a1d
+- test-order / database pollution
+- Resend mock state
+- pool starvation
+- non-deterministic test isolation
+- another identifiable baseline problem
+
+Do NOT call them pre-existing merely because one baseline rerun fails.
+
+We have prior evidence that 26d0b5a achieved 359/359.
+
+--------------------------------------------------
+PART 3 — FIX TEST ISOLATION IF NECESSARY
+--------------------------------------------------
+
+If the Phase 3 tests are non-deterministic because of shared state, Resend mock leakage, background handlers, or test ordering:
+
+fix the TEST ISOLATION issue.
+
+Do NOT weaken production automation behavior.
+
+Do NOT relax meaningful assertions merely to get green tests.
+
+Do NOT:
+- skip tests
+- use arbitrary sleeps
+- use ts-ignore
+- broadly delete dev/user data
+- disable automation functionality
+
+The final API baseline must be deterministic.
+
+Required final result:
+
+359 / 359
+
+in TWO consecutive full-suite runs.
+
+If fixing the test isolation changes code/tests, create one additional narrowly-scoped commit.
+
+Suggested title:
+
+Stabilize Phase 3 automation test isolation
+
+If no code change is needed and reruns are clean, do not create an empty commit.
+
+--------------------------------------------------
+PART 4 — RECONFIRM PHASE 4B HARDENING
+--------------------------------------------------
+
+After resolving the baseline issue, rerun:
+
+- webhook concurrency stress suite 5 consecutive times
+- Scenario A with 20 concurrent same-event deliveries
+- Phase 4B focused suite
+- full API suite run 1
+- full API suite run 2
+- mobile tests
+- mobile typecheck
+- API typecheck
+- lib/db typecheck
+- API production build
+
+Required:
+
+Webhook stress: 5/5
+Scenario A concurrency: 20
+API run 1: 359/359
+API run 2: 359/359
+Mobile tests: 45/45
+Mobile typecheck: 0 errors
+API typecheck: 0 errors
+lib/db typecheck: 0 errors
+Build: pass
+
+--------------------------------------------------
+PART 5 — PUSH
+--------------------------------------------------
+
+Once everything above is green:
+
+Push using the NORMAL REPLIT GITHUB INTEGRATION.
+
+Do not use a PAT.
+
+Verify:
+
+local HEAD === origin/main
+
+If an additional test-isolation commit was required, origin/main should contain:
+
+26d0b5a
+→ 87d8a1d
+→ optional new test-isolation commit
+
+If no additional commit was required:
+
+origin/main should become:
+
+87d8a1d
+
+--------------------------------------------------
+PART 6 — GIT CLEANLINESS
+--------------------------------------------------
+
+Verify no unintended files were committed.
+
+Do not commit:
+
+- .agents/memory
+- attached_assets/
+- old PDFs
+- unrelated .replit changes
+- platform-generated audit assets
+
+Do not create a separate agent-memory commit.
+
+--------------------------------------------------
+PART 7 — PDF MUST BE THE ABSOLUTE LAST ACTION
+--------------------------------------------------
+
+Only after:
+
+- repository verification
+- test inconsistency resolved
+- all final tests pass
+- push succeeds
+- origin/main verified
+- final git status verified
+
+create:
+
+phase4b-hardening-closure-report.pdf
+
+The PDF must include:
+
+- repository path
+- starting local HEAD
+- starting origin/main
+- explanation for the 357/359 vs 359/359 discrepancy
+- whether a code/test fix was required
+- exact fix if applicable
+- final webhook stress results
+- Scenario A concurrency count
+- API run 1
+- API run 2
+- mobile tests
+- all typechecks
+- build result
+- final commit history
+- push result
+- final local HEAD
+- final origin/main
+- working-tree status
+- confirmation no PAT was used
+- confirmation Test Mode only
+- confirmation Phase 4C not started
+
+AFTER THE PDF:
+do nothing else.
+
+Do not update agent memory after generating it.
+Do not run another command.
+Do not modify files.
+Do not commit.
+Do not push.
+
+In chat return ONLY:
+
+PASS / FAIL
+Final local HEAD
+Final origin/main
+API run 1
+API run 2
+Webhook stress
+Mobile tests
+Typechecks
+Build
+Push method
+Blockers
+PDF filename/path

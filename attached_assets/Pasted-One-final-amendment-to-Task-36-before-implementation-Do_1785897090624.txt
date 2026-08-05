@@ -1,0 +1,223 @@
+One final amendment to Task #36 before implementation.
+
+Do NOT begin implementation yet.
+
+Keep the entire current Phase 4C plan, but make these four corrections.
+
+==================================================
+1. FUND COMMITMENT REQUIRES AN EXACT ACCEPTED AGREEMENT VERSION
+==================================================
+
+The current schema still makes:
+
+commitment_snapshots.agreement_id
+commitment_snapshots.agreement_version
+
+and the corresponding fund_commitments fields nullable.
+
+That does not fully satisfy the approved business rule:
+
+Fund commitment must be tied to the exact agreement/version the contributor is explicitly acknowledging.
+
+For Phase 4C real-money commitment:
+
+A commitment preview must require:
+
+- an active/current Jar agreement
+- a concrete agreement ID
+- a concrete agreement version
+- confirmation that the authenticated contributor has accepted THAT exact active agreement version
+
+If there is:
+- no active agreement
+- no agreement version
+- or the contributor has not accepted the current version
+
+then commitment-preview must be rejected.
+
+Do not allow real-money commitment with a NULL agreement reference.
+
+Update the Phase 4C schema design so:
+
+commitment_snapshots.agreement_id        NOT NULL
+commitment_snapshots.agreement_version   NOT NULL
+
+fund_commitments.agreement_id            NOT NULL
+fund_commitments.agreement_version       NOT NULL
+
+Use the existing Phase 3 agreement/version/acceptance infrastructure rather than creating a competing agreement system.
+
+At preview:
+
+1. determine current active agreement/version
+2. verify authenticated member accepted that exact version
+3. persist that exact agreement/version in the snapshot
+4. snapshot allocations capture the exact principal lots being acknowledged
+
+At confirmation:
+
+re-check that:
+- snapshot agreement/version is still the current required version
+- contributor acceptance still exists for that exact version
+
+If a newer agreement version became active after preview:
+reject snapshot as stale and require a new preview/acceptance.
+
+A successful commitment record permanently preserves the exact agreement/version that governed the commitment even if the Jar agreement changes later.
+
+Add tests for:
+
+- no active agreement → commitment preview rejected
+- active agreement not accepted → rejected
+- accepted current agreement → preview allowed
+- agreement version changes after preview → confirmation rejected as stale
+- exact accepted agreement ID/version preserved in fund_commitments
+- later agreement changes do not mutate historical commitment records
+
+==================================================
+2. EXPLICIT STRIPE STATUS → INTERNAL STATUS MAPPING
+==================================================
+
+Stripe Refund.status uses:
+
+canceled
+
+The proposed internal refund allocation status currently uses:
+
+cancelled
+
+That is acceptable only if translation is explicit.
+
+Do NOT insert raw Stripe status strings directly into the internal status column.
+
+Define an explicit provider-to-domain mapper, for example conceptually:
+
+Stripe:
+pending          → internal pending
+requires_action  → internal requires_action
+succeeded        → internal succeeded
+failed           → internal failed
+canceled         → internal cancelled
+
+Unknown provider statuses must fail safely / be logged for review rather than silently inserted.
+
+Tests must prove:
+- Stripe "canceled" maps to internal "cancelled"
+- cancellation reverses only that allocation's REFUND_PENDING reservation
+- an unknown status cannot corrupt the internal state machine
+
+Keep database terminology internally consistent.
+
+==================================================
+3. DO NOT HARD-CODE FINAL TEST TOTALS
+==================================================
+
+The plan currently says final success is:
+
+359/359 API
+45/45 mobile
+
+Those are the PRE-PHASE-4C baseline totals.
+
+Phase 4C adds many new tests, so the final total will increase.
+
+Replace final validation wording with:
+
+- 100% of API tests pass
+- 100% of mobile tests pass
+- all Phase 4C focused tests pass
+- mobile typecheck = 0 errors
+- API typecheck = 0 errors
+- lib/db typecheck = 0 errors
+- build passes
+
+The final report must state the ACTUAL final test totals.
+
+Do not weaken or remove existing tests just to maintain a historical count.
+
+Baseline before implementation remains:
+
+359 API tests passing
+45 mobile tests passing
+
+Final total after implementation should be greater if new tests are added.
+
+==================================================
+4. CLARIFY STRIPE IDEMPOTENCY RETRY ASSERTION
+==================================================
+
+Update this test/requirement wording:
+
+"dispatcher retried → no duplicate Stripe call"
+
+because a crash/retry MAY legitimately result in another HTTP request to Stripe.
+
+The guarantee we require is:
+
+- same stable Stripe idempotency key is reused
+- Stripe resolves retry to the same logical Refund operation/object
+- no second provider refund is created
+- no additional customer money is refunded
+- exactly one stripe_refund_id becomes authoritative for that allocation
+- exactly one ledger finalization or reversal occurs
+
+Test using a Stripe mock that models idempotency semantics accurately.
+
+For crash scenario:
+
+1. refund reservation exists
+2. dispatcher calls Stripe
+3. Stripe returns successful Refund object
+4. simulate DB failure before stripe_refund_id persistence
+5. dispatcher retries
+6. same idempotency key used
+7. provider returns same logical Refund
+8. DripJar stores it once
+9. webhook finalizes ledger once
+
+The test may observe more than one attempted API invocation.
+
+It must observe exactly ONE logical provider refund.
+
+==================================================
+5. EVERYTHING ELSE REMAINS APPROVED
+==================================================
+
+Keep all existing Phase 4C architecture exactly as currently planned:
+
+- source-lot commitment snapshots
+- new Drips after snapshot remain refundable
+- idempotent commitment retries
+- REFUND_PENDING ledger reservation
+- FIFO provenance
+- partial refunds
+- refund.updated + refund.failed
+- allocation-level finalization/reversal
+- partially_failed aggregate state
+- internal refund dispatcher
+- stable per-allocation Stripe idempotency
+- guarded placeholder migration
+- contributor-only mutations
+- organizer read-only finance visibility
+- simulated contributions excluded
+- cutoff + Saving gate
+- Test Mode only
+- no live Stripe
+- no Connect
+- no payout
+- no Issuing
+- no Jar Goals
+- no AutoDrip
+
+Update Task #36.
+
+Then return ONLY:
+
+- confirmation agreement linkage is now mandatory
+- agreement-version stale-snapshot behavior
+- Stripe canceled → internal cancelled mapping
+- updated final-test success criterion
+- clarified Stripe idempotency retry guarantee
+- whether any decisions remain for my approval
+
+Do not begin implementation until I accept the updated task.

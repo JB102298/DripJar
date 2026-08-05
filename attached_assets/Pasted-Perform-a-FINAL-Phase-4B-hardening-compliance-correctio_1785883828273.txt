@@ -1,0 +1,265 @@
+Perform a FINAL Phase 4B hardening compliance correction.
+
+Do NOT start Phase 4C.
+Do NOT start Tasks #30, #31, #33, #34, or #35.
+Do NOT enable live Stripe.
+Do NOT add new product features.
+
+Current expected HEAD / origin/main:
+26d0b5a — Harden Stripe webhook concurrency and mobile types
+
+This pass exists only because the final report did not fully satisfy the previously requested hardening criteria.
+
+-----------------------------------
+1. SAME-EVENT CONCURRENCY LOAD
+-----------------------------------
+
+The current stress report says Scenario A used 10 concurrent deliveries.
+
+Increase Scenario A to AT LEAST:
+
+20 concurrent deliveries
+
+of the SAME valid Stripe:
+
+payment_intent.succeeded
+
+event with the SAME Stripe event ID and SAME PaymentIntent.
+
+If 20 is reliable, keep 20.
+Do not reduce below 20 merely for CI convenience.
+
+Use the real PostgreSQL test database.
+
+Do not mock the DB transaction layer.
+
+After all requests settle, assert exactly-once financial state in PostgreSQL:
+
+- 1 stripe_webhook_events row for the event ID
+- event finishes processed
+- 1 Stripe-backed contribution
+- 1 financial contribution posting
+- 1 contribution ledger transaction
+- balanced ledger
+- principal credited exactly once
+- DripJar fee credited exactly once
+- processing-fee clearing credited exactly once
+- member principal exactly once
+- Jar principal exactly once
+- no impossible intermediate state
+
+HTTP responses alone are not sufficient.
+
+-----------------------------------
+2. REPEAT STRESS SUITE 5 TIMES
+-----------------------------------
+
+Run the complete webhook concurrency stress suite:
+
+AT LEAST 5 consecutive times.
+
+Every run must include:
+
+Scenario A:
+20+ same-event-ID concurrent deliveries
+
+Scenario B:
+different Stripe event IDs referencing the same succeeded PaymentIntent concurrently
+
+Scenario C:
+processing vs succeeded race
+
+All 5 runs must pass.
+
+Do not report 3/3.
+Required final result is at least 5/5.
+
+-----------------------------------
+3. VERIFY STRIPE SIGNATURE PATH
+-----------------------------------
+
+Explicitly audit the stress test.
+
+For Scenario A, verify that requests actually travel through:
+
+POST /api/webhooks/stripe
+
+and exercise:
+
+- express.raw()
+- original raw Buffer
+- stripe-signature header
+- stripe.webhooks.constructEvent()
+- normal production webhook dispatch
+- real DB transaction behavior
+
+Use Stripe's supported test webhook signature generation utility where appropriate.
+
+The test must NOT bypass webhook authentication by directly invoking the success handler.
+
+If any Stripe provider/network calls need to be stubbed, that is acceptable.
+
+Signature verification itself must remain real.
+
+For Scenarios B/C, document precisely what is mocked and what is real.
+
+If those scenarios bypass signature verification for targeted race orchestration, that is acceptable ONLY if:
+
+- Scenario A proves the complete signed HTTP path under concurrency
+- B/C still use the real database transaction and ledger logic
+- the report states this clearly
+
+-----------------------------------
+4. GLOBAL ACTIVITY TAB REVIEW
+-----------------------------------
+
+The previous hardening changed a global activity query to:
+
+enabled: false
+
+because no jarId exists in the global-tab context.
+
+Audit whether that change disables functionality that previously existed or was intended to exist.
+
+We did NOT authorize a product behavior change merely to satisfy TypeScript.
+
+Determine:
+
+A. Was the global activity feature already functionally disabled/broken before the TypeScript fix?
+
+OR
+
+B. Did 26d0b5a newly disable a functioning/intended query?
+
+If A:
+- document why enabled:false preserves existing behavior
+- no change required
+
+If B:
+- restore intended global activity behavior using the proper API/query architecture
+- do not leave a functioning feature disabled just to satisfy TypeScript
+
+Do NOT start proposed Task #33.
+Only correct an unintended regression introduced by 26d0b5a.
+
+Mobile typecheck must remain 0 errors.
+
+-----------------------------------
+5. VALIDATION
+-----------------------------------
+
+After any correction:
+
+Run:
+
+- concurrency stress suite 5 consecutive times
+- Phase 4B focused tests
+- full API suite run 1
+- full API suite run 2
+- mobile tests
+- mobile typecheck
+- API typecheck
+- lib/db typecheck
+- API production build
+
+Expected:
+
+Mobile typecheck: 0 errors
+API typecheck: 0 errors
+All test suites: 100% pass
+Build: pass
+
+If anything fails:
+investigate before proceeding.
+
+-----------------------------------
+6. COMMIT / PUSH
+-----------------------------------
+
+If code changes are necessary:
+
+Create ONE commit:
+
+Finalize Phase 4B concurrency hardening
+
+Do not create an agent-memory commit.
+
+Push only after validation passes.
+
+If no code changes are necessary and this is purely verification:
+do not create an empty commit.
+
+In either case verify:
+
+local HEAD === origin/main
+
+Do not commit:
+- .agents/memory
+- attached_assets
+- prior PDFs
+- unrelated .replit changes
+
+-----------------------------------
+7. PDF — ABSOLUTE FINAL ACTION
+-----------------------------------
+
+The PDF must again be the LAST action.
+
+Only after:
+
+- 20+ concurrency test
+- all 5 stress runs
+- signature-path audit
+- global-activity review
+- tests
+- typechecks
+- build
+- commit/push if required
+- origin verification
+- final git status
+
+create:
+
+phase4b-hardening-compliance-report.pdf
+
+The PDF must include:
+
+- whether code changes were required
+- final commit hash
+- exact Scenario A concurrent request count
+- 5 consecutive stress-run results
+- Scenario A signature-generation method
+- proof Scenario A went through /api/webhooks/stripe
+- which portions of B/C are mocked vs real
+- exact DB counts after concurrency
+- global activity enabled:false analysis
+- whether behavior was restored or unchanged
+- Phase 4B focused tests
+- API full run 1
+- API full run 2
+- mobile tests
+- mobile typecheck
+- API typecheck
+- build
+- origin/main
+- working-tree state
+- confirmation Test Mode only
+- confirmation Phase 4C was not started
+
+After creating the PDF:
+DO NOTHING ELSE.
+
+In chat return ONLY:
+
+PASS / FAIL
+Final commit hash
+origin/main
+Scenario A concurrency count
+Stress runs
+Signature path
+Global activity result
+Mobile typecheck
+API run 1
+API run 2
+Blockers
+PDF filename/path
