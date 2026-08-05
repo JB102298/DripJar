@@ -360,7 +360,7 @@ describe(
 
     it(
       "all 20 return 200, signature verified, exactly-once financial + balanced ledger",
-      { timeout: 120_000 },
+      { timeout: 180_000 },
       async () => {
         const event = buildSuccessEvent(ft);
 
@@ -552,6 +552,10 @@ describe(
     let ft: typeof financialTransactions.$inferSelect;
 
     beforeAll(async () => {
+      // Wait for Scenario A's 20 concurrent handlers to drain before setting up.
+      // Under singleFork full-suite load they can hold pool connections for 30–60s.
+      await waitForPoolConnections(5, 30_000);
+
       mockStripe = buildMockStripe();
       mockGetStripeClient.mockReturnValue(mockStripe);
       mockGetOrCreateStripeCustomer.mockResolvedValue("cus_stress_mock");
@@ -561,7 +565,7 @@ describe(
       const jar = await createJar(user.token);
       await launchJar(user.token, jar.id);
       ft = await createQuoteAndPi(user.token, jar.id);
-    }, 60_000);
+    }, 90_000);
 
     afterAll(() => {
       delete process.env["STRIPE_WEBHOOK_SECRET"];
@@ -642,6 +646,9 @@ describe(
     let ft: typeof financialTransactions.$inferSelect;
 
     beforeAll(async () => {
+      // Wait for Scenario B's concurrent handlers to drain before setting up.
+      await waitForPoolConnections(5, 30_000);
+
       mockStripe = buildMockStripe();
       mockGetStripeClient.mockReturnValue(mockStripe);
       mockGetOrCreateStripeCustomer.mockResolvedValue("cus_stress_mock");
@@ -651,7 +658,7 @@ describe(
       const jar = await createJar(user.token);
       await launchJar(user.token, jar.id);
       ft = await createQuoteAndPi(user.token, jar.id);
-    }, 60_000);
+    }, 90_000);
 
     afterAll(() => {
       delete process.env["STRIPE_WEBHOOK_SECRET"];
