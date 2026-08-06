@@ -1,0 +1,433 @@
+Perform a READ-ONLY Phase 4D conformance audit.
+
+Do NOT modify files yet.
+Do NOT create migrations.
+Do NOT commit.
+Do NOT push.
+Do NOT start Phase 4E or any new feature phase.
+Do NOT enable live Stripe.
+Do NOT deploy or publish.
+
+Current reported Phase 4D commit:
+
+141523e
+
+Current Phase 4D report claims:
+- 501/501 tests passing
+- migration 0018
+- goals backend complete
+- financial transparency complete
+- organizer "Manage" link added
+- HEAD pushed to origin/main
+
+We need to verify whether the implementation fully satisfies the approved Phase 4D scope.
+
+==================================================
+A. MOBILE GOAL MANAGEMENT — CRITICAL
+==================================================
+
+Audit the actual mobile implementation.
+
+The Phase 4D plan required organizer UX for:
+
+- view goals
+- add goal
+- edit goal
+- archive/delete goal according to Jar lifecycle
+- reorder goals
+- see Jar target
+- see named-goal target total
+- see derived unallocated amount
+- prevent target sum > Jar target
+
+The final report lists:
+
+- useJarGoals.ts
+- useFinancialSummary.ts
+- a Goals section
+- a "Manage" link
+
+But it does NOT list:
+
+- a Manage Goals screen
+- POST goal mutation hook
+- PATCH goal mutation hook
+- archive mutation hook
+- reorder mutation hook
+
+Determine exactly what happens when an organizer taps:
+
+Manage
+
+Report:
+
+1. Does a real goal-management screen exist?
+2. Can organizer create a goal from mobile?
+3. Can organizer edit name/description/target from mobile?
+4. Can organizer archive/delete from mobile?
+5. Can organizer reorder from mobile?
+6. Is unallocated target shown while editing?
+7. Is the server 409 target-sum constraint surfaced cleanly?
+8. Does the Manage link point to a valid Expo route?
+
+If these flows do not exist, classify Phase 4D mobile goal management as INCOMPLETE.
+
+Do not implement yet during this audit.
+
+==================================================
+B. GOAL ACTIVITY EVENTS
+==================================================
+
+The report says ActivityEventType now contains:
+
+goal_created
+goal_updated
+goal_archived
+goal_reordered
+
+Audit whether goal mutation routes actually INSERT activity records.
+
+For each:
+
+POST goal
+PATCH goal
+archive/delete goal
+reorder goals
+
+report:
+
+- activity event created yes/no
+- correct actor
+- correct jar
+- useful metadata
+- whether hard delete in Draft/Inviting still records an activity event if appropriate
+
+The architecture requested activity entries for organizer goal changes.
+
+Merely extending the TypeScript union is not sufficient.
+
+==================================================
+C. MEMBER PRIVACY — VERIFY RESPONSE SHAPE
+==================================================
+
+Confirm regular members receive:
+
+THEIR OWN:
+- exact contributed principal
+- refundable
+- committed
+- refund pending
+- refunded
+- fees
+
+OTHER MEMBERS:
+- no exact dollar balances
+- saved percentage/status only
+- no hidden exact values accidentally serialized in nested/raw fields
+
+Organizer:
+- exact member financial figures allowed
+
+Inspect actual response objects, not just UI rendering.
+
+Verify tests assert absence of private fields rather than merely ignoring them on the client.
+
+==================================================
+D. WATERFALL ACCOUNTING
+==================================================
+
+Confirm:
+
+savedPrincipalCents =
+refundablePrincipalCents
++
+committedPrincipalCents
+
+and EXCLUDES:
+
+- refundPending
+- refunded
+- DripJar fees
+- processing fees
+- simulated contributions
+
+Verify committed allocation is independently waterfalled but can never exceed saved allocation per goal.
+
+Test example:
+
+Goals:
+A = $100
+B = $200
+
+Saved = $250
+Committed = $125
+
+Expected:
+
+A:
+saved 100
+committed 100
+
+B:
+saved 150
+committed 25
+
+Confirm exact behavior.
+
+==================================================
+E. UNALLOCATED VS SURPLUS
+==================================================
+
+Verify these two concepts are distinct:
+
+UNALLOCATED TARGET:
+jar target − SUM(active named goal targets)
+
+SURPLUS SAVED PRINCIPAL:
+max(0, savedPrincipal − SUM(active goal targets))
+
+And separately:
+
+OVER TARGET:
+max(0, savedPrincipal − jar target)
+
+Audit actual API/mobile behavior when:
+
+Jar target = $10,000
+Named goals = $8,000
+Saved = $9,000
+
+Expected concepts:
+
+Unallocated target = $2,000
+
+Named goals receive at most $8,000 through waterfall.
+
+There is $1,000 of saved principal corresponding to the unallocated portion of the Jar target.
+
+It should NOT be presented as "over target."
+
+Then test:
+
+Jar target = $10,000
+Named goals = $8,000
+Saved = $10,500
+
+Need clear distinction between:
+
+- $2,000 unallocated target category
+- saved principal allocated conceptually to unallocated target
+- true $500 above the overall Jar target
+
+Report whether current `surplusCents` semantics produce misleading UI.
+
+Do not change yet.
+
+==================================================
+F. JAR TARGET CHANGE BEHAVIOR
+==================================================
+
+Audit PATCH /jars/:jarId target changes.
+
+Current report confirms:
+
+new jar target cannot be below active-goal target sum.
+
+Also determine:
+
+1. Can target be lowered below CURRENT saved principal?
+2. Can target be lowered below CURRENT committed principal?
+3. What happens to contribution schedules/per-person targets when Jar target changes?
+4. Does changing target after real contributions silently create inconsistent savings expectations?
+5. Does current product already intentionally allow overfunded Jars?
+
+Do not redesign yet.
+
+Return a recommendation if another invariant is needed.
+
+==================================================
+G. GOAL REORDER CONCURRENCY
+==================================================
+
+Verify reorder:
+
+- requires organizer
+- validates complete active-goal ID set
+- rejects duplicates
+- rejects foreign Jar goal IDs
+- executes inside transaction
+- locks appropriate Jar/goals
+- final order always 1..N
+- concurrent reorder/edit cannot violate active-target constraint or leave corrupt ordering
+
+Report whether absence of UNIQUE(jar_id, sort_order) is safe under actual locking implementation.
+
+==================================================
+H. HARD DELETE VS ARCHIVE
+==================================================
+
+Verify:
+
+Draft / Inviting:
+hard delete
+
+Saving or later:
+soft archive
+
+Audit ALL possible Jar statuses currently supported.
+
+Ensure no later status accidentally falls through to hard delete.
+
+Archived goals:
+- excluded from active target sum
+- excluded from waterfall
+- retained in includeArchived history
+
+==================================================
+I. GOAL MUTATIONS MUST BE FINANCIALLY PURE
+==================================================
+
+Reconfirm from actual tests/code:
+
+POST goal
+PATCH goal
+archive/delete
+reorder
+
+create ZERO:
+
+- financial_transactions
+- ledger_transactions
+- ledger_entries
+- Stripe calls
+- refund records
+- commitment records
+
+This is a hard Phase 4D invariant.
+
+==================================================
+J. FRESH MIGRATION REPRODUCIBILITY
+==================================================
+
+Create a CLEAN disposable PostgreSQL database/schema.
+
+Apply ONLY committed migrations:
+
+0000 → 0018
+
+Do not:
+- use drizzle push
+- copy dev schema
+- manually patch SQL
+
+Verify:
+
+- all 19 migration files execute in order
+- all journal entries align
+- jar_goals table exists
+- constraints correct
+- FK correct
+- archive/status constraint correct
+- index exists
+- prior Phase 4C schema remains intact
+
+Drop disposable DB afterward.
+
+Report PASS/FAIL.
+
+==================================================
+K. FULL TEST VERIFICATION
+==================================================
+
+Run:
+
+- Phase 4D goals standalone
+- Phase 4D transparency standalone
+- FULL API suite run 1
+- FULL API suite run 2
+- rate-limit suite if still separate
+- mobile test suite
+- API typecheck
+- mobile typecheck
+- lib/db typecheck
+- API production build
+
+Report ACTUAL totals.
+
+Do not skip slow suites.
+
+==================================================
+L. GIT STATE
+==================================================
+
+Run:
+
+git rev-parse HEAD
+git rev-parse origin/main
+
+Confirm exact equality.
+
+Report full hashes.
+
+Do not push or change anything during this audit.
+
+==================================================
+M. TRANSACTION HISTORY
+==================================================
+
+The Phase 4D planning task asked for a recommendation on user-friendly financial history.
+
+Audit whether Phase 4D implemented any transaction-history UX.
+
+If not, report:
+
+NOT IMPLEMENTED / intentionally deferred
+
+This is not automatically a blocker if the accepted Task #40 explicitly deferred it.
+
+Do not implement during audit.
+
+==================================================
+N. NOTIFICATIONS
+==================================================
+
+Confirm whether automatic:
+
+goal funded
+Jar 100% funded
+
+notifications were intentionally omitted.
+
+Preferred architecture was to avoid these for MVP because derived funding can move backward after refunds.
+
+Report current behavior only.
+
+==================================================
+O. RETURN ONLY
+==================================================
+
+Return a concise audit summary:
+
+- Mobile goal management: PASS / INCOMPLETE
+- Goal activity events: PASS / INCOMPLETE
+- Privacy response enforcement: PASS / FAIL
+- Waterfall accounting: PASS / FAIL
+- Unallocated/surplus semantics: PASS / CONCERN
+- Jar target edits: current behavior + recommendation
+- Reorder concurrency: PASS / FAIL
+- Hard delete/archive: PASS / FAIL
+- Financial-purity invariant: PASS / FAIL
+- Fresh 0000→0018 migration: PASS / FAIL
+- Phase 4D goal tests
+- Phase 4D transparency tests
+- Full API run 1
+- Full API run 2
+- Mobile tests
+- Typechecks/build
+- Transaction history: implemented/deferred
+- Notifications: implemented/deferred
+- HEAD
+- origin/main
+- remaining Phase 4D blockers
+
+Do not modify code until I review the findings.

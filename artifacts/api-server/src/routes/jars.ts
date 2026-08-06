@@ -137,6 +137,7 @@ router.post("/jars", requireAuth, async (req, res) => {
     goalAmountCents,
     currency = "USD",
     approvalThreshold = 0.67,
+    timeZone = "America/New_York",
   } = req.body as {
     name?: string;
     category?: string;
@@ -150,6 +151,7 @@ router.post("/jars", requireAuth, async (req, res) => {
     goalAmountCents?: number;
     currency?: string;
     approvalThreshold?: number;
+    timeZone?: string;
   };
 
   if (!name || !targetDate || !goalAmountCents) {
@@ -179,6 +181,17 @@ router.post("/jars", requireAuth, async (req, res) => {
   const baseSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
   const slug = `${baseSlug}-${Date.now().toString(36)}`;
 
+  // Validate timeZone is a recognized IANA timezone; default on invalid input
+  let resolvedTimeZone = "America/New_York";
+  if (typeof timeZone === "string" && timeZone.trim()) {
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: timeZone.trim() });
+      resolvedTimeZone = timeZone.trim();
+    } catch {
+      // Invalid IANA timezone — use default
+    }
+  }
+
   const [jar] = await db
     .insert(jars)
     .values({
@@ -197,6 +210,7 @@ router.post("/jars", requireAuth, async (req, res) => {
       currency,
       status: "Draft",
       approvalThreshold: String(approvalThreshold),
+      timeZone: resolvedTimeZone,
     })
     .returning();
 

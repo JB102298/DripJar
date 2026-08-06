@@ -33,7 +33,15 @@ export type ActivityEventType =
   | "goal_created"
   | "goal_updated"
   | "goal_archived"
-  | "goal_reordered";
+  | "goal_reordered"
+  // Phase 4E — AutoDrip
+  | "autodrip_enabled"
+  | "autodrip_paused"
+  | "autodrip_resumed"
+  | "autodrip_cancelled"
+  | "autodrip_succeeded"
+  | "autodrip_failed"
+  | "autodrip_payment_method_changed";
 
 export async function logActivity(params: {
   jarId: string;

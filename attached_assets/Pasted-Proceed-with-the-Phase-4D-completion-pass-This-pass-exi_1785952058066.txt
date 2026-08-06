@@ -1,0 +1,506 @@
+Proceed with the Phase 4D completion pass.
+
+This pass exists to finish the missing organizer mobile goal-management workflow and close the remaining Phase 4D validation gaps.
+
+Do NOT start Phase 4E.
+Do NOT enable live Stripe.
+Do NOT add goal-funded notifications.
+Do NOT add transaction-history UX.
+Do NOT deploy.
+Do NOT use a PAT.
+
+Current expected state:
+
+HEAD === origin/main:
+817787044323d3ddef80975b0574fa1a1bbff634
+
+Phase 4D backend architecture is approved.
+
+==================================================
+1. BUILD THE MISSING MOBILE MANAGE GOALS SCREEN
+==================================================
+
+The existing organizer "Manage" link currently routes to:
+
+/jar/:jarId/goals
+
+but no Expo route exists.
+
+Create a real organizer-facing route consistent with Expo Router conventions.
+
+Preferred route:
+
+artifacts/mobile/app/jar/[id]/goals.tsx
+
+or the structurally correct equivalent required by the current router.
+
+The existing Manage link must navigate successfully to it.
+
+The screen must support:
+
+- list active goals in canonical sort_order
+- show Jar target
+- show total named goal targets
+- show derived unallocated target
+- create goal
+- edit goal
+- archive/delete goal
+- reorder goals
+
+Use server APIs already created in Phase 4D.
+
+Do not reproduce server-side accounting logic on the client.
+
+==================================================
+2. CREATE / EDIT GOAL UX
+==================================================
+
+Organizer must be able to enter:
+
+Name
+Target amount
+Optional description
+
+Show context:
+
+Jar target:
+$X
+
+Allocated to named goals:
+$Y
+
+Unallocated:
+$Z
+
+On create/edit:
+
+- validate obvious client input
+- server remains authoritative
+- target must be > 0
+- surface server 409 cleanly if active named goals would exceed Jar target
+
+Suggested UX:
+
+"Your named goals can't total more than the Jar target."
+
+Do not silently clamp the amount.
+
+After successful mutation:
+
+- invalidate/refetch goal queries
+- refresh financial summary if necessary
+- return updated canonical goal list
+
+==================================================
+3. ARCHIVE / DELETE UX
+==================================================
+
+Use the existing backend lifecycle behavior.
+
+Pre-launch:
+Draft / Inviting
+→ hard delete
+
+Post-launch:
+→ soft archive
+
+The user-facing action can simply be:
+
+"Remove Goal"
+
+with confirmation.
+
+If post-launch soft archive is used, explain briefly:
+
+"This goal will be removed from the active plan but kept in the Jar's history."
+
+Do not expose DB implementation terminology unnecessarily.
+
+After removal:
+refresh goal list and unallocated amount.
+
+==================================================
+4. REORDER UX
+==================================================
+
+For MVP, do NOT add a drag-and-drop dependency unless one is already safely installed.
+
+Preferred robust controls:
+
+Move Up
+Move Down
+
+or compact arrow controls.
+
+When order changes:
+
+- construct complete active-goal ID list
+- send POST reorder endpoint
+- server performs sequential 1..N canonical reassignment
+- refresh response after success
+
+Prevent:
+- duplicate IDs
+- incomplete lists
+- local optimistic state becoming permanently inconsistent after API failure
+
+If simple optimistic UI is safe, it may be used with rollback.
+Otherwise wait for server response.
+
+==================================================
+5. MOBILE MUTATION HOOKS
+==================================================
+
+Add clean hooks/utilities consistent with existing mobile architecture for:
+
+- create goal
+- update goal
+- archive/remove goal
+- reorder goals
+
+Do not make raw fetch calls scattered throughout the screen if the project convention uses hooks.
+
+Ensure authentication uses the existing client/customFetch infrastructure.
+
+==================================================
+6. AUTHORIZATION UX
+==================================================
+
+Only organizer should see/manage mutation controls.
+
+Regular members:
+- may view goals
+- must not see create/edit/archive/reorder controls
+
+Outsiders remain blocked by API authorization.
+
+Do not rely on UI hiding for security; server auth remains authoritative.
+
+==================================================
+7. SURPLUS / UNALLOCATED SEMANTICS
+==================================================
+
+The audit found:
+
+unallocatedCents =
+jar target - named goal targets
+
+surplusCents =
+saved principal remaining after filling named goals
+
+This means surplusCents can contain BOTH:
+
+- principal filling the unnamed/unallocated target portion
+- true over-target principal
+
+That naming is ambiguous.
+
+Do NOT change financial accounting.
+
+Choose one clean API semantic.
+
+Preferred approach:
+
+Keep:
+
+unallocatedTargetCents =
+max(0, jarTarget - activeGoalTargets)
+
+Add / expose:
+
+savedTowardUnallocatedCents =
+min(
+  max(0, savedPrincipal - activeGoalTargets),
+  unallocatedTargetCents
+)
+
+overTargetCents =
+max(0, savedPrincipal - jarTarget)
+
+Then avoid exposing ambiguous `surplusCents` as a user-facing concept.
+
+If backwards compatibility requires keeping surplusCents:
+document it as:
+"saved principal remaining after named goals"
+and do not label it "over target."
+
+Mobile should use:
+
+- Unallocated target
+- Saved toward unallocated
+- Above Jar target
+
+as separate concepts where relevant.
+
+No new persisted table is needed.
+
+==================================================
+8. FIX MOBILE TEST BASELINE
+==================================================
+
+The audit found:
+
+39/52 mobile tests passing
+13 failing
+
+across:
+- jar-lifecycle-ui.test.tsx
+- phase4c-action-visibility.test.tsx
+
+Do NOT label them pre-existing and leave the suite red.
+
+Audit why they fail against current Phase 4D UI.
+
+Fix test setup/mocks/assertions if implementation behavior is correct.
+
+If an actual UI regression exists:
+fix the UI.
+
+Do NOT:
+- delete tests
+- skip tests
+- weaken meaningful assertions
+- reintroduce incorrect cutoff-gated refund behavior
+
+Required final mobile result:
+
+100% pass
+
+==================================================
+9. ADD PHASE 4D MOBILE TESTS
+==================================================
+
+Add tests for:
+
+Manage route:
+- organizer Manage link opens valid route
+- member does not see organizer management controls
+
+Create:
+- create form renders
+- valid goal succeeds
+- > Jar target sum surfaces 409 message
+
+Edit:
+- update name
+- update description
+- update target
+- server error surfaced
+
+Remove:
+- confirmation shown
+- successful remove refreshes goals
+
+Reorder:
+- move goal up/down
+- complete ordered ID list submitted
+- canonical server order reflected after success
+
+Financial planning display:
+- Jar target shown
+- allocated named target shown
+- unallocated target shown
+- saved toward unallocated shown if implemented
+- over-target amount shown separately
+
+==================================================
+10. RECONFIRM FINANCIAL PURITY
+==================================================
+
+After mobile implementation, rerun backend financial-purity tests.
+
+Goal management must still create ZERO:
+
+- ledger_entries
+- ledger_transactions
+- financial_transactions
+- Stripe calls
+- refund records
+- commitment records
+
+Mobile mutations are planning metadata only.
+
+==================================================
+11. ARCHIVE ENDPOINT LIFECYCLE REVIEW
+==================================================
+
+The audit noted organizers can soft-archive goals on Cancelled/Completed jars.
+
+Decide whether this should remain allowed.
+
+Preferred Phase 4D behavior:
+
+If Jar is Cancelled or Completed:
+goal plan should be read-only.
+
+Therefore mutation endpoints should reject goal changes for terminal Jar statuses.
+
+Audit all goal mutation endpoints:
+
+POST
+PATCH
+archive
+reorder
+
+Use a consistent mutation-allowed lifecycle rule.
+
+Preferred:
+
+Allowed:
+Draft
+Inviting
+Saving
+Commitment if represented/derived
+
+Blocked:
+Cancelled
+Completed
+Closed/other terminal states
+
+Do not create a second phase engine.
+
+Use existing Jar status/phase utilities.
+
+Add tests.
+
+==================================================
+12. FULL VALIDATION
+==================================================
+
+Run:
+
+- Phase 4D goals suite
+- Phase 4D transparency suite
+- new Phase 4D mobile goal-management tests
+- full API suite run 1
+- full API suite run 2
+- rate-limit suite if separate
+- full mobile suite run 1
+- full mobile suite run 2
+- API typecheck
+- mobile typecheck
+- lib/db typecheck
+- API production build
+- fresh migration chain 0000 → 0018
+
+All executed tests must pass 100%.
+
+Report actual totals.
+
+==================================================
+13. SECURITY / PRIVACY REVIEW
+==================================================
+
+Reconfirm:
+
+- regular member cannot mutate goals
+- organizer-only controls
+- outsider cannot access financial summary
+- regular member response contains no exact other-member financial values
+- client cannot submit saved/committed allocation values
+- goal mutation cannot touch ledger
+- goal mutation cannot trigger Stripe
+- reorder cannot inject foreign goal IDs
+- terminal jars reject inappropriate mutation if lifecycle rule is adopted
+
+==================================================
+14. COMMIT / PUSH
+==================================================
+
+Create ONE Phase 4D closure commit.
+
+Suggested title:
+
+Complete Phase 4D mobile goal management
+
+Include only relevant app/test/API semantic cleanup.
+
+Do not commit:
+
+- .agents/memory
+- attached_assets
+- old PDFs
+- unrelated .replit files
+- report-generation scripts
+
+Push using Replit managed GitHub integration only.
+
+No PAT.
+
+Verify:
+
+git rev-parse HEAD
+git rev-parse origin/main
+
+They must match.
+
+==================================================
+15. PDF — ABSOLUTE FINAL ACTION
+==================================================
+
+Only after:
+
+- implementation
+- test fixes
+- full validation
+- security/privacy review
+- fresh migration
+- commit
+- push
+- HEAD === origin/main
+- final git status
+
+create:
+
+phase4d-closure-report.pdf
+
+PDF must include:
+
+- starting HEAD
+- final HEAD
+- mobile Manage Goals route
+- create/edit/archive/reorder UX
+- mutation hooks added
+- organizer/member authorization behavior
+- surplus/unallocated semantic cleanup
+- terminal Jar mutation rule
+- Phase 4D backend test totals
+- mobile goal-management test totals
+- full API run 1
+- full API run 2
+- mobile run 1
+- mobile run 2
+- typechecks
+- build
+- fresh 0000→0018 migration
+- financial-purity confirmation
+- privacy review
+- final origin/main
+- push method
+- confirmation no PAT
+- confirmation Stripe TEST MODE only
+- confirmation Phase 4E not started
+
+PDF must be the ABSOLUTE LAST action.
+
+After PDF generation:
+do nothing else.
+
+In chat return ONLY:
+
+PASS / FAIL
+Final HEAD
+origin/main
+Phase 4D goals
+Phase 4D transparency
+Phase 4D mobile management
+API run 1
+API run 2
+Mobile run 1
+Mobile run 2
+Typechecks
+Build
+Fresh migration
+Security/privacy
+Blockers
+PDF filename/path

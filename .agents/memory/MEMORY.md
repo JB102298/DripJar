@@ -15,3 +15,5 @@
 - [Webhook concurrency patterns](webhook-concurrency-patterns.md) — 3 production bugs fixed: onConflictDoNothing for idempotent INSERT, sql`col+1` for increments, mark processed in every tx exit path
 - [Phase 4B compliance lessons](phase4b-compliance-lessons.md) — real Stripe sig in tests: send payload as string not Buffer; pool-wait helper needed for singleFork full-suite; pdfkit use .cjs extension
 - [Phase 4C lessons](phase4c-lessons.md) — let-in-async-closure narrows to `never`; concurrent commit race; reminder processor slow with accumulated Saving jars; webhook-concurrency Scenario A borderline 120s timeout; background procs die between ShellExec calls
+- [Phase 4D lessons](phase4d-lessons.md) — RN Modal retains DOM when visible=false (use conditional render); useGoalMutations uses customFetch not useMutation; terminal status guard; vi.mock useQuery hooks
+- [DripJar rebrand](dripjar-rebrand.md) — what changed / what was intentionally left (AsyncStorage keys, bundleIdentifier, migration DB names); brand-guard test coverage; owner actions outstanding

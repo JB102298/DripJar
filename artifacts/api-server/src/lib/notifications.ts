@@ -18,6 +18,8 @@ export type NotificationType =
   | "cutoff_upcoming"
   | "cutoff_reached"
   | "agreement_required"
+  | "autodrip_succeeded"
+  | "autodrip_needs_attention"
   | "general";
 
 export async function createNotification(params: {

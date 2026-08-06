@@ -134,6 +134,41 @@
       "when": 1754520000000,
       "tag": "0018_phase4d_jar_goals",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1754606400000,
+      "tag": "0019_jar_timezone",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1754606460000,
+      "tag": "0020_saved_payment_methods",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1754606520000,
+      "tag": "0021_autodrip_authorizations",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1754606580000,
+      "tag": "0022_autodrip_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1754606640000,
+      "tag": "0023_autodrip_enum_extensions",
+      "breakpoints": true
     }
   ]
 }

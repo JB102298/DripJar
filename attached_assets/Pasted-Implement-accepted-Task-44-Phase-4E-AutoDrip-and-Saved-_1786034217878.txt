@@ -1,0 +1,57 @@
+Implement accepted Task #44 — Phase 4E: AutoDrip and Saved Payment Methods exactly as finalized.
+
+Follow the accepted task specification as the source of truth.
+
+Important execution requirements:
+
+- Stripe TEST MODE only.
+- Do not enable live Stripe.
+- Preserve all existing Phase 1–4D behavior.
+- No unrelated refactors.
+- No production deployment.
+- No production cron wiring.
+- Do not rename INTERNAL_REMINDER_TOKEN in this phase.
+- Keep the DripJar brand guard green.
+- Ensure all ownership, privacy, idempotency, concurrency, Jar Time, fee, schedule, failure, and needs_attention rules from Task #44 are implemented exactly.
+
+Before completion:
+1. Run the complete Phase 4E test suite.
+2. Run the full API test suite twice.
+3. Run the full mobile test suite twice.
+4. Run all typechecks.
+5. Run the API production build.
+6. Verify fresh migrations 0000 through 0023 from an empty database.
+7. Perform the Phase 4E security review.
+8. Confirm brand guard passes.
+9. Review git diff for unrelated changes.
+10. Commit with:
+   Add Phase 4E: AutoDrip and saved payment methods
+11. Push through the existing Replit GitHub integration.
+12. Confirm HEAD === origin/main.
+13. Confirm final git status.
+
+ABSOLUTE FINAL ACTION:
+Generate:
+
+phase4e-final-report.pdf
+
+The PDF must contain the complete implementation report, architecture delivered, migrations, APIs, mobile UX, Stripe Test Mode behavior, Jar Time behavior, AutoDrip state machine, fee handling, exactly-once protections, test results, security review, commit hash, origin verification, blockers/deferred items, and final git status.
+
+The PDF must be generated AFTER all tests, review, commit, push, origin verification, and final git status.
+
+After generating phase4e-final-report.pdf:
+DO NOT modify application files.
+DO NOT run more tests.
+DO NOT commit.
+DO NOT push.
+DO NOT update project memory.
+DO NOT perform any additional project action.
+
+Your final chat response should contain only:
+- PASS or FAIL
+- commit hash
+- API test totals
+- mobile test totals
+- migration verification result
+- blockers, if any
+- phase4e-final-report.pdf filename/path

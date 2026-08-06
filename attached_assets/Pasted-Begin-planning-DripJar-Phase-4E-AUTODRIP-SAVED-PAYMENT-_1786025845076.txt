@@ -1,0 +1,1280 @@
+Begin planning DripJar Phase 4E:
+
+AUTODRIP + SAVED PAYMENT METHODS
+
+THIS IS A READ-ONLY ARCHITECTURE / IMPLEMENTATION-PLANNING TASK FIRST.
+
+Do NOT implement Phase 4E yet.
+Do NOT modify files.
+Do NOT create migrations.
+Do NOT commit.
+Do NOT push.
+Do NOT enable live Stripe.
+Do NOT deploy or publish.
+
+Current product identity:
+
+DripJar
+TheDripJar.com
+
+Current expected repository:
+
+branch:
+main
+
+Expected HEAD / origin/main:
+6130810 — Rebrand M3Jar to DripJar
+
+Phase 4D is CLOSED.
+
+==================================================
+PHASE 4E PRODUCT GOAL
+==================================================
+
+Add the ability for a contributor to:
+
+1. Save a payment method securely through Stripe.
+2. Choose an AutoDrip schedule.
+3. Authorize DripJar to initiate future Drips automatically.
+4. See:
+   - AutoDrip amount
+   - frequency
+   - next scheduled Drip
+   - saved payment method summary
+   - projected completion date / progress
+5. Pause or cancel AutoDrip.
+6. Safely handle failed or delayed automatic payments.
+
+Core user experience:
+
+"Set it once. Drip toward it automatically."
+
+==================================================
+1. IMPORTANT FINANCIAL BOUNDARY
+==================================================
+
+DripJar must NEVER store:
+
+- raw card number
+- bank account number
+- CVV
+- routing/account credentials
+- Stripe secret payment credentials
+
+Stripe remains responsible for payment-method storage.
+
+DripJar stores only safe provider identifiers and display metadata where appropriate.
+
+Stripe remains TEST MODE ONLY.
+
+Do NOT enable live mode.
+
+==================================================
+2. SAVED PAYMENT METHODS
+==================================================
+
+Audit the existing Phase 4B Stripe integration.
+
+Current one-time Drip flow intentionally did NOT implement:
+
+- setup_future_usage
+- SetupIntents
+- saved payment methods
+- AutoDrip
+
+Phase 4E now needs a deliberate saved-payment-method architecture.
+
+Determine the safest Stripe Test Mode approach for:
+
+CARD
+
+and
+
+ACH DIRECT DEBIT
+
+Do not assume both payment types use identical setup flows.
+
+Audit:
+
+- Stripe Customer architecture already present
+- PaymentIntent usage
+- CustomerSession usage if present
+- PaymentSheet configuration
+- whether SetupIntent should be used
+- whether setup_future_usage belongs on a PaymentIntent
+- mandate/authorization requirements
+- off-session readiness
+- payment method reuse
+- bank-account verification requirements
+
+Return the recommended provider flow before implementation.
+
+==================================================
+3. AUTODRIP IS NOT A SUBSCRIPTION PRODUCT
+==================================================
+
+Do NOT model AutoDrip as a Stripe Subscription unless there is a compelling architectural reason.
+
+DripJar AutoDrip is a Jar-specific savings schedule.
+
+Example:
+
+Vacation Jar
+Contributor owes $2,000
+
+AutoDrip:
+$200 monthly
+
+10 scheduled Drips
+
+The amount may change if:
+
+- member gets ahead
+- member refunds money
+- Jar target changes before launch where allowed
+- schedule changes
+- final remaining amount is smaller than the configured AutoDrip
+
+Therefore prefer DripJar-controlled scheduling + PaymentIntents over a fixed Stripe subscription billing model.
+
+Audit and confirm.
+
+==================================================
+4. USER AUTHORIZATION
+==================================================
+
+A contributor must explicitly authorize AutoDrip.
+
+Before enabling, show:
+
+AutoDrip amount
+Frequency
+Next Drip
+Payment method
+Estimated fee structure
+Ability to pause/cancel
+Statement that future automatic charges will occur according to the schedule
+
+Persist durable authorization including:
+
+- userId
+- memberId
+- jarId
+- schedule configuration
+- payment method reference
+- authorization timestamp
+- authorization/version context
+- status
+
+Do not infer authorization from merely saving a payment method.
+
+SAVED PAYMENT METHOD
+and
+AUTODRIP AUTHORIZATION
+
+are separate concepts.
+
+==================================================
+5. FREQUENCIES
+==================================================
+
+Audit existing contribution schedule infrastructure.
+
+Current product historically supports concepts such as:
+
+weekly
+bi-weekly
+monthly
+twice-monthly
+
+Do not invent a competing scheduler.
+
+Phase 4E should build on the existing schedule model wherever possible.
+
+Determine:
+
+- which frequency enum already exists
+- next due date calculation
+- schedule remaining amount
+- missed-payment semantics
+- existing Phase 3 reminder processor relationships
+
+Return whether existing contribution_schedules can be extended safely or whether a separate AutoDrip authorization table is cleaner.
+
+==================================================
+6. AUTODRIP AMOUNT
+==================================================
+
+Contributor chooses the PRINCIPAL amount.
+
+Example:
+
+AutoDrip principal:
+$200
+
+At execution time the existing fee engine calculates:
+
+Principal
++ DripJar 3%
++ processing fee estimate
+=
+total charge
+
+Do not save a hard-coded historical processing-fee total as the future charge amount.
+
+Every AutoDrip execution should use the then-current approved fee engine.
+
+However:
+
+Do NOT change the 3% DripJar fee policy in this phase.
+
+==================================================
+7. FINAL SMALLER DRIP
+==================================================
+
+AutoDrip must not intentionally overfund a contributor's expected remaining share unless the product already permits intentional extra Drips.
+
+Example:
+
+Remaining expected principal:
+$75
+
+Configured AutoDrip:
+$200
+
+Preferred behavior:
+
+Next AutoDrip principal = $75
+
+NOT $200
+
+Audit current schedule/member-target architecture before locking this rule.
+
+Important:
+
+This is related to the previously deferred "can members Drip ahead/extra?" product decision.
+
+Do NOT silently implement a global restriction on manual Drips.
+
+For AutoDrip only, recommend a safe remaining-target cap.
+
+Surface if a product decision is required.
+
+==================================================
+8. FEES AND DISCLOSURE
+==================================================
+
+AutoDrip UI must clearly explain:
+
+Configured AutoDrip principal:
+$200
+
+DripJar fee:
+3% added
+
+Processing fee:
+added based on payment method
+
+The actual total charged may therefore exceed $200.
+
+The member's Jar progress increases by PRINCIPAL only.
+
+Fees never count toward Jar progress.
+
+==================================================
+9. CARD VS ACH
+==================================================
+
+DripJar should remain ACH-first where practical because recurring group savings benefits from lower processing costs.
+
+But cards should remain available for convenience.
+
+Plan AutoDrip UX so contributor can choose among eligible saved payment methods.
+
+Audit:
+
+- card off-session payment support
+- ACH off-session requirements
+- mandate text
+- delayed ACH success/failure states
+- whether ACH should be eligible immediately after setup or only after verification/completion
+
+Do not pretend ACH settles instantly.
+
+==================================================
+10. PAYMENT METHOD MODEL
+==================================================
+
+Plan a minimal provider-reference model.
+
+Potential table:
+
+saved_payment_methods
+
+Possible fields:
+
+id
+user_id
+stripe_customer_id
+stripe_payment_method_id
+type
+display_brand
+last4
+bank_name nullable
+is_default
+status
+created_at
+updated_at
+
+Do not assume this exact schema if Stripe Customer + provider querying makes some fields redundant.
+
+Audit whether DripJar actually needs to persist a table or can safely retrieve methods from Stripe.
+
+Preference:
+
+Persist enough durable linkage to authorize AutoDrip safely without treating cached display metadata as provider truth.
+
+==================================================
+11. AUTODRIP AUTHORIZATION MODEL
+==================================================
+
+Likely table:
+
+autodrip_authorizations
+
+Possible fields:
+
+id
+jar_id
+member_id
+user_id
+payment_method_id/provider reference
+principal_cents
+frequency
+status
+authorized_at
+paused_at
+cancelled_at
+next_run_at
+last_run_at
+agreement/version if appropriate
+created_at
+updated_at
+
+Potential statuses:
+
+active
+paused
+cancelled
+completed
+
+Do not persist redundant monetary balances.
+
+==================================================
+12. AUTODRIP EXECUTION RECORD
+==================================================
+
+Each scheduled attempt should have its own durable execution record.
+
+Potential:
+
+autodrip_runs
+
+Fields conceptually:
+
+id
+autodrip_authorization_id
+scheduled_for
+principal_cents
+status
+financial_transaction_id nullable
+stripe_payment_intent_id nullable
+attempt_count
+failure_code
+failure_message safe/sanitized
+started_at
+completed_at
+
+Status model may include:
+
+scheduled
+processing
+succeeded
+failed
+skipped
+cancelled
+
+Use a durable run record so retries do not create duplicate charges.
+
+==================================================
+13. EXACTLY-ONCE AUTODRIP
+==================================================
+
+This is critical.
+
+If the AutoDrip processor runs twice for the same scheduled date:
+
+DripJar must NOT create two charges.
+
+Need deterministic idempotency.
+
+Potential key:
+
+autodrip:<authorizationId>:<scheduledOccurrence>
+
+or preferably immutable run UUID created transactionally before provider call.
+
+Plan:
+
+schedule occurrence
+→ durable autodrip_run
+→ Stripe PaymentIntent creation using stable idempotency key
+→ webhook posts existing Phase 4A ledger contribution exactly once
+
+Reuse Phase 4B webhook contribution posting.
+
+Do NOT create a parallel contribution accounting system.
+
+==================================================
+14. REUSE PHASE 4B DRIP PIPELINE
+==================================================
+
+AutoDrip should ideally converge into the same financial model as a manual Drip.
+
+After successful Stripe payment:
+
+- financial_transaction
+- contribution
+- ledger transaction
+- principal → CTRB_REFUNDABLE
+- DripJar fee → DJ_FEE_REVENUE
+- processing fee → PROC_FEE_CLR
+
+should behave consistently.
+
+Source may distinguish:
+
+stripe_test_manual
+vs
+stripe_test_autodrip
+
+or equivalent.
+
+Do not duplicate fee/ledger logic.
+
+==================================================
+15. PROVIDER SUCCESS IS AUTHORITATIVE
+==================================================
+
+Do not mark an AutoDrip successful because PaymentIntent creation succeeded.
+
+Provider lifecycle must remain authoritative.
+
+Plan states for:
+
+requires_payment_method
+requires_action
+processing
+succeeded
+failed/cancelled
+
+Audit how off-session authentication failures should appear.
+
+For cards that require authentication:
+
+AutoDrip may fail and require the contributor to open the app and complete action.
+
+Plan UX/status for:
+
+"Action required"
+
+Do not repeatedly hammer the card automatically.
+
+==================================================
+16. FAILED AUTODRIPS
+==================================================
+
+Plan safe failure behavior.
+
+Example:
+
+Next Drip:
+August 15
+
+Attempt fails.
+
+DripJar should:
+
+- mark run failed/action-required
+- notify/display status
+- preserve schedule
+- not create principal credit
+- not create duplicate financial posting
+- not repeatedly retry without defined policy
+
+Recommend retry policy.
+
+For MVP, conservative recommendation:
+
+one automatic attempt per scheduled occurrence
+then user intervention / manual retry
+
+OR a small deterministic retry schedule.
+
+Do not implement aggressive dunning.
+
+==================================================
+17. PAUSE
+==================================================
+
+Contributor can pause AutoDrip.
+
+Pause means:
+
+- no future automatic run should be initiated while paused
+- existing already-created/provider-processing PaymentIntent is not magically cancelled unless safely possible
+- saved payment method remains available
+- schedule/authorization can be resumed
+
+Need clear effective-time semantics.
+
+==================================================
+18. CANCEL
+==================================================
+
+Contributor can cancel AutoDrip.
+
+Cancel:
+
+- prevents future automatic runs
+- does NOT refund existing contributions
+- does NOT remove committed funds
+- does NOT automatically detach the saved payment method unless user explicitly removes it
+
+Do not conflate AutoDrip cancellation with Jar membership cancellation.
+
+==================================================
+19. PAYMENT METHOD REMOVAL
+==================================================
+
+Plan behavior if contributor removes a payment method currently used by active AutoDrip.
+
+Preferred:
+
+Block removal until:
+- choose replacement
+OR
+- pause/cancel AutoDrip
+
+Do not leave active authorization pointing to a nonexistent payment method.
+
+==================================================
+20. DEFAULT PAYMENT METHOD
+==================================================
+
+Plan whether one saved method can be marked default.
+
+AutoDrip should reference a specific payment method, not merely "whatever is default today," unless intentionally designed otherwise.
+
+Preferred:
+
+AutoDrip authorization pins:
+
+specific Stripe PaymentMethod ID
+
+Changing account default should not silently change the method used for an already-authorized AutoDrip.
+
+Provide explicit:
+
+"Change AutoDrip payment method"
+
+flow.
+
+==================================================
+21. USER OWNERSHIP
+==================================================
+
+All saved-payment and AutoDrip mutations derive user/member from authenticated identity.
+
+Do not accept authoritative:
+
+memberId
+stripeCustomerId
+stripePaymentMethodId belonging to another user
+autodripAuthorizationId belonging to another user
+
+Verify provider PaymentMethod belongs to authenticated user's Stripe Customer before attaching/using it.
+
+==================================================
+22. ORGANIZER PERMISSIONS
+==================================================
+
+Organizer may SEE AutoDrip status where appropriate:
+
+Active
+Paused
+Needs attention
+Not configured
+
+Organizer may NOT:
+
+- enable AutoDrip for another member
+- choose another member's payment method
+- change their AutoDrip amount
+- retry their charge
+- cancel their AutoDrip
+
+Contributor owns their own automatic payment authorization.
+
+==================================================
+23. PRIVACY
+==================================================
+
+Regular members should NOT see:
+
+- another member's card brand/last4
+- bank name
+- payment method
+- failure codes
+- exact charge details
+
+Organizer may see coordination-level state only:
+
+AutoDrip On
+Paused
+Action Needed
+Off
+
+not private payment credentials/details.
+
+==================================================
+24. MOBILE PAYMENT METHOD UX
+==================================================
+
+Plan screens such as:
+
+Payment Methods
+
+Saved methods:
+
+Visa •••• 4242
+Checking •••• 6789
+
+Add payment method
+Set default
+Remove
+
+Actual method entry must use Stripe's secure UI.
+
+Never render raw card/bank credentials through DripJar-controlled text inputs.
+
+==================================================
+25. AUTODRIP SETUP UX
+==================================================
+
+Concept:
+
+Set Up AutoDrip
+
+Principal per Drip
+$200
+
+Frequency
+Monthly
+
+Starting
+August 15
+
+Payment method
+Visa •••• 4242
+
+Estimated next charge:
+Principal $200
+DripJar fee $6
+Estimated processing $X
+Estimated total $Y
+
+Disclosure:
+"Your processing fee may vary by payment method."
+
+Primary CTA:
+Enable AutoDrip
+
+==================================================
+26. AUTODRIP STATUS UX
+==================================================
+
+Jar detail should show:
+
+AutoDrip
+$200 monthly
+
+Next Drip
+Aug 15
+
+Payment method
+Visa •••• 4242
+
+Status
+Active
+
+Actions:
+Pause
+Change
+Cancel
+
+If failed:
+
+AutoDrip needs attention
+
+CTA:
+Fix Payment Method
+or
+Retry Drip
+
+==================================================
+27. NEXT DRIP LANGUAGE
+==================================================
+
+Use DripJar terminology consistently:
+
+AutoDrip
+Next Drip
+Drip amount
+Drip schedule
+
+Avoid customer-facing:
+
+subscription invoice
+recurring billing cycle
+
+unless legally/provider-required.
+
+Internally technical names may remain precise.
+
+==================================================
+28. EXISTING SCHEDULES
+==================================================
+
+Audit current contribution_schedules.
+
+We already use schedule infrastructure for:
+
+- recommended payment cadence
+- due dates
+- reminder automation
+
+Decide whether AutoDrip should:
+
+A. augment contribution_schedules
+
+or
+
+B. have separate authorization/execution tables linked to contribution_schedules
+
+Preference:
+
+Existing schedules represent SAVINGS EXPECTATION.
+
+AutoDrip authorization represents PAYMENT AUTHORITY.
+
+They should probably remain separate but linked.
+
+Confirm from code.
+
+==================================================
+29. SCHEDULE EDITS
+==================================================
+
+If contributor changes:
+
+amount
+frequency
+next date
+payment method
+
+determine whether:
+
+- mutate current authorization
+or
+- version authorization
+
+For auditability, strongly consider preserving material authorization changes.
+
+At minimum record activity.
+
+Do not make historical charge authorization impossible to reconstruct.
+
+==================================================
+30. AGREEMENT / CONSENT
+==================================================
+
+Determine whether AutoDrip authorization needs its own terms/version reference.
+
+This is NOT the same thing as:
+
+Jar agreement acceptance
+or
+fund commitment agreement.
+
+AutoDrip consent concerns permission to charge the saved payment method automatically.
+
+Plan whether to persist:
+
+authorization_terms_version
+
+and disclosure text/version.
+
+Recommend a lightweight versioned consent record.
+
+==================================================
+31. ACTIVITY
+==================================================
+
+Plan activity types:
+
+autodrip_enabled
+autodrip_paused
+autodrip_resumed
+autodrip_cancelled
+autodrip_succeeded
+autodrip_failed
+autodrip_payment_method_changed
+
+Do not expose private payment details in group activity.
+
+Example:
+
+"Alex enabled AutoDrip."
+
+not:
+
+"Alex enabled AutoDrip on Visa 4242."
+
+==================================================
+32. NOTIFICATIONS
+==================================================
+
+Phase 4E may need targeted contributor notifications for:
+
+Upcoming AutoDrip
+AutoDrip succeeded
+AutoDrip failed
+Action required
+
+Audit existing Phase 3 notification/email infrastructure.
+
+Do not build a new notification platform.
+
+Use existing infrastructure where appropriate.
+
+But avoid unnecessary notification expansion if it significantly increases scope.
+
+Return MVP recommendation.
+
+==================================================
+33. INTERNAL PROCESSOR
+==================================================
+
+AutoDrip needs a safely retryable internal processor.
+
+Concept:
+
+POST /internal/process-autodrips
+
+protected with existing internal-token pattern or a dedicated safe equivalent.
+
+Processor:
+
+1. finds due active AutoDrip schedules
+2. locks/creates occurrence run
+3. ensures occurrence idempotency
+4. creates Stripe Test Mode PaymentIntent
+5. records provider relationship
+6. lets webhook determine success
+
+Do not depend on an external scheduler for test correctness.
+
+Tests invoke processor directly.
+
+Production scheduler wiring may remain a pre-go-live task if appropriate.
+
+==================================================
+34. REFUND DISPATCHER INTERACTION
+==================================================
+
+Do NOT merge AutoDrip processing with refund dispatcher.
+
+Separate job responsibilities.
+
+But audit internal-token naming.
+
+Current refund dispatcher reportedly reused INTERNAL_REMINDER_TOKEN.
+
+Consider whether Phase 4E is the right time to introduce a clearer generic internal-job secret name.
+
+Be cautious:
+
+renaming production secret plumbing creates deployment work.
+
+If current token is safe though poorly named:
+document technical debt rather than expand scope.
+
+==================================================
+35. TIMEZONE
+==================================================
+
+AutoDrip scheduling requires deterministic time semantics.
+
+Audit current Jar/member timezone handling.
+
+Do NOT assume device local time is appropriate for backend automatic charges.
+
+Determine canonical execution timezone.
+
+Potential MVP:
+
+Jar timezone
+or
+UTC-normalized execution time
+
+Need user-friendly "Next Drip" display in local/Jar time.
+
+Surface a decision if the product currently has no timezone field.
+
+==================================================
+36. MISSED / DELAYED EXECUTION
+==================================================
+
+If processor runs late:
+
+Example:
+
+Drip scheduled Aug 15
+processor unavailable until Aug 16
+
+Should it execute the missed occurrence?
+
+Preferred:
+
+Yes, once, if:
+- authorization remains active
+- occurrence has not already run
+- Jar still eligible
+- amount remains > 0
+
+Do not create every historically missed run after a long outage without a bounded catch-up rule.
+
+Recommend safe catch-up semantics.
+
+==================================================
+37. JAR LIFECYCLE
+==================================================
+
+AutoDrip must stop when the Jar no longer accepts contributions.
+
+Audit current Jar statuses/phases.
+
+At minimum:
+
+Cancelled
+Completed
+Closed/terminal equivalent
+
+must block new automatic Drips.
+
+If cutoff/Commitment phase still allows new contributions under existing rules, do not silently change that.
+
+Return exact lifecycle recommendation.
+
+==================================================
+38. FUND COMMITMENT INTERACTION
+==================================================
+
+If member previously committed all funds and later AutoDrip adds new principal:
+
+the NEW principal must remain REFUNDABLE.
+
+Existing Phase 4C rule remains.
+
+Do not automatically commit new AutoDrips.
+
+AutoDrip is contribution authorization, not fund commitment.
+
+Add explicit tests later.
+
+==================================================
+39. REFUND INTERACTION
+==================================================
+
+If AutoDripped principal remains refundable, contributor may use normal Phase 4C refund flow.
+
+No AutoDrip-specific refund architecture.
+
+Source lot provenance must work normally for AutoDrip contributions.
+
+==================================================
+40. JAR GOALS INTERACTION
+==================================================
+
+Successful AutoDrip principal automatically affects:
+
+savedPrincipalCents
+Jar progress
+goal waterfall
+
+because those derive from the ledger.
+
+No goal-specific AutoDrip routing.
+
+Do not modify Phase 4D goal metadata when AutoDrip executes.
+
+==================================================
+41. API DESIGN
+==================================================
+
+Plan endpoints for:
+
+Payment Methods:
+
+POST /payment-methods/setup
+GET /payment-methods
+DELETE /payment-methods/:id
+POST /payment-methods/:id/default
+
+or the provider-safe equivalent.
+
+AutoDrip:
+
+GET /jars/:jarId/autodrip
+POST /jars/:jarId/autodrip/preview
+POST /jars/:jarId/autodrip
+PATCH /jars/:jarId/autodrip
+POST /jars/:jarId/autodrip/pause
+POST /jars/:jarId/autodrip/resume
+DELETE /jars/:jarId/autodrip
+
+Internal:
+
+POST /internal/process-autodrips
+
+Use route conventions already established.
+
+Do not accept client-authoritative financial/provider identifiers.
+
+==================================================
+42. SCHEMA PLAN
+==================================================
+
+Current migration chain ends:
+
+0018
+
+Likely Phase 4E migrations begin:
+
+0019
+
+Audit a minimal schema around:
+
+saved_payment_methods
+autodrip_authorizations
+autodrip_runs
+possibly authorization consent/version history
+
+Do not create unnecessary tables.
+
+Return exact proposed migrations.
+
+==================================================
+43. CONCURRENCY
+==================================================
+
+Plan tests/locking for:
+
+- processor invoked twice simultaneously
+- two workers claim same occurrence
+- AutoDrip paused while processor starts
+- AutoDrip cancelled while run already provider-created
+- schedule changed while occurrence is claimed
+- saved method removed while AutoDrip active
+- manual Drip + AutoDrip simultaneous
+- contribution webhook duplicate
+- successful webhook with two different Stripe event IDs
+- failed payment retry
+- Jar becomes terminal while occurrence is due
+
+No duplicate charge.
+
+No duplicate ledger posting.
+
+==================================================
+44. SECURITY
+==================================================
+
+Audit against:
+
+- payment-method substitution
+- customer-ID substitution
+- AutoDrip authorization takeover
+- organizer enabling AutoDrip for member
+- off-session charge without consent
+- duplicate provider charges
+- stale authorization
+- removed method use
+- live Stripe key usage
+- webhook spoofing
+- client-authoritative fee amount
+- client-authoritative total amount
+- negative/invalid principal
+- terminal Jar charging
+- leaked card/bank metadata
+
+==================================================
+45. TEST PLAN
+==================================================
+
+Plan extensive tests for:
+
+PAYMENT METHODS
+- setup
+- save
+- list
+- ownership
+- remove
+- active AutoDrip removal blocked
+- default behavior
+- card
+- ACH
+- Test Mode guards
+
+AUTODRIP SETUP
+- preview
+- explicit consent
+- enable
+- ownership
+- frequency
+- amount
+- method linkage
+- next run
+- pause/resume/cancel
+- method change
+
+PROCESSOR
+- due run
+- not-yet-due skip
+- paused skip
+- terminal Jar skip
+- exactly-once occurrence
+- concurrent processor
+- Stripe idempotency
+- provider failure
+- provider processing
+- provider success
+- action required
+
+ACCOUNTING
+- successful AutoDrip posts through existing contribution ledger
+- fees correct
+- principal refundable
+- new AutoDrip after commitment stays refundable
+- Jar Goals update via derived balance
+- no success posting before webhook
+
+PRIVACY
+- organizer status-only
+- members can't see other methods
+- outsider rejected
+
+==================================================
+46. OUT OF SCOPE
+==================================================
+
+Do NOT plan implementation of:
+
+- live Stripe
+- Stripe Connect payout
+- organizer bank payout
+- DripJar Card / Issuing
+- production cron wiring unless absolutely required
+- app-store release
+- Jar Goal-specific AutoDrips
+- AutoDrip-specific refunds
+- changing DripJar fee policy
+- investment/interest features
+- legal entity formation
+- production deployment
+
+==================================================
+47. REBRAND MUST REMAIN CLEAN
+==================================================
+
+DripJar is FINAL.
+
+All new Phase 4E customer-facing code must use:
+
+DripJar
+TheDripJar.com
+AutoDrip
+Next Drip
+
+Do not reintroduce:
+
+M3Jar
+TripJar
+
+Brand guard must remain green.
+
+==================================================
+48. RETURN ARCHITECTURE DECISIONS
+==================================================
+
+Create a DRAFT task:
+
+Phase 4E — AutoDrip and Saved Payment Methods
+
+Do NOT execute it.
+
+Return a concise architecture summary containing:
+
+- Stripe saved-payment-method approach
+- Card setup flow
+- ACH setup flow
+- off-session authorization model
+- proposed DB tables
+- existing contribution_schedules relationship
+- AutoDrip occurrence/run model
+- exactly-once strategy
+- fee calculation strategy
+- final-small-Drip recommendation
+- failure/retry recommendation
+- pause/cancel semantics
+- payment-method removal behavior
+- privacy model
+- timezone decision/recommendation
+- Jar lifecycle behavior
+- mobile UX
+- API endpoints
+- webhook changes
+- internal processor design
+- migrations expected
+- test strategy
+- security risks
+- any decisions requiring my approval
+
+Do not generate a PDF during planning.
+
+Do not start implementation until I explicitly accept the Phase 4E task.
+
+The eventual implementation task MUST require:
+
+phase4e-final-report.pdf
+
+as the ABSOLUTE FINAL ACTION after:
+implementation
+testing
+security review
+fresh migrations
+commit
+push
+origin verification
+final git status.

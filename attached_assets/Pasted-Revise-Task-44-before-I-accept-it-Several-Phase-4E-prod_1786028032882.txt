@@ -1,0 +1,173 @@
+Revise Task #44 before I accept it.
+
+Several Phase 4E product decisions are now FINAL.
+
+Do NOT implement yet.
+Update the draft task only.
+
+==================================================
+1. JAR TIME — REPLACE CURRENT TIMEZONE DESIGN
+==================================================
+
+The current task's contributor/device-timezone execution model is NOT approved.
+
+DripJar will use "Jar Time."
+
+FINAL RULE:
+
+- At Jar creation, capture the CREATOR'S current IANA timezone.
+- Persist that timezone on the Jar itself.
+- Example:
+  America/New_York
+  America/Los_Angeles
+  Europe/London
+- Jar Time is IMMUTABLE after Jar creation.
+- Users cannot change the Jar timezone.
+- Do not derive future execution timing from individual contributor profiles.
+- Do not change Jar Time when the organizer travels or changes device timezone.
+- Device/member timezone may be used for display formatting only.
+- Backend timestamps remain UTC.
+- Scheduled AutoDrips execute at exactly 9:00 AM JAR TIME on the scheduled calendar date.
+- Use proper IANA timezone conversion so daylight saving time is handled automatically.
+- Never hard-code UTC offsets such as UTC-5.
+
+This means a jar-level timezone field IS required.
+
+Audit the Jar schema and include the necessary migration/schema changes in Phase 4E.
+
+Existing Jars/test fixtures need a deterministic migration/backfill strategy.
+
+==================================================
+2. FAILED AUTODRIP — ONE ATTEMPT AND STOP
+==================================================
+
+FINAL POLICY:
+
+There is ONE automatic attempt per scheduled occurrence.
+
+If the PaymentIntent fails or requires customer action:
+
+- mark the run failed or action_required
+- do not automatically retry that occurrence
+- place the AutoDrip authorization into an action-required / needs-attention state
+- prevent future automatic occurrences while that unresolved state remains
+- notify the contributor
+- require contributor intervention to fix the payment method/authentication
+- contributor must explicitly restore/resume AutoDrip after resolution
+
+Do NOT simply allow the next scheduled occurrence to run automatically while the AutoDrip remains unresolved.
+
+No automatic dunning.
+
+==================================================
+3. FINAL SMALL DRIP + FEES
+==================================================
+
+FINAL POLICY:
+
+effectivePrincipal =
+min(configuredAutoDripPrincipal, remainingExpectedPrincipal)
+
+If configured AutoDrip is $200 and remaining expected principal is $73:
+
+principal charged toward Jar = $73
+
+THEN recalculate ALL applicable fees from the $73 effective principal:
+
+- DripJar fee = 3% of effective principal
+- Stripe/payment processing fee = calculated using the existing fee engine from that reduced transaction
+- total charge = effective principal + DripJar fee + processing fee
+
+Never calculate the fees using the original $200 configured amount after the principal has been capped.
+
+If remainingExpectedPrincipal <= 0:
+- do not create a PaymentIntent
+- mark AutoDrip completed
+
+Manual Drips remain unaffected by this AutoDrip-only ceiling.
+
+==================================================
+4. AUTODRIP REQUIRES A CONTRIBUTION SCHEDULE
+==================================================
+
+APPROVED:
+
+A contributor must have an active/accepted contribution schedule before enabling AutoDrip.
+
+AutoDrip automates an established savings plan.
+
+Do NOT allow an uncapped AutoDrip when no schedule exists.
+
+Use the member's accepted schedule/expected principal as the ceiling when calculating remainingExpectedPrincipal.
+
+If no eligible schedule exists:
+- AutoDrip setup should be blocked
+- mobile UX should direct the contributor to establish their savings schedule first
+
+Do not silently create an arbitrary schedule.
+
+==================================================
+5. CATCH-UP POLICY
+==================================================
+
+APPROVED WITH LIMITS:
+
+If DripJar's processor misses a scheduled occurrence because of service/scheduler downtime, it may execute ONE overdue occurrence when processing resumes.
+
+Never batch-charge multiple historical occurrences.
+
+Catch-up is allowed only when:
+
+- AutoDrip authorization is active
+- AutoDrip is not action_required
+- AutoDrip is not paused/cancelled/completed
+- Jar still accepts contributions
+- occurrence has not already run
+- remaining expected principal > 0
+
+After the single catch-up attempt, advance to the next future scheduled occurrence.
+
+All normal one-attempt failure rules still apply.
+
+==================================================
+6. UPDATE MIGRATION PLAN
+==================================================
+
+Because Jar Time is now persisted on the Jar, revise the expected migration plan.
+
+Current migration chain ends at 0018.
+
+Phase 4E should still begin at 0019, but determine the cleanest ordering for:
+
+- Jar timezone / Jar Time field
+- saved_payment_methods
+- autodrip_authorizations
+- autodrip_runs
+- activity/source enum changes
+
+Do not assume migrations must remain exactly 0019–0022 if an additional migration is required.
+
+Return the revised migration sequence.
+
+==================================================
+7. RETURN UPDATED TASK
+==================================================
+
+Update Task #44 to incorporate these FINAL decisions.
+
+Return only:
+
+- confirmation that Task #44 was revised
+- revised Jar Time architecture
+- revised failed-payment state behavior
+- revised final-small-Drip fee behavior
+- schedule requirement
+- revised migrations
+- any remaining decisions requiring my approval
+
+Do NOT implement.
+Do NOT modify application code.
+Do NOT create migrations yet.
+Do NOT commit.
+Do NOT push.
+Do NOT generate the final PDF yet.

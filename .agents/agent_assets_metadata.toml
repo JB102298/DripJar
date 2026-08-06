@@ -76,3 +76,24 @@ uri = "file://phase4c-final-verification-report.pdf"
 type = "pdf"
 title = "Phase 4C Final Verification Report"
 description = "Full closure pass — all test suites, fresh migration, typechecks, git state, Stripe TEST MODE confirmation."
+
+[[outputs]]
+id = "9SGjRhZXI0FtHYPz6RQcn"
+uri = "file://phase4d-final-report.pdf"
+type = "pdf"
+title = "Phase 4D Final Report"
+description = "Jar Goals + Financial Transparency — 501/501 tests passing, HEAD === origin/main"
+
+[[outputs]]
+id = "gYxlwbc4LjvChSHXggPAR"
+uri = "file://phase4d-closure-report.pdf"
+type = "pdf"
+title = "Phase 4D Closure Report"
+description = "M3Jar Phase 4D — Mobile Goal Management. 501/501 API × 2, 81/81 mobile × 2, all typechecks and production build clean, fresh migration 0000→0018 verified. Committed 9a59de2, pushed to origin/main."
+
+[[outputs]]
+id = "0I2jJAPJD7frQLgQlwOVN"
+uri = "file://dripjar-full-rebrand-report.pdf"
+type = "pdf"
+title = "DripJar Full Rebrand Report"
+description = "Complete audit and change log for the M3Jar → DripJar rebrand. Commit 6130810."

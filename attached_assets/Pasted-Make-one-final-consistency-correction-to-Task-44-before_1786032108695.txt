@@ -1,0 +1,109 @@
+Make one final consistency correction to Task #44 before implementation.
+
+Do NOT implement yet.
+Do NOT modify application code.
+Update the task specification only.
+
+==================================================
+1. CATCH-UP SEMANTICS
+==================================================
+
+Correct the processor language so it exactly matches the approved catch-up policy.
+
+If more than one AutoDrip occurrence was missed during downtime:
+
+- DO NOT execute every missed occurrence.
+- DO NOT skip charging entirely merely because multiple occurrences are overdue.
+- Select exactly ONE eligible overdue occurrence: the MOST RECENT overdue scheduled occurrence.
+- Create exactly one AutoDrip run for that occurrence.
+- Permanently skip the older missed occurrences.
+- After that run is initiated/resolved according to normal rules, next_run_at must point to the next FUTURE scheduled occurrence.
+
+All existing eligibility conditions still apply:
+- authorization active
+- not paused
+- not needs_attention
+- not cancelled/completed
+- Jar accepts contributions
+- occurrence not previously executed
+- remainingExpectedPrincipal > 0
+
+Maximum catch-up charge count after an outage = ONE.
+
+==================================================
+2. NEEDS_ATTENTION MUST REQUIRE EXPLICIT RESUME
+==================================================
+
+Remove any specification saying that a successful Stripe webhook automatically clears authorization.needs_attention.
+
+FINAL RULE:
+
+If an AutoDrip enters needs_attention because of failed payment or requires_action:
+
+- future automatic runs remain blocked
+- contributor intervention is required
+
+If a requires_action PaymentIntent is later successfully completed by the contributor:
+
+- mark that AutoDrip run succeeded
+- post its contribution/accounting normally
+- DO NOT automatically change the authorization from needs_attention to active
+
+The authorization remains needs_attention until the contributor explicitly uses:
+
+POST /jars/:jarId/autodrip/resume
+
+Resume is the only action that restores future automatic charging after needs_attention.
+
+Resume should:
+- verify the authorization is now eligible
+- verify the referenced payment method remains valid/eligible
+- clear needs_attention
+- recompute next_run_at to the next FUTURE scheduled occurrence
+- never retry the missed occurrence automatically
+
+==================================================
+3. PAYMENT METHOD REMOVAL WORDING
+==================================================
+
+Keep the safer existing technical rule:
+
+DELETE /payment-methods/:id returns 409 when any AutoDrip authorization in:
+
+- active
+- paused
+- needs_attention
+
+references that payment method.
+
+Correct any text saying that merely pausing AutoDrip allows the method to be removed.
+
+To remove a referenced payment method, contributor must:
+
+A. explicitly change that AutoDrip to another eligible payment method
+
+OR
+
+B. cancel the AutoDrip authorization
+
+Pausing alone is NOT sufficient.
+
+This prevents paused authorizations from referencing a detached/nonexistent provider payment method.
+
+==================================================
+RETURN
+==================================================
+
+Return only:
+
+- confirmation Task #44 was corrected
+- corrected catch-up rule
+- corrected needs_attention/resume rule
+- corrected payment-method-removal rule
+- whether any decisions remain unresolved
+
+Do not implement.
+Do not create migrations.
+Do not commit.
+Do not push.
+Do not generate the PDF.

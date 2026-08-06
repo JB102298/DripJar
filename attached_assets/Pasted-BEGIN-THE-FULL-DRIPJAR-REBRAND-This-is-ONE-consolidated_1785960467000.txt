@@ -1,0 +1,944 @@
+BEGIN THE FULL DRIPJAR REBRAND.
+
+This is ONE consolidated implementation task.
+
+Do NOT split this into separate implementation tasks unless a genuinely external/manual action requires the owner.
+
+CURRENT PRODUCT NAME:
+M3Jar
+
+OLDER LEGACY NAME:
+TripJar
+
+FINAL PRODUCT NAME:
+DripJar
+
+FINAL PRIMARY DOMAIN:
+TheDripJar.com
+
+TARGET FUTURE LEGAL ENTITY NAME:
+DripJar LLC
+
+IMPORTANT:
+Do NOT start Phase 4E.
+This task is ONLY the full product/infrastructure naming migration.
+
+Current expected repository:
+
+branch:
+main
+
+Expected HEAD / origin/main:
+9a59de2b7463bb9c1c832c3af7b63bd03b2814b8
+
+Current GitHub repository:
+JB102298/TripJar
+
+Current application has historical references to:
+- TripJar
+- tripjar
+- M3Jar
+- m3jar
+- m3jar.com
+
+Some production/development configuration may still reference:
+- m3jar.com
+- www.m3jar.com
+- updates.m3jar.com
+- @m3jar.dev
+
+The final customer-facing identity is now permanently:
+
+DripJar
+TheDripJar.com
+
+==================================================
+1. REBRAND PHILOSOPHY
+==================================================
+
+This is NOT a blind global find-and-replace.
+
+Audit every occurrence and classify it before changing.
+
+Change identifiers that represent:
+
+- customer-facing brand
+- application identity
+- URLs/domains
+- email identity
+- documentation
+- marketing/product copy
+- test fixtures representing brand identity
+- seed/demo brand references
+- package metadata
+- Expo/app metadata
+- generated assets/reports
+- environment/config references
+- CORS/origin/domain assumptions
+
+DO NOT rename internal technical identifiers merely because they were created while the app was called M3Jar/TripJar if:
+
+- they are not customer-visible
+- they do not represent external identity
+- changing them adds DB migration risk
+- changing them adds unnecessary API compatibility risk
+- changing them adds needless Git history churn
+
+Examples:
+
+A neutral table such as:
+financial_transactions
+
+does not need changing.
+
+A historical migration filename does not need changing merely to remove "M3Jar" from Git history.
+
+Do NOT rewrite old committed migration history unless necessary for runtime correctness.
+
+The goal is:
+
+COMPLETE EXTERNAL / ACTIVE PRODUCT REBRAND
+
+not:
+
+destroy historical development provenance.
+
+==================================================
+2. START WITH A COMPLETE REPOSITORY AUDIT
+==================================================
+
+Before editing, search the entire active repository for case-insensitive variants of:
+
+TripJar
+tripjar
+TRIPJAR
+
+M3Jar
+M3jar
+m3jar
+M3JAR
+
+m3jar.com
+www.m3jar.com
+updates.m3jar.com
+
+@m3jar.dev
+
+Also search for:
+
+Trip Jar
+M3 Jar
+
+and any branding-derived identifiers.
+
+Classify occurrences into:
+
+A. MUST CHANGE
+B. SHOULD CHANGE
+C. HISTORICAL / SAFE TO LEAVE
+D. REQUIRES OWNER ACTION OUTSIDE REPLIT
+
+Do not stop after the audit.
+
+Unless an external action is genuinely required, continue through the implementation in THIS SAME TASK.
+
+==================================================
+3. CUSTOMER-FACING PRODUCT NAME
+==================================================
+
+Replace active customer-facing references:
+
+M3Jar
+TripJar
+
+with:
+
+DripJar
+
+This includes where applicable:
+
+- login/register screens
+- onboarding
+- Jar screens
+- invitations
+- password reset
+- emails
+- notifications
+- activity copy
+- error/help copy
+- Settings/About
+- headers
+- splash/app labels
+- PDF generators
+- test copy
+- developer-facing current documentation
+- current README
+- generated API descriptions if customer/developer-facing
+- seed/demo content representing the product
+
+Do not change generic words such as:
+
+Jar
+Drip
+AutoDrip
+Lock In
+Commit My Funds
+Jar Goals
+
+unless needed for grammatical consistency.
+
+==================================================
+4. FINAL DOMAIN
+==================================================
+
+The final public domain is:
+
+TheDripJar.com
+
+Canonical production origin:
+
+https://TheDripJar.com
+
+Also support:
+
+https://www.TheDripJar.com
+
+where the existing architecture expects both apex + www.
+
+For programmatic configuration, domain comparison should remain case-insensitive / normalized.
+
+Use lowercase where technically appropriate:
+
+thedripjar.com
+www.thedripjar.com
+
+Customer-facing display may use:
+
+TheDripJar.com
+
+Audit active references to:
+
+m3jar.com
+www.m3jar.com
+
+and migrate ACTIVE DripJar production configuration assumptions to:
+
+thedripjar.com
+www.thedripjar.com
+
+Do NOT delete compatibility/fallback configuration blindly if removing it could break an existing environment.
+
+If old-domain compatibility should temporarily remain, document it explicitly.
+
+==================================================
+5. RESEND / EMAIL IDENTITY
+==================================================
+
+Audit the current email infrastructure.
+
+Historical configuration may include:
+
+updates.m3jar.com
+M3Jar sender names
+EMAIL_FROM values
+m3jar.com reset/invite links
+
+Final email identity should be designed around DripJar.
+
+Preferred brand display:
+
+DripJar
+
+Preferred sending-domain direction:
+
+updates.thedripjar.com
+
+Preferred sender examples:
+
+DripJar <updates@updates.thedripjar.com>
+
+OR another technically cleaner sender using the verified subdomain.
+
+Do NOT invent a sender configuration that Resend will not support.
+
+Do NOT remove the currently working m3jar.com Resend setup before the new domain is verified.
+
+Where code can safely be made DripJar-ready:
+do it.
+
+Where DNS / Resend verification requires owner action:
+DO NOT fake completion.
+
+Instead produce exact manual steps required.
+
+Email templates must use:
+
+DripJar
+
+and links should ultimately resolve to:
+
+TheDripJar.com
+
+Do not expose secrets.
+
+Never print:
+RESEND_API_KEY
+JWT_SECRET
+SESSION_SECRET
+Stripe secrets
+or any other secret values.
+
+==================================================
+6. EMAIL ADDRESSES / DEV SEED IDENTITIES
+==================================================
+
+Audit historical seed/test identities such as:
+
+@m3jar.dev
+
+Change active seed/demo identity to a DripJar equivalent where appropriate.
+
+Preferred development-only domain:
+
+@dripjar.dev
+
+ONLY if it is clearly non-production test data.
+
+Do not accidentally send real email to fabricated domains.
+
+For customer-facing support/contact addresses:
+do not invent a real mailbox unless one is configured.
+
+Use configuration variables where appropriate.
+
+==================================================
+7. APP / EXPO IDENTITY
+==================================================
+
+Audit:
+
+- app.json
+- app.config.*
+- Expo config
+- package.json
+- mobile display name
+- slug
+- scheme
+- deep links
+- bundle/package identifiers
+- splash metadata
+- icon metadata
+- route/domain references
+
+Customer-visible application name must be:
+
+DripJar
+
+Be conservative with identifiers that may later affect App Store / Play Store identity.
+
+If changing:
+bundleIdentifier
+android.package
+Expo project ID
+EAS project linkage
+or another external immutable-ish identifier
+
+would require an external account migration or could break deployment:
+
+DO NOT change it automatically without confirming safety.
+
+Instead:
+- change safe display branding now
+- document the immutable/external identifier separately
+- recommend whether it should be changed before app-store submission
+
+Do not create unnecessary future App Store migration problems.
+
+==================================================
+8. API / SERVER IDENTITY
+==================================================
+
+Audit active server branding including:
+
+- response metadata
+- email helpers
+- error pages
+- health/info endpoints
+- generated docs
+- CSP/domain config
+- CORS
+- allowed origins
+- APP_BASE_URL
+- EXPO_PUBLIC_DOMAIN
+- invitation URLs
+- reset-password URLs
+- verification URLs
+
+Final production-domain intent:
+
+APP_BASE_URL=https://TheDripJar.com
+EXPO_PUBLIC_DOMAIN=TheDripJar.com
+
+ALLOWED_ORIGINS should ultimately include normalized:
+https://thedripjar.com
+https://www.thedripjar.com
+
+DO NOT print secret values.
+
+If Replit environment variables cannot be safely updated automatically:
+document the exact variable NAME + desired VALUE for owner action.
+
+Do not claim an environment variable was changed if it was not.
+
+==================================================
+9. STRIPE BRAND REFERENCES
+==================================================
+
+Stripe remains TEST MODE ONLY.
+
+Do NOT enable live Stripe.
+
+Audit active Stripe metadata/descriptions/product-facing references that currently say:
+
+M3Jar
+TripJar
+
+Change safe descriptive metadata to:
+
+DripJar
+
+Examples might include:
+- PaymentIntent descriptions
+- Stripe metadata brand labels
+- customer descriptions
+- test-mode descriptions
+
+Do NOT alter:
+
+- financial model
+- 3% fee
+- processing fee model
+- ledger architecture
+- refund behavior
+- commitment behavior
+- payment topology
+- Test Mode guards
+
+This is branding only.
+
+If Stripe Dashboard business/account branding requires manual action:
+report it as owner action.
+
+==================================================
+10. DATABASE
+==================================================
+
+Do NOT perform schema/table/column renames solely for branding.
+
+Audit schema for genuinely brand-bearing stored values.
+
+If active persisted seed/config values contain M3Jar/TripJar:
+update safely only if necessary.
+
+Do not alter immutable historical financial records merely to cosmetically rename old product metadata.
+
+No financial migration should be necessary unless the audit identifies an active brand field.
+
+Preserve migrations 0000–0018.
+
+Do not rename old migration files.
+
+==================================================
+11. GITHUB
+==================================================
+
+Current repository:
+
+JB102298/TripJar
+
+Desired final repository name:
+
+DripJar
+
+Audit whether the Replit-managed GitHub integration can safely rename the repository itself.
+
+If YES and the integration explicitly supports it safely:
+rename repository to:
+
+JB102298/DripJar
+
+Then verify remote configuration.
+
+If NO:
+do NOT use a PAT.
+do NOT invent another GitHub auth path.
+do NOT change to an unsupported remote.
+
+Instead:
+- finish all code rebranding
+- leave current remote working
+- provide ONE exact owner-action step for renaming the GitHub repository in GitHub
+- explain that GitHub normally redirects old repository URLs after a rename, but verify after owner action
+- identify whether Replit must reconnect after the rename
+
+The inability to rename the GitHub repository externally is NOT a blocker to completing code rebranding.
+
+==================================================
+12. REPLIT PROJECT IDENTITY
+==================================================
+
+Audit whether the Replit project/workspace currently displays:
+
+M3Jar
+TripJar
+
+If Replit exposes a safe project-name change mechanism in the current environment:
+rename to:
+
+DripJar
+
+If not:
+report the exact manual UI action.
+
+Do NOT disrupt deployment configuration merely for display-name cosmetics.
+
+==================================================
+13. README / CURRENT DOCUMENTATION
+==================================================
+
+Update CURRENT living documentation to:
+
+DripJar
+
+and:
+
+TheDripJar.com
+
+Where useful, include a short historical note:
+
+"DripJar was previously developed under the working names M3Jar and TripJar."
+
+Do not keep using old names throughout current docs.
+
+Do not rewrite Git history.
+
+Do not modify old generated Phase reports solely to replace historical names.
+
+Historical reports should remain historical artifacts.
+
+==================================================
+14. TESTS
+==================================================
+
+Update active tests that assert:
+
+M3Jar
+TripJar
+m3jar.com
+@m3jar.dev
+
+when those assertions represent current branding.
+
+Do not update a test merely because it intentionally verifies legacy compatibility.
+
+Add explicit rebrand tests where useful.
+
+At minimum verify:
+
+- current app display branding is DripJar
+- current email branding is DripJar
+- active generated links use TheDripJar.com configuration
+- production origin allowlist supports TheDripJar.com intent
+- no current customer-facing M3Jar/TripJar strings remain
+- Stripe Test Mode financial behavior unchanged
+
+==================================================
+15. BRAND AUDIT SCRIPT / GUARD
+==================================================
+
+Add a lightweight automated guard if appropriate.
+
+Goal:
+
+prevent future accidental reintroduction of:
+
+M3Jar
+TripJar
+
+into active customer-facing code.
+
+Do NOT fail on:
+
+- historical migrations
+- archived reports
+- explicit compatibility comments
+- documented historical note
+- Git metadata
+
+A small scoped test/script is preferable to an over-broad brittle repository grep.
+
+Example conceptual behavior:
+
+Fail if prohibited legacy brand strings appear in:
+- active mobile UI source
+- active email templates
+- active API customer-facing copy
+
+Allow explicitly whitelisted historical locations.
+
+Use judgment.
+
+==================================================
+16. DOMAIN / EXTERNAL-SERVICE TRANSITION SAFETY
+==================================================
+
+Do NOT break existing working services while external DNS/account changes are pending.
+
+If code is changed to TheDripJar.com before Resend/DNS is ready:
+
+ensure development/test behavior still works.
+
+Clearly separate:
+
+CODE COMPLETE
+
+from:
+
+EXTERNAL OWNER ACTION REQUIRED
+
+Potential manual items may include:
+
+- DNS
+- Resend domain verification
+- GitHub repository rename
+- Replit project display name
+- Stripe Dashboard public branding
+- future App Store / Play Store identity
+
+Do not claim these are completed without evidence.
+
+==================================================
+17. LOGO / IMAGE ASSETS
+==================================================
+
+Audit image assets for visible:
+
+M3Jar
+TripJar
+
+branding.
+
+If an existing text-based logo asset contains the old name:
+identify it.
+
+Do NOT generate a new logo in this task unless an existing simple text asset can be safely updated without design decisions.
+
+If a graphical redesign is required:
+list the asset for later design work.
+
+Do not block the code rebrand on a future logo redesign.
+
+==================================================
+18. PRODUCT TERMINOLOGY
+==================================================
+
+Standardize active product language around DripJar.
+
+Preferred terms:
+
+Drip
+Dripping
+AutoDrip
+Next Drip
+Jar
+Jar Goal
+Lock In / Commit My Funds where already established
+
+Audit inconsistent remnants such as:
+
+deposit
+payment
+contribution
+
+Do NOT globally replace technical/API terms that are correct internally.
+
+This terminology cleanup is CUSTOMER-FACING only.
+
+Avoid unnecessary functional changes.
+
+==================================================
+19. LEGAL COMPANY NAME
+==================================================
+
+Do NOT hardcode:
+
+DripJar LLC
+
+throughout the app yet.
+
+The LLC has not been formally filed/confirmed in this task.
+
+Use:
+
+DripJar
+
+as product branding.
+
+Where a legal company name is required:
+prefer a configurable field or leave existing neutral placeholder until legal formation is complete.
+
+Document locations that will need:
+
+DripJar LLC
+
+after the entity is officially created.
+
+==================================================
+20. NO FINANCIAL BEHAVIOR CHANGES
+==================================================
+
+This rebrand must not alter:
+
+- Stripe Test Mode behavior
+- Drip calculation
+- 3% DripJar fee
+- processing-fee gross-up
+- financial_transactions
+- double-entry ledger
+- commitment behavior
+- refund behavior
+- refund dispatcher
+- Jar Goals waterfall
+- financial transparency
+- schedules
+- membership
+- agreements
+- notifications behavior
+- security model
+
+Branding/config only.
+
+Any discovered unrelated bug:
+document it.
+Do not expand scope unless required to complete the rename safely.
+
+==================================================
+21. FULL VALIDATION
+==================================================
+
+After implementation run:
+
+- legacy-brand audit / guard
+- Phase 4D focused tests
+- Phase 4C financial tests
+- Phase 4B Stripe tests
+- full API suite run 1
+- full API suite run 2
+- rate-limit suite if separate
+- mobile suite run 1
+- mobile suite run 2
+- API typecheck
+- mobile typecheck
+- lib/db typecheck
+- API production build
+- fresh migration chain 0000 → 0018
+
+All executed suites must pass 100%.
+
+Report ACTUAL totals.
+
+No skipped failures.
+
+==================================================
+22. ACTIVE LEGACY-BRAND ZERO CHECK
+==================================================
+
+After implementation perform another full search.
+
+Return all remaining occurrences of:
+
+TripJar / tripjar
+M3Jar / m3jar
+m3jar.com
+
+Classify every remaining occurrence.
+
+Expected remaining references should ONLY be things such as:
+
+- historical migration comments if any
+- old immutable report artifacts
+- GitHub repository URL if external rename cannot be performed
+- documented historical compatibility note
+- temporary old-domain compatibility configuration explicitly retained
+
+There must be NO unexplained active customer-facing legacy branding.
+
+==================================================
+23. COMMIT
+==================================================
+
+Create ONE primary rebrand commit.
+
+Suggested title:
+
+Rebrand M3Jar to DripJar
+
+Suggested body:
+
+- Adopt DripJar as final product identity
+- Migrate active branding to TheDripJar.com
+- Update application, email, config, docs, tests, and metadata
+- Preserve financial behavior and migration history
+- Add legacy-brand regression protection
+
+Do NOT create separate agent-memory commits.
+
+Do not commit:
+
+- .agents/memory
+- attached_assets
+- old PDFs
+- unrelated .replit changes
+- temporary audit scripts unless intentionally part of the maintained project
+- report-generation scripts
+
+==================================================
+24. PUSH
+==================================================
+
+Push using:
+
+Replit managed GitHub integration
+
+ONLY.
+
+Do not use a PAT.
+
+Verify:
+
+git rev-parse HEAD
+git rev-parse origin/main
+
+If repository rename occurred:
+also verify new remote.
+
+If repository rename requires owner action:
+push to the currently functioning remote and report the manual step.
+
+==================================================
+25. MANUAL OWNER ACTION CHECKLIST
+==================================================
+
+After code/push verification, prepare a concise checklist of ONLY actions that genuinely require the owner.
+
+Examples if applicable:
+
+[ ] Rename GitHub repository TripJar → DripJar
+[ ] Rename Replit project display name
+[ ] Add updates.thedripjar.com to Resend
+[ ] Add required DNS records at domain provider
+[ ] Update production-scoped APP_BASE_URL
+[ ] Update ALLOWED_ORIGINS
+[ ] Update EMAIL_FROM
+[ ] Update EXPO_PUBLIC_DOMAIN
+[ ] Update Stripe Dashboard business/public branding
+[ ] Replace old graphical logo assets later
+
+For each action provide:
+
+- service
+- exact field/menu
+- exact desired value
+- whether it is required NOW or BEFORE PRODUCTION only
+
+Do not overwhelm the owner with actions Replit already completed.
+
+==================================================
+26. FINAL REPORT — ABSOLUTE LAST ACTION
+==================================================
+
+The absolute final project action must be creating:
+
+dripjar-full-rebrand-report.pdf
+
+ONLY after:
+
+- audit
+- implementation
+- external-service assessment
+- tests
+- typechecks
+- build
+- fresh migrations
+- legacy-brand zero check
+- commit
+- push
+- origin verification
+- final git status
+- owner manual-action checklist
+
+The PDF must include:
+
+1. Starting HEAD
+2. Final HEAD
+3. Final origin/main
+4. Files changed
+5. Customer-facing rename summary
+6. Domain migration summary
+7. Email/Resend status
+8. Expo/app identity status
+9. API/server config status
+10. Stripe branding status
+11. Database/schema decision
+12. GitHub rename status
+13. Replit project rename status
+14. Asset/logo findings
+15. Exact remaining legacy-name occurrences with classification
+16. Legacy-brand guard/test
+17. Full API Run 1
+18. Full API Run 2
+19. Mobile Run 1
+20. Mobile Run 2
+21. Rate-limit results
+22. Phase 4B/4C/4D focused verification
+23. Typechecks
+24. Build
+25. Fresh 0000→0018 migration
+26. Security regression review
+27. Confirmation financial behavior unchanged
+28. Manual owner-action checklist
+29. Confirmation no PAT
+30. Confirmation Stripe remains TEST MODE
+31. Confirmation Phase 4E NOT started
+
+AFTER GENERATING THE PDF:
+
+DO NOTHING ELSE.
+
+No edits.
+No tests.
+No memory update.
+No commit.
+No push.
+No commands.
+
+In chat return ONLY:
+
+PASS / FAIL
+Final HEAD
+origin/main
+Final product name
+Final domain
+Legacy active-brand check
+API run 1
+API run 2
+Mobile run 1
+Mobile run 2
+Typechecks
+Build
+Migration
+GitHub rename status
+Resend/domain status
+Manual owner actions
+Blockers
+PDF filename/path

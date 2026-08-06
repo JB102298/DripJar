@@ -36,6 +36,8 @@ import {
   stripeWebhookEvents,
   refundAllocations,
   refundRequests,
+  autoDripRuns,
+  autoDripAuthorizations,
 } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { getStripeClient } from "../lib/stripe.js";
@@ -46,6 +48,7 @@ import {
   postRefundReversalInTx,
 } from "../lib/ledger.js";
 import { mapStripeRefundStatus, recomputeRefundRequestStatus, TERMINAL_ALLOCATION_STATES } from "../lib/refund-helpers.js";
+import { notifyAutoDripSucceeded } from "./autodrip.js";
 import { logger } from "../lib/logger.js";
 import type Stripe from "stripe";
 
@@ -194,6 +197,12 @@ async function handlePaymentIntentSucceeded(
   eventRowId: string,
 ): Promise<void> {
   const pi = event.data.object as Stripe.PaymentIntent;
+
+  // Route AutoDrip PIs through separate handler
+  if (pi.metadata?.["source"] === "autodrip") {
+    await handleAutoDripSucceeded(pi, eventRowId);
+    return;
+  }
 
   // Find financial_transaction by providerTransactionId (DB-stored, not metadata)
   // Metadata is a routing hint only; the cross-check below is the authorization.
@@ -346,6 +355,206 @@ async function handlePaymentIntentSucceeded(
   });
 }
 
+// ─── AutoDrip succeeded handler ───────────────────────────────────────────────
+
+async function handleAutoDripSucceeded(
+  pi: Stripe.PaymentIntent,
+  eventRowId: string,
+): Promise<void> {
+  // Find the AutoDrip run by PI ID (set by processor after PI creation)
+  const [run] = await db
+    .select()
+    .from(autoDripRuns)
+    .where(eq(autoDripRuns.stripePaymentIntentId, pi.id));
+
+  if (!run) {
+    await db
+      .update(stripeWebhookEvents)
+      .set({
+        processingStatus: "ignored",
+        errorMessage: `No autodrip_run found for PaymentIntent ${pi.id}`,
+        processedAt: new Date(),
+      })
+      .where(eq(stripeWebhookEvents.id, eventRowId));
+    return;
+  }
+
+  // Idempotency: if already succeeded, acknowledge
+  if (run.status === "succeeded") {
+    await db
+      .update(stripeWebhookEvents)
+      .set({ processingStatus: "processed", processedAt: new Date() })
+      .where(eq(stripeWebhookEvents.id, eventRowId));
+    return;
+  }
+
+  // Load authorization
+  const [auth] = await db
+    .select()
+    .from(autoDripAuthorizations)
+    .where(eq(autoDripAuthorizations.id, run.autoDripAuthorizationId));
+
+  if (!auth) {
+    await db
+      .update(stripeWebhookEvents)
+      .set({ processingStatus: "ignored", errorMessage: "AutoDrip authorization not found", processedAt: new Date() })
+      .where(eq(stripeWebhookEvents.id, eventRowId));
+    return;
+  }
+
+  const now = new Date();
+  type DbOrTx = typeof db;
+
+  await db.transaction(async (tx) => {
+    const txDb = tx as unknown as DbOrTx;
+
+    // Lock run row (prevent concurrent duplicate processing)
+    const [lockedRun] = await txDb
+      .select({ status: autoDripRuns.status })
+      .from(autoDripRuns)
+      .where(eq(autoDripRuns.id, run.id))
+      .for("update");
+
+    if (lockedRun?.status === "succeeded") {
+      await txDb
+        .update(stripeWebhookEvents)
+        .set({ processingStatus: "processed", processedAt: now })
+        .where(eq(stripeWebhookEvents.id, eventRowId));
+      return;
+    }
+
+    // Post contribution accounting (creates FT + ledger entries + updates FT to posted)
+    const idempotencyKey = `autodrip-webhook:${run.id}:${pi.id}`;
+    const { financialTransactionId } = await postContributionAccounting({
+      jarId: auth.jarId,
+      memberId: auth.memberId,
+      principalCents: run.principalCents,
+      currency: "USD",
+      idempotencyKey,
+      transactionType: "autodrip_contribution",
+      providerType: "stripe",
+      providerTransactionId: pi.id,
+      providerStatus: "succeeded",
+    });
+
+    // Insert contribution row
+    const today = now.toISOString().slice(0, 10);
+    await txDb.insert(contributions).values({
+      jarId: auth.jarId,
+      memberId: auth.memberId,
+      amountCents: run.principalCents,
+      contributionDate: today,
+      status: "stripe_test",
+      sourceType: "stripe_test_autodrip",
+      externalPaymentId: pi.id,
+    });
+
+    // Mark run succeeded
+    await txDb
+      .update(autoDripRuns)
+      .set({
+        status: "succeeded",
+        financialTransactionId,
+        completedAt: now,
+      })
+      .where(eq(autoDripRuns.id, run.id));
+
+    // Advance authorization last_run_at — do NOT change status (spec: success webhook
+    // does NOT clear needs_attention; only explicit /resume does)
+    await txDb
+      .update(autoDripAuthorizations)
+      .set({ lastRunAt: now, updatedAt: now })
+      .where(eq(autoDripAuthorizations.id, auth.id));
+
+    // Mark webhook event processed
+    await txDb
+      .update(stripeWebhookEvents)
+      .set({ processingStatus: "processed", processedAt: now })
+      .where(eq(stripeWebhookEvents.id, eventRowId));
+  });
+
+  // Send success notification (best-effort, outside transaction)
+  void notifyAutoDripSucceeded({
+    userId: auth.userId,
+    jarId: auth.jarId,
+    principalCents: run.principalCents,
+    frequency: auth.frequency,
+  });
+}
+
+// ─── AutoDrip failed handler ──────────────────────────────────────────────────
+
+async function handleAutoDripFailed(
+  pi: Stripe.PaymentIntent,
+  eventRowId: string,
+): Promise<void> {
+  const [run] = await db
+    .select()
+    .from(autoDripRuns)
+    .where(eq(autoDripRuns.stripePaymentIntentId, pi.id));
+
+  if (!run) {
+    await db
+      .update(stripeWebhookEvents)
+      .set({ processingStatus: "ignored", processedAt: new Date() })
+      .where(eq(stripeWebhookEvents.id, eventRowId));
+    return;
+  }
+
+  // Idempotency guard
+  if (run.status === "failed" || run.status === "action_required") {
+    await db
+      .update(stripeWebhookEvents)
+      .set({ processingStatus: "processed", processedAt: new Date() })
+      .where(eq(stripeWebhookEvents.id, eventRowId));
+    return;
+  }
+
+  const [auth] = await db
+    .select()
+    .from(autoDripAuthorizations)
+    .where(eq(autoDripAuthorizations.id, run.autoDripAuthorizationId));
+
+  const now = new Date();
+  const failureCode = pi.last_payment_error?.code ?? "payment_failed";
+  const failureMessage = pi.last_payment_error?.message ?? "Payment failed";
+
+  await db
+    .update(autoDripRuns)
+    .set({ status: "failed", failureCode, failureMessage, completedAt: now })
+    .where(eq(autoDripRuns.id, run.id));
+
+  if (auth && auth.status !== "needs_attention" && auth.status !== "cancelled" && auth.status !== "completed") {
+    await db
+      .update(autoDripAuthorizations)
+      .set({ status: "needs_attention", needsAttentionAt: now, needsAttentionReason: failureMessage, updatedAt: now })
+      .where(eq(autoDripAuthorizations.id, auth.id));
+
+    // Notify (best-effort)
+    if (auth) {
+      void (async () => {
+        try {
+          const { users, jars, profiles } = await import("@workspace/db");
+          const [userRow] = await db.select({ email: users.email }).from(users).where(eq(users.id, auth.userId));
+          const [profileRow] = await db.select({ displayName: profiles.userId }).from(profiles).where(eq(profiles.userId, auth.userId));
+          const [jarRow] = await db.select({ name: jars.name }).from(jars).where(eq(jars.id, auth.jarId));
+          if (userRow && jarRow) {
+            const { sendAutoDripNeedsAttentionEmail } = await import("../lib/autodrip-email.js");
+            const { createNotification } = await import("../lib/notifications.js");
+            void sendAutoDripNeedsAttentionEmail({ toEmail: userRow.email, displayName: profileRow?.displayName ?? userRow.email, jarName: jarRow.name, jarId: auth.jarId, reason: failureMessage });
+            void createNotification({ userId: auth.userId, type: "autodrip_needs_attention", title: "AutoDrip Needs Attention", message: `Your AutoDrip to ${jarRow.name} failed. Tap to fix.`, relatedJarId: auth.jarId });
+          }
+        } catch (err) { logger.warn({ err: { message: (err as Error).message } }, "Failed to send autodrip failure notification"); }
+      })();
+    }
+  }
+
+  await db
+    .update(stripeWebhookEvents)
+    .set({ processingStatus: "processed", processedAt: now })
+    .where(eq(stripeWebhookEvents.id, eventRowId));
+}
+
 // ─── payment_intent.payment_failed ────────────────────────────────────────────
 
 async function handlePaymentIntentFailed(
@@ -353,6 +562,12 @@ async function handlePaymentIntentFailed(
   eventRowId: string,
 ): Promise<void> {
   const pi = event.data.object as Stripe.PaymentIntent;
+
+  // Route AutoDrip PIs through dedicated handler
+  if (pi.metadata?.["source"] === "autodrip") {
+    await handleAutoDripFailed(pi, eventRowId);
+    return;
+  }
 
   const [ft] = await db
     .select({ id: financialTransactions.id })

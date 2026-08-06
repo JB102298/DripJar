@@ -197,6 +197,12 @@ export async function postContributionAccounting(params: {
   estimatedProcessingFeeCents?: number;
   currency?: string;
   idempotencyKey?: string;
+  /** Default: 'contribution'. Pass 'autodrip_contribution' for AutoDrip runs. */
+  transactionType?: string;
+  /** Provider info for AutoDrip runs (PI already created before webhook) */
+  providerType?: string;
+  providerTransactionId?: string;
+  providerStatus?: string;
 }): Promise<ContributionPostResult> {
   const {
     jarId,
@@ -205,6 +211,10 @@ export async function postContributionAccounting(params: {
     estimatedProcessingFeeCents = 0,
     currency = "USD",
     idempotencyKey = randomUUID(),
+    transactionType = "contribution",
+    providerType = null,
+    providerTransactionId = null,
+    providerStatus = "not_applicable",
   } = params;
 
   const quote = generateQuote(principalCents, estimatedProcessingFeeCents, currency);
@@ -238,7 +248,7 @@ export async function postContributionAccounting(params: {
       .values({
         jarId,
         memberId,
-        transactionType: "contribution",
+        transactionType: transactionType as string,
         currency,
         requestedPrincipalCents: principalCents,
         dripJarFeeCents: quote.dripJarFeeCents,
@@ -246,9 +256,9 @@ export async function postContributionAccounting(params: {
         processingFeeEstimatedCents: estimatedProcessingFeeCents,
         processingFeeActualCents: null,
         totalQuotedCents: quote.totalChargeCents,
-        providerType: null,
-        providerTransactionId: null,
-        providerStatus: "not_applicable",
+        providerType: providerType as string | null,
+        providerTransactionId: providerTransactionId as string | null,
+        providerStatus: providerStatus as string,
         ledgerPostingStatus: "pending",
         ledgerId: null,
         idempotencyKey,

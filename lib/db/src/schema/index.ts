@@ -122,6 +122,9 @@ export const jars = pgTable("jars", {
   status: text("status").notNull().default("Draft"),
   approvalThreshold: numeric("approval_threshold", { precision: 4, scale: 3 }).notNull().default("0.670"),
   launchedAt: timestamp("launched_at"),
+  // Phase 4E: IANA timezone captured at jar creation — used for AutoDrip 9AM scheduling.
+  // Immutable after creation. Existing jars default to 'America/New_York'.
+  timeZone: text("time_zone").notNull().default("America/New_York"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
@@ -986,3 +989,143 @@ export const jarGoalsRelations = relations(jarGoals, ({ one }) => ({
 // Phase 4D
 export type JarGoal = typeof jarGoals.$inferSelect;
 export type NewJarGoal = typeof jarGoals.$inferInsert;
+
+// ─── Saved Payment Methods — Phase 4E ─────────────────────────────────────────
+//
+// Stripe PaymentMethods saved via SetupIntent (usage='off_session').
+// Used by AutoDrip for recurring off-session charges.
+//
+// Status values:
+//   active              → verified; ready for off-session charging
+//   pending_verification → ACH SetupIntent confirmed; awaiting micro-deposit
+//   detached            → removed; Stripe PM also detached
+
+export const savedPaymentMethods = pgTable("saved_payment_methods", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  stripeCustomerId: text("stripe_customer_id").notNull(),
+  stripePaymentMethodId: text("stripe_payment_method_id").notNull(),
+  // 'card' | 'us_bank_account'
+  type: text("type").notNull(),
+  displayBrand: text("display_brand"),
+  last4: text("last4"),
+  bankName: text("bank_name"),
+  isDefault: boolean("is_default").notNull().default(false),
+  // 'active' | 'pending_verification' | 'detached'
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("saved_payment_methods_stripe_pm_idx").on(t.stripePaymentMethodId),
+  index("saved_payment_methods_user_idx").on(t.userId),
+  index("saved_payment_methods_customer_idx").on(t.stripeCustomerId),
+]);
+
+export const savedPaymentMethodsRelations = relations(savedPaymentMethods, ({ one }) => ({
+  user: one(users, { fields: [savedPaymentMethods.userId], references: [users.id] }),
+}));
+
+// ─── AutoDrip Authorizations — Phase 4E ───────────────────────────────────────
+//
+// One row per contributor AutoDrip setup. Records the payment authority
+// granted by the contributor. The processor uses this row to schedule and
+// initiate off-session PaymentIntents.
+//
+// Status lifecycle:
+//   active          → processor may create runs
+//   paused          → processor skips; contributor can resume
+//   needs_attention → payment failed / requires_action; all future runs blocked;
+//                     ONLY cleared via explicit POST .../resume
+//   cancelled       → terminal (no future runs)
+//   completed       → terminal (remainingExpectedPrincipal ≤ 0)
+//
+// next_run_at is UTC, derived from 9:00 AM <jar.time_zone> on the next
+// scheduled calendar date.
+
+export const autoDripAuthorizations = pgTable("autodrip_authorizations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jarId: uuid("jar_id").notNull().references(() => jars.id, { onDelete: "restrict" }),
+  memberId: uuid("member_id").notNull().references(() => jarMembers.id, { onDelete: "restrict" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  savedPaymentMethodId: uuid("saved_payment_method_id").notNull().references(() => savedPaymentMethods.id, { onDelete: "restrict" }),
+  principalCents: integer("principal_cents").notNull(),
+  // 'weekly' | 'biweekly' | 'monthly' | 'twiceMonthly'
+  frequency: text("frequency").notNull(),
+  // 'active' | 'paused' | 'needs_attention' | 'cancelled' | 'completed'
+  status: text("status").notNull().default("active"),
+  authorizedAt: timestamp("authorized_at").notNull().defaultNow(),
+  authorizationTermsVersion: text("authorization_terms_version").notNull().default("1"),
+  pausedAt: timestamp("paused_at"),
+  needsAttentionAt: timestamp("needs_attention_at"),
+  needsAttentionReason: text("needs_attention_reason"),
+  cancelledAt: timestamp("cancelled_at"),
+  completedAt: timestamp("completed_at"),
+  nextRunAt: timestamp("next_run_at").notNull(),
+  lastRunAt: timestamp("last_run_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("autodrip_authorizations_jar_member_idx").on(t.jarId, t.memberId),
+  index("autodrip_authorizations_status_next_run_idx").on(t.status, t.nextRunAt),
+  index("autodrip_authorizations_user_idx").on(t.userId),
+]);
+
+export const autoDripAuthorizationsRelations = relations(autoDripAuthorizations, ({ one, many }) => ({
+  jar: one(jars, { fields: [autoDripAuthorizations.jarId], references: [jars.id] }),
+  member: one(jarMembers, { fields: [autoDripAuthorizations.memberId], references: [jarMembers.id] }),
+  user: one(users, { fields: [autoDripAuthorizations.userId], references: [users.id] }),
+  savedPaymentMethod: one(savedPaymentMethods, { fields: [autoDripAuthorizations.savedPaymentMethodId], references: [savedPaymentMethods.id] }),
+  runs: many(autoDripRuns),
+}));
+
+// ─── AutoDrip Runs — Phase 4E ─────────────────────────────────────────────────
+//
+// One row per scheduled occurrence attempt. IDs are pre-generated before
+// Stripe is called. The idempotency_key prevents duplicate rows for the
+// same (authorization, calendar date) pair.
+//
+// idempotency_key: autodrip:<authorizationId>:<scheduledFor_iso>
+//
+// Status lifecycle:
+//   scheduled       → row inserted, not yet processed
+//   processing      → Stripe PI created; awaiting webhook
+//   succeeded       → webhook confirmed; accounting posted
+//   failed          → payment_failed webhook; authorization → needs_attention
+//   action_required → requires_action webhook; authorization → needs_attention
+//   skipped         → permanently skipped (older missed run in catch-up)
+//   cancelled       → jar went terminal before run completed
+
+export const autoDripRuns = pgTable("autodrip_runs", {
+  id: uuid("id").primaryKey(),  // pre-generated by processor, NOT defaultRandom()
+  autoDripAuthorizationId: uuid("autodrip_authorization_id").notNull().references(() => autoDripAuthorizations.id, { onDelete: "restrict" }),
+  scheduledFor: date("scheduled_for").notNull(),
+  principalCents: integer("principal_cents").notNull(),
+  // 'scheduled'|'processing'|'succeeded'|'failed'|'action_required'|'skipped'|'cancelled'
+  status: text("status").notNull().default("scheduled"),
+  financialTransactionId: uuid("financial_transaction_id").references(() => financialTransactions.id, { onDelete: "restrict" }),
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  idempotencyKey: text("idempotency_key").notNull(),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  failureCode: text("failure_code"),
+  failureMessage: text("failure_message"),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("autodrip_runs_idempotency_key_idx").on(t.idempotencyKey),
+  index("autodrip_runs_authorization_idx").on(t.autoDripAuthorizationId),
+  index("autodrip_runs_stripe_pi_idx").on(t.stripePaymentIntentId),
+]);
+
+export const autoDripRunsRelations = relations(autoDripRuns, ({ one }) => ({
+  authorization: one(autoDripAuthorizations, { fields: [autoDripRuns.autoDripAuthorizationId], references: [autoDripAuthorizations.id] }),
+  financialTransaction: one(financialTransactions, { fields: [autoDripRuns.financialTransactionId], references: [financialTransactions.id] }),
+}));
+
+// Phase 4E type exports
+export type SavedPaymentMethod = typeof savedPaymentMethods.$inferSelect;
+export type NewSavedPaymentMethod = typeof savedPaymentMethods.$inferInsert;
+export type AutoDripAuthorization = typeof autoDripAuthorizations.$inferSelect;
+export type NewAutoDripAuthorization = typeof autoDripAuthorizations.$inferInsert;
+export type AutoDripRun = typeof autoDripRuns.$inferSelect;
+export type NewAutoDripRun = typeof autoDripRuns.$inferInsert;
