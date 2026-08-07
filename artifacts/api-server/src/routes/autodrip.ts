@@ -1059,17 +1059,17 @@ async function processOneAuthorization(
 
 // ─── Post-processor notification helpers ─────────────────────────────────────
 
-async function notifyAutoDripNeedsAttention(
+export async function notifyAutoDripNeedsAttention(
   auth: typeof autoDripAuthorizations.$inferSelect,
   reason: string,
 ) {
   try {
     const [profile] = await db
-      .select({ displayName: profiles.userId })
+      .select({ displayName: profiles.displayName })
       .from(profiles)
       .where(eq(profiles.userId, auth.userId));
     const [userRow] = await db
-      .select({ email: users.email, displayName: users.email })
+      .select({ email: users.email })
       .from(users)
       .where(eq(users.id, auth.userId));
     const [jarRow] = await db
@@ -1108,7 +1108,7 @@ export async function notifyAutoDripSucceeded(
       .from(users)
       .where(eq(users.id, auth.userId));
     const [profileRow] = await db
-      .select({ displayName: profiles.userId })
+      .select({ displayName: profiles.displayName })
       .from(profiles)
       .where(eq(profiles.userId, auth.userId));
     const [jarRow] = await db

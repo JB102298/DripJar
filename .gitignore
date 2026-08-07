@@ -41,6 +41,9 @@ testem.log
 .DS_Store
 Thumbs.db
 
+# Editor/tooling backup files — never belong in version control
+*.bak
+
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
 

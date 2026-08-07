@@ -11,7 +11,8 @@ Making Meaningful Moments Happen. A mobile-first collaborative group savings app
 | `pnpm --filter @workspace/api-server run dev` | Build + start API server (uses `PORT` env var) |
 | `pnpm --filter @workspace/mobile run dev` | Start Expo mobile app |
 | `pnpm run typecheck` | Full typecheck across all packages |
-| `pnpm --filter @workspace/db run push` | Push DB schema changes (dev only — requires TTY) |
+| `pnpm --filter @workspace/db run migrate` | **Canonical DB provisioning** — applies the 0000→0023 chain and seeds the 8 ledger accounts idempotently |
+| `pnpm --filter @workspace/db run push` | Structure-only schema diff (dev scratch use only — requires TTY; skips ledger-account seeds) |
 | `pnpm --filter @workspace/scripts run seed` | Seed dev DB (user: `jordan@dripjar.dev` / `password123`) |
 | `pnpm --filter @workspace/api-server run test` | Run security + unit test suite (`NODE_ENV=test`) |
 | `pnpm --filter @workspace/scripts run generate-pdf` | Regenerate `DripJar-Codebase.pdf` (see below) |

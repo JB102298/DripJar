@@ -536,7 +536,7 @@ async function handleAutoDripFailed(
         try {
           const { users, jars, profiles } = await import("@workspace/db");
           const [userRow] = await db.select({ email: users.email }).from(users).where(eq(users.id, auth.userId));
-          const [profileRow] = await db.select({ displayName: profiles.userId }).from(profiles).where(eq(profiles.userId, auth.userId));
+          const [profileRow] = await db.select({ displayName: profiles.displayName }).from(profiles).where(eq(profiles.userId, auth.userId));
           const [jarRow] = await db.select({ name: jars.name }).from(jars).where(eq(jars.id, auth.jarId));
           if (userRow && jarRow) {
             const { sendAutoDripNeedsAttentionEmail } = await import("../lib/autodrip-email.js");

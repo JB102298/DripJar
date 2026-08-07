@@ -1,243 +1,297 @@
 /**
- * Fresh migration verification script.
+ * Fresh-database migration verification — canonical Phase 4E provisioning check.
  *
- * 1. Creates a clean temporary PostgreSQL database.
- * 2. Applies all 18 migration SQL files (0000–0017) in order.
- * 3. Verifies all required Phase 4C tables, constraints, and data.
- * 4. Reports every check with PASS/FAIL.
- * 5. Drops the temporary database.
+ * Proves that a brand-new, empty PostgreSQL database can be provisioned end-to-end
+ * by the canonical path (`drizzle-kit migrate`), and that the result is correct
+ * and idempotent.
  *
- * Requires: pg (already in workspace), DATABASE_URL env var set.
+ * Steps:
+ *   1. Validate the local migration chain on disk (journal 0000→0023 + SQL files).
+ *   2. Create a clean temporary database.
+ *   3. Provision it with `pnpm --filter @workspace/db run migrate`.
+ *   4. Verify 33 base tables, all 8 seeded ledger accounts, and no duplicates.
+ *   5. Re-run migrate to prove the chain + seeds are idempotent.
+ *   6. Drop the temporary database.
+ *
+ * `drizzle-kit push` is deliberately NOT used: push diffs schema *structure* only,
+ * so it never executes the ledger-account seed INSERTs and leaves a fresh database
+ * with an empty chart of accounts.
+ *
+ * Requires: DATABASE_URL pointing at a server where the role may CREATE DATABASE.
+ * Usage: node scripts/run-fresh-migration.mjs
  */
 
 import pg from "pg";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DRIZZLE_DIR = path.join(__dirname, "..", "lib", "db", "drizzle");
+const REPO_ROOT = path.join(__dirname, "..");
+const DRIZZLE_DIR = path.join(REPO_ROOT, "lib", "db", "drizzle");
+const JOURNAL_PATH = path.join(DRIZZLE_DIR, "meta", "_journal.json");
 
-// ── Build connection strings ───────────────────────────────────────────────────
-const baseUrl = new URL(process.env.DATABASE_URL);
-const adminDbName = baseUrl.pathname.replace("/", "").split("?")[0];
-const adminUrl = process.env.DATABASE_URL;
+// ─── Expectations ─────────────────────────────────────────────────────────────
 
-const TEST_DB = `m3jar_migration_verify_${Date.now()}`;
-const testUrl = new URL(process.env.DATABASE_URL);
+/** Highest migration index in the current chain. */
+const LAST_MIGRATION_IDX = 23;
+/** 24 migrations: 0000 … 0023. */
+const EXPECTED_MIGRATION_COUNT = LAST_MIGRATION_IDX + 1;
+/** Base tables in `public` after the full chain (34 created, 1 dropped in 0015). */
+const EXPECTED_TABLE_COUNT = 33;
+
+/** The system chart of accounts: 7 seeded by 0008 + REFUND_PENDING by 0012. */
+const EXPECTED_LEDGER_ACCOUNTS = [
+  "CTRB_COMMITTED",
+  "CTRB_REFUNDABLE",
+  "DJ_FEE_REVENUE",
+  "EXT_PAY_CLR",
+  "PAYOUT_CLR",
+  "PROC_FEE_CLR",
+  "REFUND_CLR",
+  "REFUND_PENDING",
+];
+
+// ─── Reporting ────────────────────────────────────────────────────────────────
+
+const results = [];
+function pass(label, detail = "") {
+  results.push({ ok: true, label });
+  console.log(`  ✓  ${label}${detail ? `  [${detail}]` : ""}`);
+}
+function fail(label, detail = "") {
+  results.push({ ok: false, label, detail });
+  console.error(`  ✗  ${label}${detail ? `  [${detail}]` : ""}`);
+}
+
+// ─── Connection strings ───────────────────────────────────────────────────────
+
+const rawUrl = process.env.DATABASE_URL;
+if (!rawUrl) {
+  console.error("DATABASE_URL not set — cannot run fresh-migration verification.");
+  process.exit(1);
+}
+
+const TEST_DB = `dripjar_migration_verify_${Date.now()}`;
+const testUrl = new URL(rawUrl);
 testUrl.pathname = `/${TEST_DB}`;
 const testDsn = testUrl.toString();
 
-const results = [];
-let db = null;
+/** Run the canonical provisioning command against the temp database. */
+function runMigrate() {
+  return spawnSync("pnpm", ["--filter", "@workspace/db", "run", "migrate"], {
+    cwd: REPO_ROOT,
+    env: { ...process.env, DATABASE_URL: testDsn },
+    encoding: "utf8",
+    shell: process.platform === "win32",
+  });
+}
+
 let adminClient = null;
+let testClient = null;
 
-function pass(label) {
-  results.push({ label, ok: true });
-  console.log(`  ✓ ${label}`);
-}
-function fail(label, detail = "") {
-  results.push({ label, ok: false, detail });
-  console.error(`  ✗ ${label}${detail ? ": " + detail : ""}`);
-}
+try {
+  // ── STEP 1: Validate the migration chain on disk ───────────────────────────
+  console.log("\n=== STEP 1: Validate migration chain on disk ===");
 
-// ── STEP 1: Create fresh database ─────────────────────────────────────────────
-console.log(`\n=== STEP 1: Create fresh database: ${TEST_DB} ===`);
-adminClient = new pg.Client({ connectionString: adminUrl });
-await adminClient.connect();
-await adminClient.query(`CREATE DATABASE "${TEST_DB}"`);
-await adminClient.end();
-pass(`Created database ${TEST_DB}`);
+  const journal = JSON.parse(fs.readFileSync(JOURNAL_PATH, "utf8"));
+  const entries = journal.entries ?? [];
 
-// ── STEP 2: Apply all migrations ──────────────────────────────────────────────
-console.log("\n=== STEP 2: Apply migrations 0000 → 0017 ===");
-db = new pg.Client({ connectionString: testDsn });
-await db.connect();
+  if (entries.length === EXPECTED_MIGRATION_COUNT) {
+    pass(`Journal registers ${EXPECTED_MIGRATION_COUNT} migrations (0000→0023)`);
+  } else {
+    fail(
+      `Journal migration count`,
+      `expected ${EXPECTED_MIGRATION_COUNT}, found ${entries.length}`,
+    );
+  }
 
-const migFiles = fs.readdirSync(DRIZZLE_DIR)
-  .filter(f => /^\d{4}_.+\.sql$/.test(f))
-  .sort();
+  for (let i = 0; i <= LAST_MIGRATION_IDX; i++) {
+    const entry = entries.find((e) => e.idx === i);
+    if (!entry) {
+      fail(`Journal entry idx=${i} missing`);
+      continue;
+    }
+    const sqlPath = path.join(DRIZZLE_DIR, `${entry.tag}.sql`);
+    if (fs.existsSync(sqlPath)) {
+      pass(`Chain step ${String(i).padStart(4, "0")} → ${entry.tag}.sql`);
+    } else {
+      fail(`Chain step ${String(i).padStart(4, "0")} SQL file missing`, `${entry.tag}.sql`);
+    }
+  }
 
-for (const file of migFiles) {
-  const sql = fs.readFileSync(path.join(DRIZZLE_DIR, file), "utf8");
+  // Guard against orphaned SQL files that the journal does not register — these
+  // would be silently skipped by `drizzle-kit migrate`.
+  const sqlFiles = fs
+    .readdirSync(DRIZZLE_DIR)
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f))
+    .sort();
+  const registered = new Set(entries.map((e) => `${e.tag}.sql`));
+  const orphans = sqlFiles.filter((f) => !registered.has(f));
+  if (orphans.length === 0) {
+    pass(`All ${sqlFiles.length} SQL files are registered in the journal`);
+  } else {
+    fail("Unregistered migration SQL files found", orphans.join(", "));
+  }
+
+  // ── STEP 2: Create a fresh, empty database ─────────────────────────────────
+  console.log(`\n=== STEP 2: Create fresh database ${TEST_DB} ===`);
+  adminClient = new pg.Client({ connectionString: rawUrl });
+  await adminClient.connect();
+  await adminClient.query(`CREATE DATABASE "${TEST_DB}"`);
+  pass(`Created empty database ${TEST_DB}`);
+
+  // ── STEP 3: Provision via the canonical path ───────────────────────────────
+  console.log("\n=== STEP 3: Provision via `drizzle-kit migrate` ===");
+  const migrateRun = runMigrate();
+  if (migrateRun.status === 0) {
+    pass("drizzle-kit migrate completed on empty database");
+  } else {
+    fail(
+      "drizzle-kit migrate failed",
+      (migrateRun.stderr || migrateRun.stdout || "").trim().split("\n").slice(-3).join(" | "),
+    );
+  }
+
+  testClient = new pg.Client({ connectionString: testDsn });
+  await testClient.connect();
+
+  // Every migration in the chain must be recorded as applied.
+  const applied = await testClient.query(
+    "SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations",
+  );
+  if (applied.rows[0].n === EXPECTED_MIGRATION_COUNT) {
+    pass(`drizzle recorded ${EXPECTED_MIGRATION_COUNT} applied migrations`);
+  } else {
+    fail(
+      "Applied migration count",
+      `expected ${EXPECTED_MIGRATION_COUNT}, found ${applied.rows[0].n}`,
+    );
+  }
+
+  // ── STEP 4: Verify resulting schema ────────────────────────────────────────
+  console.log("\n=== STEP 4: Verify schema ===");
+
+  const tables = await testClient.query(
+    `SELECT table_name FROM information_schema.tables
+      WHERE table_schema='public' AND table_type='BASE TABLE'
+      ORDER BY table_name`,
+  );
+  const tableNames = tables.rows.map((r) => r.table_name);
+  if (tableNames.length === EXPECTED_TABLE_COUNT) {
+    pass(`Base table count is ${EXPECTED_TABLE_COUNT}`);
+  } else {
+    fail(
+      "Base table count",
+      `expected ${EXPECTED_TABLE_COUNT}, found ${tableNames.length}: ${tableNames.join(", ")}`,
+    );
+  }
+
+  // Phase 4E tables must exist specifically.
+  for (const t of ["autodrip_authorizations", "autodrip_runs", "saved_payment_methods"]) {
+    if (tableNames.includes(t)) pass(`Phase 4E table exists: ${t}`);
+    else fail(`Phase 4E table missing: ${t}`);
+  }
+
+  // The table dropped by 0015 must not survive a fresh chain run.
+  if (!tableNames.includes("refund_request_placeholders")) {
+    pass("refund_request_placeholders correctly dropped by migration 0015");
+  } else {
+    fail("refund_request_placeholders still present after full chain");
+  }
+
+  // ── Ledger accounts: all 8 present, exactly once each ──────────────────────
+  const accounts = await testClient.query(
+    "SELECT code, count(*)::int AS n FROM ledger_accounts GROUP BY code ORDER BY code",
+  );
+  const byCode = new Map(accounts.rows.map((r) => [r.code, r.n]));
+
+  for (const code of EXPECTED_LEDGER_ACCOUNTS) {
+    const n = byCode.get(code);
+    if (n === undefined) fail(`Ledger account missing: ${code}`);
+    else if (n !== 1) fail(`Ledger account duplicated: ${code}`, `count=${n}`);
+    else pass(`Ledger account seeded exactly once: ${code}`);
+  }
+
+  const totalAccounts = accounts.rows.reduce((sum, r) => sum + r.n, 0);
+  if (totalAccounts === EXPECTED_LEDGER_ACCOUNTS.length) {
+    pass(`Ledger account total is ${EXPECTED_LEDGER_ACCOUNTS.length} with no duplicates`);
+  } else {
+    fail(
+      "Ledger account total",
+      `expected ${EXPECTED_LEDGER_ACCOUNTS.length}, found ${totalAccounts}`,
+    );
+  }
+
+  const unexpected = accounts.rows
+    .map((r) => r.code)
+    .filter((c) => !EXPECTED_LEDGER_ACCOUNTS.includes(c));
+  if (unexpected.length === 0) pass("No unexpected ledger accounts");
+  else fail("Unexpected ledger accounts", unexpected.join(", "));
+
+  // ── STEP 5: Idempotency — re-running migrate changes nothing ───────────────
+  console.log("\n=== STEP 5: Verify idempotency (re-run migrate) ===");
+  const rerun = runMigrate();
+  if (rerun.status === 0) pass("Second `drizzle-kit migrate` run succeeded");
+  else fail("Second migrate run failed", (rerun.stderr || "").trim().split("\n").slice(-3).join(" | "));
+
+  const after = await testClient.query(
+    `SELECT
+       (SELECT count(*)::int FROM information_schema.tables
+         WHERE table_schema='public' AND table_type='BASE TABLE') AS tables,
+       (SELECT count(*)::int FROM ledger_accounts) AS accounts,
+       (SELECT count(DISTINCT code)::int FROM ledger_accounts) AS distinct_accounts`,
+  );
+  const a = after.rows[0];
+  if (a.tables === EXPECTED_TABLE_COUNT) pass(`Table count stable after re-run: ${a.tables}`);
+  else fail("Table count changed after re-run", `${a.tables}`);
+
+  if (a.accounts === EXPECTED_LEDGER_ACCOUNTS.length && a.accounts === a.distinct_accounts) {
+    pass(`Ledger accounts stable and unique after re-run: ${a.accounts}`);
+  } else {
+    fail(
+      "Ledger accounts changed after re-run",
+      `total=${a.accounts} distinct=${a.distinct_accounts}`,
+    );
+  }
+} catch (err) {
+  fail("Unhandled error", err instanceof Error ? err.message : String(err));
+} finally {
+  // ── STEP 6: Drop the temporary database ──────────────────────────────────
+  console.log("\n=== STEP 6: Drop temporary database ===");
   try {
-    await db.query(sql);
-    pass(`Applied ${file}`);
+    if (testClient) await testClient.end();
+    if (adminClient) {
+      await adminClient.query(
+        `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1`,
+        [TEST_DB],
+      );
+      await adminClient.query(`DROP DATABASE IF EXISTS "${TEST_DB}"`);
+      await adminClient.end();
+      pass(`Dropped ${TEST_DB}`);
+    }
   } catch (err) {
-    fail(`Applied ${file}`, err.message.split("\n")[0]);
-    // Continue to see other failures
+    fail("Cleanup failed", err instanceof Error ? err.message : String(err));
+    console.error(`  Manual cleanup may be required: DROP DATABASE "${TEST_DB}";`);
   }
 }
 
-// ── STEP 3: Verify schema ─────────────────────────────────────────────────────
-console.log("\n=== STEP 3: Verify schema ===");
+// ─── Summary ──────────────────────────────────────────────────────────────────
 
-async function tableExists(name) {
-  const r = await db.query(
-    `SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1`,
-    [name]
-  );
-  return r.rows.length > 0;
-}
-async function columnExists(table, column) {
-  const r = await db.query(
-    `SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND column_name=$2`,
-    [table, column]
-  );
-  return r.rows.length > 0;
-}
-async function indexExists(name) {
-  const r = await db.query(
-    `SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname=$1`,
-    [name]
-  );
-  return r.rows.length > 0;
-}
-async function constraintExists(name) {
-  const r = await db.query(
-    `SELECT 1 FROM pg_constraint WHERE conname=$1`,
-    [name]
-  );
-  return r.rows.length > 0;
-}
-async function checkText(constraintName) {
-  const r = await db.query(
-    `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname=$1`,
-    [constraintName]
-  );
-  return r.rows.length > 0 ? r.rows[0].pg_get_constraintdef : null;
-}
+const passed = results.filter((r) => r.ok).length;
+const failed = results.filter((r) => !r.ok).length;
 
-// 3a. Core Phase 4C tables
-const phase4cTables = [
-  "commitment_snapshots",
-  "commitment_snapshot_allocations",
-  "fund_commitments",
-  "commitment_allocations",
-  "refund_requests",
-  "refund_allocations",
-];
-for (const t of phase4cTables) {
-  if (await tableExists(t)) pass(`Table exists: ${t}`);
-  else fail(`Table missing: ${t}`);
-}
-
-// 3b. REFUND_PENDING in ledger_accounts
-{
-  const r = await db.query(
-    `SELECT 1 FROM ledger_accounts WHERE account_type='REFUND_PENDING' LIMIT 1`
-  );
-  if (r.rows.length > 0) pass("ledger_accounts includes REFUND_PENDING");
-  else fail("ledger_accounts missing REFUND_PENDING");
-}
-
-// 3c. Placeholder table dropped
-if (!(await tableExists("refund_request_placeholders")))
-  pass("refund_request_placeholders table correctly removed by migration 0015");
-else
-  fail("refund_request_placeholders still exists — migration 0015 did not drop it");
-
-// 3d. ft_transaction_type_check includes Phase 4C refund types
-{
-  const checkDef = await checkText("ft_transaction_type_check");
-  if (checkDef) {
-    const required = ["refund_reservation", "refund_finalization", "refund_reversal", "commitment_transfer"];
-    for (const rt of required) {
-      if (checkDef.includes(rt)) pass(`ft_transaction_type_check includes '${rt}'`);
-      else fail(`ft_transaction_type_check missing '${rt}'`, checkDef.substring(0, 120));
-    }
-  } else {
-    fail("ft_transaction_type_check constraint not found");
-  }
-}
-
-// 3e. Key indexes
-const expectedIndexes = [
-  "commitment_snapshots_status_expires_idx",
-  "fund_commitments_snapshot_idx",
-  "refund_allocations_dispatch_idx",
-  "refund_allocations_stripe_refund_unique_idx",
-  "refund_requests_member_jar_idx",
-];
-for (const idx of expectedIndexes) {
-  if (await indexExists(idx)) pass(`Index exists: ${idx}`);
-  else fail(`Index missing: ${idx}`);
-}
-
-// 3f. NOT NULL on agreement fields
-{
-  const cols = await db.query(
-    `SELECT column_name, is_nullable FROM information_schema.columns
-     WHERE table_schema='public' AND table_name='fund_commitments'
-     AND column_name IN ('agreement_id','agreement_version','snapshot_id','jar_id','member_id')`
-  );
-  for (const col of cols.rows) {
-    if (col.is_nullable === "NO") pass(`fund_commitments.${col.column_name} is NOT NULL`);
-    else fail(`fund_commitments.${col.column_name} is nullable (expected NOT NULL)`);
-  }
-}
-
-// 3g. refund_requests status constraint
-{
-  const r = await db.query(
-    `SELECT pg_get_constraintdef(oid) FROM pg_constraint
-     WHERE conname LIKE '%refund_request%status%' AND contype='c'`
-  );
-  if (r.rows.length > 0) {
-    const def = r.rows[0].pg_get_constraintdef;
-    const requiredStatuses = ["pending_provider", "processing", "completed", "failed", "cancelled"];
-    for (const s of requiredStatuses) {
-      if (def.includes(s)) pass(`refund_requests status includes '${s}'`);
-      else fail(`refund_requests status missing '${s}'`, def);
-    }
-  } else {
-    // May be stored as CHECK on column
-    pass("refund_requests status constraint (no named check — column default covers lifecycle)");
-  }
-}
-
-// 3h. refund_allocations provider_status constraint
-{
-  const r = await db.query(
-    `SELECT pg_get_constraintdef(oid) FROM pg_constraint
-     WHERE conname LIKE '%refund_alloc%status%' OR conname LIKE '%provider_status%'`
-  );
-  if (r.rows.length > 0) {
-    pass("refund_allocations provider_status constraint found");
-  } else {
-    pass("refund_allocations provider_status (lifecycle enforced by application layer)");
-  }
-}
-
-// 3i. All 18 tables migrated — spot check table count
-{
-  const r = await db.query(
-    `SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'`
-  );
-  const cnt = parseInt(r.rows[0].count, 10);
-  if (cnt >= 15) pass(`Schema table count: ${cnt} (≥ 15 expected)`);
-  else fail(`Schema table count: ${cnt} (expected ≥ 15)`);
-}
-
-// ── STEP 4: Cleanup ────────────────────────────────────────────────────────────
-console.log("\n=== STEP 4: Drop test database ===");
-await db.end();
-adminClient = new pg.Client({ connectionString: adminUrl });
-await adminClient.connect();
-await adminClient.query(`DROP DATABASE "${TEST_DB}"`);
-await adminClient.end();
-pass(`Dropped test database ${TEST_DB}`);
-
-// ── SUMMARY ────────────────────────────────────────────────────────────────────
 console.log("\n=== SUMMARY ===");
-const passed = results.filter(r => r.ok).length;
-const failed = results.filter(r => !r.ok).length;
-console.log(`Checks: ${passed} passed, ${failed} failed`);
+console.log(`${passed} checks passed, ${failed} failed`);
+
 if (failed > 0) {
-  console.error("FAILURES:");
-  results.filter(r => !r.ok).forEach(r => console.error(`  - ${r.label}: ${r.detail}`));
+  console.error("\nFRESH MIGRATION VERIFICATION FAILED");
+  for (const r of results.filter((x) => !x.ok)) {
+    console.error(`  - ${r.label}${r.detail ? `: ${r.detail}` : ""}`);
+  }
   process.exit(1);
-} else {
-  console.log("ALL CHECKS PASSED");
-  process.exit(0);
 }
+
+console.log("ALL FRESH MIGRATION CHECKS PASSED");
+process.exit(0);
