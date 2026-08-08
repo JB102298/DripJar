@@ -6,6 +6,7 @@ import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
 import { enforceAgreement } from "../lib/agreement-check.js";
 import { computeScheduleStatus } from "../lib/schedule-status.js";
 import { deriveJarPhase } from "../lib/phase.js";
+import { validateBody, createScheduleSchema, updateScheduleSchema } from "../lib/validation.js";
 
 const router = Router();
 
@@ -97,14 +98,12 @@ router.post("/jars/:jarId/schedule", requireAuth, async (req, res) => {
   const agreementOk = await enforceAgreement(jarId, userId, res);
   if (!agreementOk) return;
 
-  const { frequency, amountCents, startDate, preferredDay, endCondition = "targetDate" } = req.body as {
-    frequency?: string; amountCents?: number; startDate?: string; preferredDay?: number; endCondition?: string;
-  };
-
-  if (!frequency || !amountCents || !startDate) {
-    res.status(400).json({ error: "BadRequest", message: "frequency, amountCents, and startDate are required" });
-    return;
-  }
+  // Validated here rather than as middleware so the membership, jar-status,
+  // phase and agreement checks above still return 403/404 for an unauthorized
+  // caller even when the body is malformed.
+  const body = validateBody(createScheduleSchema, req.body, res);
+  if (!body) return;
+  const { frequency, amountCents, startDate, preferredDay, endCondition = "targetDate" } = body;
 
   // Deactivate existing schedules
   await db.update(contributionSchedules)
@@ -154,9 +153,12 @@ router.patch("/jars/:jarId/schedule", requireAuth, async (req, res) => {
   const agreementOk = await enforceAgreement(jarId, userId, res);
   if (!agreementOk) return;
 
-  const { frequency, amountCents, preferredDay, isPaused } = req.body as {
-    frequency?: string; amountCents?: number; preferredDay?: number; isPaused?: boolean;
-  };
+  // Same rules as creation. Without this, a caller could create a valid
+  // schedule and then PATCH it to a negative amount or an out-of-range
+  // preferredDay, which would defeat the creation-time validation entirely.
+  const patchBody = validateBody(updateScheduleSchema, req.body, res);
+  if (!patchBody) return;
+  const { frequency, amountCents, preferredDay, isPaused } = patchBody;
 
   const updates: Partial<typeof contributionSchedules.$inferSelect> = { updatedAt: new Date() };
   if (frequency !== undefined) updates.frequency = frequency;

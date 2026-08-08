@@ -1,6 +1,8 @@
 import { Router } from "express";
 import path from "node:path";
 import fs from "node:fs";
+import { requireAuth } from "../lib/auth.js";
+import { devOnly } from "../lib/dev-only.js";
 
 const router = Router();
 
@@ -28,10 +30,24 @@ if (!PDF_PATH.startsWith(WORKSPACE_ROOT + path.sep)) {
 }
 
 // GET /download/codebase
+//
 // Serves the most recently generated DripJar-Codebase.pdf.
 // No query parameters or user-supplied path segments are accepted.
 // The file is re-read on every request so regeneration is reflected immediately.
-router.get("/download/codebase", (_req, res) => {
+//
+// ── Access control (DJ-001) ──────────────────────────────────────────────────
+// This endpoint discloses the full source of a financial application: fee
+// formulas, ledger account codes, internal endpoint paths and header names.
+// It is therefore doubly gated:
+//
+//   devOnly     → 404 whenever NODE_ENV === "production", so a deployed
+//                 instance cannot serve it at all and does not reveal that the
+//                 route exists.
+//   requireAuth → even in dev/test, an anonymous caller gets 401.
+//
+// devOnly runs first so production returns 404 for authenticated and
+// anonymous callers alike — the route must look absent, not merely protected.
+router.get("/download/codebase", devOnly, requireAuth, (_req, res) => {
   if (!fs.existsSync(PDF_PATH)) {
     res.status(404).json({
       error: "NotFound",

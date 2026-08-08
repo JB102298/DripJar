@@ -17,14 +17,14 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.m3jar.app"
+      "bundleIdentifier": "com.dripjar.app"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#178B57"
       },
-      "package": "com.m3jar.app"
+      "package": "com.dripjar.app"
     },
     "web": {
       "favicon": "./assets/images/icon.png",

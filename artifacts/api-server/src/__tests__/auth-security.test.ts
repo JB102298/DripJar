@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import request from "supertest";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { DIST_INDEX_PATH, ensureApiBuild } from "./support/ensure-api-build.js";
 import { hashToken, createRefreshToken, signAccessToken } from "../lib/auth.js";
 import app from "../app.js";
 
@@ -53,9 +54,19 @@ describe("signAccessToken", () => {
 
 // ─── Unit: startup validation (subprocess against built dist) ─────────────
 
-const distIndexPath = new URL("../../dist/index.mjs", import.meta.url).pathname;
+// Path resolution and on-demand building both live in the shared helper.
+// Previously this used `new URL(...).pathname`, which yields a URL path rather
+// than a filesystem path: on Windows "/C:/Users/..." that Node then resolved
+// relative to cwd as "C:\C:\Users\...". The subprocess died with
+// MODULE_NOT_FOUND before reaching the JWT_SECRET check, so these assertions
+// were matching a module-resolution error instead of the startup diagnostic.
+const distIndexPath = DIST_INDEX_PATH;
 
 describe("startup JWT_SECRET validation", () => {
+  // dist/ is gitignored and removed by a workspace build; build it if absent so
+  // these tests do not depend on what ran before them.
+  beforeAll(() => { ensureApiBuild(); }, 130_000);
+
   it("exits with code 1 when JWT_SECRET is absent", () => {
     const env = { ...process.env };
     delete env["JWT_SECRET"];

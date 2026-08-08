@@ -35,9 +35,25 @@ Making Meaningful Moments Happen. A mobile-first collaborative group savings app
 **Production (owner must set)**
 | Variable | Desired value | Purpose |
 |---|---|---|
-| `APP_BASE_URL` | `https://TheDripJar.com` | Canonical production URL used in email links |
+| `RESEND_API_KEY` | *(Resend API key — store as a Replit Secret)* | **Enforced at startup.** Transactional email delivery. Absent outside production, email is silently disabled; in production the server refuses to start rather than boot healthy while sending nothing |
+| `APP_BASE_URL` | `https://TheDripJar.com` | **Enforced at startup.** Canonical production URL used to build emailed links. In production this takes precedence over `REPLIT_DEV_DOMAIN`, so links resolve to the production origin rather than a preview host |
 | `EMAIL_FROM` | `DripJar <noreply@updates.thedripjar.com>` | Transactional email sender (requires Resend DNS verification) |
 | `ALLOWED_ORIGINS` | `https://thedripjar.com,https://www.thedripjar.com` | Production CORS allowlist |
+
+`RESEND_API_KEY` and `APP_BASE_URL` are validated in `artifacts/api-server/src/index.ts` when
+`NODE_ENV=production`; a missing value logs the variable name (never its value) and exits 1.
+Development and test runs are unaffected.
+
+**Mobile build-time config (`EXPO_PUBLIC_*`)**
+
+Read at build time by the Expo client. Deliberately unset by default — the app treats an
+unconfigured or non-absolute URL as unavailable and shows the row as inactive rather than
+opening a dead link.
+
+| Variable | Purpose |
+|---|---|
+| `EXPO_PUBLIC_PRIVACY_POLICY_URL` | Absolute `https://` URL of the published Privacy Policy, linked from Profile → Privacy Policy. Required before app-store submission |
+| `EXPO_PUBLIC_TERMS_OF_SERVICE_URL` | Absolute `https://` URL of the published Terms of Service, linked from Profile → Terms of Service. Required before accepting real money |
 
 ## Regenerating the Codebase Report
 

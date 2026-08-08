@@ -45,6 +45,7 @@ import {
   toISODate,
   stripTime,
 } from "../lib/schedule-utils.js";
+import { computeJarTimeRunAt } from "../lib/jar-time.js";
 import { computeDripJarFee, DRIPJAR_FEE_RATE_BPS, detectTamperedFeeFields } from "../lib/fee-engine.js";
 import { computeGrossedUpProviderFee, type PaymentMethodType } from "../lib/provider-fees.js";
 import { getStripeClient } from "../lib/stripe.js";
@@ -68,39 +69,17 @@ const CURRENT_TERMS_VERSION = "1";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Compute the UTC timestamp for 9:00 AM in the jar's IANA timezone on a given date string. */
+/**
+ * Compute the UTC timestamp for 9:00 AM Jar Time on a given calendar date.
+ *
+ * Delegates to `lib/jar-time.ts`, which solves for the UTC instant whose
+ * rendering in the jar's zone equals 09:00 local. The previous inline
+ * implementation sampled the zone offset at 09:00 *UTC*, which produced
+ * whole-day errors for zones at UTC−10 or further west (Pacific/Honolulu,
+ * Pacific/Pago_Pago) and one-hour errors on DST transition dates.
+ */
 function computeNextRunAt(scheduledDateISO: string, jarTimeZone: string): Date {
-  // Build a date string that represents 9:00 AM local time in the jar's timezone,
-  // then convert to UTC via Intl.DateTimeFormat resolution.
-  // We use a pure UTC-based method:
-  //   1. Parse the date parts
-  //   2. Find what UTC offset applies at 9AM on that date in the target timezone
-  //   3. Subtract the offset to get the UTC equivalent
-  //
-  // Method: create a Date at "noon UTC" on the target date, then use
-  // Intl.DateTimeFormat to find the local hour, compute the difference,
-  // and solve for the UTC time that corresponds to 09:00 local.
-  const [y, m, d] = scheduledDateISO.split("-").map(Number) as [number, number, number];
-  // Start at 9:00 UTC as a first approximation
-  const approx = new Date(Date.UTC(y, m - 1, d, 9, 0, 0));
-
-  // Use Intl to find what local hour this UTC time corresponds to
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: jarTimeZone,
-    hour: "numeric",
-    hour12: false,
-    minute: "numeric",
-  });
-  const parts = formatter.formatToParts(approx);
-  const localHour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "9", 10);
-  const localMin = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
-
-  // Compute offset difference and adjust
-  const targetLocalHour = 9;
-  const targetLocalMin = 0;
-  const diffMinutes =
-    (targetLocalHour * 60 + targetLocalMin) - (localHour * 60 + localMin);
-  return new Date(approx.getTime() + diffMinutes * 60_000);
+  return computeJarTimeRunAt(scheduledDateISO, jarTimeZone);
 }
 
 /** Compute the ISO date of the most recent overdue scheduled occurrence for catch-up. */

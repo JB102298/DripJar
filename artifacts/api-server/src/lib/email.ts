@@ -22,12 +22,27 @@ function getResendClient(): Resend | null {
   return resend;
 }
 
+/**
+ * Base URL used to build emailed links (password reset, verification, invites).
+ *
+ * Dev/test precedence is unchanged and intentional: REPLIT_DEV_DOMAIN wins so
+ * that links opened from a Replit preview resolve to that preview.
+ *
+ * In production APP_BASE_URL wins instead. A Replit production deployment can
+ * still expose REPLIT_DEV_DOMAIN, and without this every emailed link would
+ * point at the dev host rather than the configured production origin.
+ * `index.ts` requires APP_BASE_URL when NODE_ENV=production, so this branch
+ * always has a value there and the literal fallback is dev/test only.
+ */
 export function getAppBaseUrl(): string {
+  const explicit = process.env["APP_BASE_URL"];
+  if (process.env["NODE_ENV"] === "production" && explicit) return explicit;
+
   // In Replit dev the mobile app is served at the dev domain root
   const domain = process.env["REPLIT_DEV_DOMAIN"];
   if (domain) return `https://${domain}`;
   // Allow explicit override for production
-  return process.env["APP_BASE_URL"] ?? "https://thedripjar.com";
+  return explicit ?? "https://thedripjar.com";
 }
 
 export function getFromAddress(): string {

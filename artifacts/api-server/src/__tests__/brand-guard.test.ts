@@ -24,7 +24,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "fs";
-import { join, relative, extname } from "path";
+import { join, relative, extname, sep } from "path";
 
 const WORKSPACE_ROOT = join(__dirname, "../../../..");
 
@@ -32,6 +32,18 @@ const WORKSPACE_ROOT = join(__dirname, "../../../..");
 // Each entry is tested case-sensitively or case-insensitively as appropriate.
 const LEGACY_EXACT: string[] = ["M3Jar", "TripJar"];
 const LEGACY_CI: string[] = ["m3jar.com", "@m3jar.dev", "updates.m3jar.com"];
+
+/**
+ * Lowercase legacy identifiers (DJ-006).
+ *
+ * The exact-case list above could not catch `com.m3jar.app`, because the
+ * identifier is lowercase and matches none of the domain patterns either. That
+ * left the iOS bundle identifier and Android package name — the two most
+ * permanent strings an app ever publishes — invisible to this guard.
+ *
+ * Checked case-insensitively against the same file set.
+ */
+const LEGACY_IDENTIFIERS_CI: string[] = ["m3jar", "tripjar"];
 
 const SCAN_DIRS = [
   "artifacts/api-server/src",
@@ -41,6 +53,17 @@ const SCAN_DIRS = [
   "artifacts/mobile/components",
   "lib/api-spec",
   "scripts/src",
+];
+
+/**
+ * Individually scanned files that live outside the directories above.
+ *
+ * `artifacts/mobile/app.json` sits at the mobile package root, so the
+ * `artifacts/mobile/app` directory entry never reached it.
+ */
+const SCAN_FILES = [
+  "artifacts/mobile/app.json",
+  "artifacts/mobile/package.json",
 ];
 
 const TEXT_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".yaml", ".yml", ".json", ".md"]);
@@ -56,8 +79,19 @@ const WHITELIST: RegExp[] = [
   /scripts\/generate-.*\.cjs$/,
 ];
 
+/**
+ * Whitelist patterns are written with forward slashes, but `relative()` yields
+ * backslashes on Windows — so every path-shaped pattern silently failed to
+ * match there. Normalize separators before testing so the whitelist behaves
+ * identically on both platforms.
+ */
+function toPosix(relPath: string): string {
+  return relPath.split(sep).join("/");
+}
+
 function isWhitelisted(relPath: string): boolean {
-  return WHITELIST.some((p) => p.test(relPath));
+  const posix = toPosix(relPath);
+  return WHITELIST.some((p) => p.test(posix));
 }
 
 function collectFiles(dir: string): string[] {
@@ -82,7 +116,11 @@ function collectFiles(dir: string): string[] {
   return results;
 }
 
-const allFiles = SCAN_DIRS.flatMap(collectFiles);
+const explicitFiles = SCAN_FILES.map((rel) => join(WORKSPACE_ROOT, rel)).filter((abs) => {
+  try { return statSync(abs).isFile(); } catch { return false; }
+});
+
+const allFiles = [...SCAN_DIRS.flatMap(collectFiles), ...explicitFiles];
 const filesToCheck = allFiles.filter((f) => {
   const rel = relative(WORKSPACE_ROOT, f);
   return !isWhitelisted(rel);
@@ -115,5 +153,55 @@ describe("Brand guard — legacy brand names absent from active source", () => {
         ).toBe(false);
       }
     });
+
+    it(`${relPath} — no lowercase legacy identifiers`, () => {
+      const content = readFileSync(filePath, "utf-8").toLowerCase();
+      for (const term of LEGACY_IDENTIFIERS_CI) {
+        expect(
+          content.includes(term),
+          `Found legacy identifier "${term}" in ${relPath}`,
+        ).toBe(false);
+      }
+    });
   }
+});
+
+// ─── Active app config must be DripJar-only ──────────────────────────────────
+//
+// Bundle identifiers are permanent: once a build is submitted to App Store
+// Connect or Google Play under a given ID, it cannot be changed without
+// publishing a separate listing and losing installs and reviews. These
+// assertions are exact-value, not merely "does not contain m3jar", so a future
+// rename to any other unintended value also fails.
+
+describe("Mobile app config — DripJar identity", () => {
+  const appConfig = JSON.parse(
+    readFileSync(join(WORKSPACE_ROOT, "artifacts/mobile/app.json"), "utf-8"),
+  ) as {
+    expo: {
+      name: string;
+      slug: string;
+      scheme: string;
+      ios: { bundleIdentifier: string };
+      android: { package: string };
+    };
+  };
+
+  it("iOS bundleIdentifier is com.dripjar.app", () => {
+    expect(appConfig.expo.ios.bundleIdentifier).toBe("com.dripjar.app");
+  });
+
+  it("Android package is com.dripjar.app", () => {
+    expect(appConfig.expo.android.package).toBe("com.dripjar.app");
+  });
+
+  it("iOS and Android identifiers match", () => {
+    expect(appConfig.expo.ios.bundleIdentifier).toBe(appConfig.expo.android.package);
+  });
+
+  it("display name, slug and scheme are DripJar", () => {
+    expect(appConfig.expo.name).toBe("DripJar");
+    expect(appConfig.expo.slug).toBe("dripjar");
+    expect(appConfig.expo.scheme).toBe("dripjar");
+  });
 });

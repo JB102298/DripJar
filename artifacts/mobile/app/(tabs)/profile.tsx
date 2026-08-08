@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Platform, Switch } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Platform, Switch, Linking } from 'react-native';
+import { privacyPolicyLink, termsOfServiceLink, type LegalLink } from '@/constants/legal';
 
 type PrefKey = 'emailPrefContributionReminders' | 'emailPrefCutoffReminders' | 'emailPrefLifecycle';
 const PREF_ITEMS: Array<{ key: PrefKey; label: string; sub: string; icon: React.ComponentProps<typeof Feather>['name'] }> = [
@@ -63,7 +64,11 @@ export default function ProfileScreen() {
     return '$' + (cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 });
   };
 
-  const SettingRow = ({ icon, title, onPress, destructive = false, placeholder = false }: any) => (
+  // `unavailable` renders the muted "Soon" treatment like `placeholder`, but
+  // keeps onPress active. Used for legal links, which are inert in the UI until
+  // their URL is configured yet still need a press handler so dev builds can
+  // surface which environment variable is missing.
+  const SettingRow = ({ icon, title, onPress, destructive = false, placeholder = false, unavailable = false }: any) => (
     <Pressable
       style={({ pressed }) => [
         styles.settingRow,
@@ -76,13 +81,13 @@ export default function ProfileScreen() {
         <Feather name={icon} size={20} color={destructive ? colors.destructive : colors.foreground} />
       </View>
       <Text style={[
-        styles.settingTitle, 
+        styles.settingTitle,
         { color: destructive ? colors.destructive : colors.foreground },
-        placeholder && { opacity: 0.5 }
+        (placeholder || unavailable) && { opacity: 0.5 }
       ]}>
         {title}
       </Text>
-      {placeholder ? (
+      {placeholder || unavailable ? (
         <View style={[styles.comingSoonChip, { backgroundColor: colors.muted }]}>
           <Text style={[styles.comingSoonText, { color: colors.mutedForeground }]}>Soon</Text>
         </View>
@@ -91,6 +96,26 @@ export default function ProfileScreen() {
       )}
     </Pressable>
   );
+
+  /**
+   * Open a legal document. When the URL has not been configured the row stays
+   * visibly unavailable rather than opening a dead link; dev builds additionally
+   * name the missing environment variable so the gap is obvious before release.
+   */
+  const openLegalLink = (link: LegalLink, title: string) => {
+    if (link.configured) {
+      void Linking.openURL(link.url);
+      return;
+    }
+    if (__DEV__) {
+      const message = `${title} is not configured.\n\nSet ${link.envVar} to an absolute https URL and rebuild.`;
+      if (Platform.OS === 'web') {
+        window.alert(message);
+      } else {
+        Alert.alert('Legal link not configured', message);
+      }
+    }
+  };
 
   return (
     <ScrollView 
@@ -222,8 +247,18 @@ export default function ProfileScreen() {
         <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>Legal & Support</Text>
         <View style={[styles.settingsGroup, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <SettingRow icon="help-circle" title="Help & Support" placeholder />
-          <SettingRow icon="file-text" title="Terms of Service" placeholder />
-          <SettingRow icon="shield" title="Privacy Policy" placeholder />
+          <SettingRow
+            icon="file-text"
+            title="Terms of Service"
+            unavailable={!termsOfServiceLink.configured}
+            onPress={() => openLegalLink(termsOfServiceLink, 'Terms of Service')}
+          />
+          <SettingRow
+            icon="shield"
+            title="Privacy Policy"
+            unavailable={!privacyPolicyLink.configured}
+            onPress={() => openLegalLink(privacyPolicyLink, 'Privacy Policy')}
+          />
         </View>
       </View>
 
