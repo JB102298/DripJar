@@ -18,15 +18,31 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import React, { useEffect } from "react";
 import { render, waitFor, act } from "@testing-library/react";
 
-// ─── In-memory SecureStore mock ──────────────────────────────────────────────
+// ─── In-memory token-storage mock ────────────────────────────────────────────
+//
+// auth-context now talks to the platform-agnostic `@/lib/token-storage` seam
+// rather than calling expo-secure-store directly, so the mock moved here. The
+// behaviour under test is unchanged — this still asserts that a terminal
+// refresh failure deletes BOTH token keys.
 
-const secureStore = new Map<string, string>();
+// vi.hoisted runs before the hoisted vi.mock factories, so the shared Map and
+// its spies exist by the time auth-context is imported. Declaring them as plain
+// top-level consts would fail with "Cannot access 'storageMock' before
+// initialization".
+const { secureStore, storageMock } = vi.hoisted(() => {
+  const store = new Map<string, string>();
+  return {
+    secureStore: store,
+    storageMock: {
+      getItem: vi.fn(async (k: string) => store.get(k) ?? null),
+      setItem: vi.fn(async (k: string, v: string) => void store.set(k, v)),
+      deleteItem: vi.fn(async (k: string) => void store.delete(k)),
+      storageBackend: "localStorage" as const,
+    },
+  };
+});
 
-vi.mock("expo-secure-store", () => ({
-  getItemAsync: vi.fn(async (k: string) => secureStore.get(k) ?? null),
-  setItemAsync: vi.fn(async (k: string, v: string) => void secureStore.set(k, v)),
-  deleteItemAsync: vi.fn(async (k: string) => void secureStore.delete(k)),
-}));
+vi.mock("@/lib/token-storage", () => storageMock);
 
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
@@ -54,7 +70,6 @@ vi.mock("@workspace/api-client-react", () => ({
 // (auth-context's `import type … from "…/api.schemas"` is type-only and
 // erased at transform time — no runtime mock needed.)
 
-import * as SecureStore from "expo-secure-store";
 import { AuthProvider, useAuth } from "../contexts/auth-context";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -170,8 +185,8 @@ describe("Terminal refresh failure — SecureStore cleared (spec test 22)", () =
     expect(refreshFetch).toHaveBeenCalledTimes(1); // no retry of the refresh
     expect(secureStore.has(ACCESS_KEY)).toBe(false);
     expect(secureStore.has(REFRESH_KEY)).toBe(false);
-    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith(ACCESS_KEY);
-    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith(REFRESH_KEY);
+    expect(storageMock.deleteItem).toHaveBeenCalledWith(ACCESS_KEY);
+    expect(storageMock.deleteItem).toHaveBeenCalledWith(REFRESH_KEY);
   });
 
   it("a network error during refresh also clears both keys (no infinite retry)", async () => {

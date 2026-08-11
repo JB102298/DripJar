@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import { getItem, setItem, deleteItem } from '@/lib/token-storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { setBaseUrl, setAuthTokenGetter } from '@workspace/api-client-react';
 import { useGetMe, useLogin, useRegister, getGetMeQueryKey } from '@workspace/api-client-react';
@@ -10,7 +10,10 @@ import type {
   RegisterRequest,
 } from '@workspace/api-client-react';
 
-// ─── SecureStore keys ────────────────────────────────────────────────────────
+// ─── Token storage keys ──────────────────────────────────────────────────────
+//
+// Unchanged from the original SecureStore implementation. Renaming these would
+// sign out every existing native user, so the legacy 'tripjar_' prefix stays.
 
 const ACCESS_TOKEN_KEY = 'tripjar_access_token';
 const REFRESH_TOKEN_KEY = 'tripjar_refresh_token';
@@ -67,7 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     refreshLockRef.current = (async () => {
       try {
-        const storedRefreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+        const storedRefreshToken = await getItem(REFRESH_TOKEN_KEY);
         if (!storedRefreshToken) {
           await clearAuth();
           return null;
@@ -90,8 +93,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           refreshToken: string;
         };
 
-        await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, data.token);
-        await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, data.refreshToken);
+        await setItem(ACCESS_TOKEN_KEY, data.token);
+        await setItem(REFRESH_TOKEN_KEY, data.refreshToken);
         setAccessToken(data.token);
         return data.token;
       } catch {
@@ -106,8 +109,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const clearAuth = async () => {
-    await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
-    await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+    await deleteItem(ACCESS_TOKEN_KEY);
+    await deleteItem(REFRESH_TOKEN_KEY);
     setAccessToken(null);
     setAuthTokenGetter(null);
   };
@@ -116,7 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const wireAuthGetter = (token: string) => {
     setAuthTokenGetter(async () => {
-      const current = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+      const current = await getItem(ACCESS_TOKEN_KEY);
       if (!current) return null;
 
       // Proactively refresh if expiring within 60 seconds
@@ -127,20 +130,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  // ── Initialize: load tokens from SecureStore (migrate AsyncStorage) ─────
+  // ── Initialize: load tokens from storage (migrate AsyncStorage) ─────────
 
   useEffect(() => {
     async function init() {
       try {
-        // One-time migration: move old AsyncStorage token to SecureStore
+        // One-time migration: move old AsyncStorage token into token storage
         const legacyToken = await AsyncStorage.getItem('auth_token');
         if (legacyToken) {
-          await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, legacyToken);
+          await setItem(ACCESS_TOKEN_KEY, legacyToken);
           await AsyncStorage.removeItem('auth_token');
           // No refresh token from old sessions — user will get one on next login
         }
 
-        const stored = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+        const stored = await getItem(ACCESS_TOKEN_KEY);
         if (stored) {
           if (tokenIsValid(stored)) {
             setAccessToken(stored);
@@ -189,8 +192,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshToken: string;
     };
 
-    await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, data.token);
-    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, data.refreshToken);
+    await setItem(ACCESS_TOKEN_KEY, data.token);
+    await setItem(REFRESH_TOKEN_KEY, data.refreshToken);
     setAccessToken(data.token);
     wireAuthGetter(data.token);
   };
@@ -213,8 +216,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshToken: string;
     };
 
-    await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, data.token);
-    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, data.refreshToken);
+    await setItem(ACCESS_TOKEN_KEY, data.token);
+    await setItem(REFRESH_TOKEN_KEY, data.refreshToken);
     setAccessToken(data.token);
     wireAuthGetter(data.token);
   };
@@ -222,8 +225,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logoutAction = async () => {
     const apiBase = process.env['EXPO_PUBLIC_API_URL'] ?? '';
     try {
-      const current = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
-      const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+      const current = await getItem(ACCESS_TOKEN_KEY);
+      const refreshToken = await getItem(REFRESH_TOKEN_KEY);
       if (current && refreshToken) {
         await fetch(`${apiBase}/api/auth/logout`, {
           method: 'POST',

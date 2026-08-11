@@ -23,8 +23,21 @@ SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
-if (process.env.EXPO_PUBLIC_DOMAIN) {
-  setBaseUrl(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
+// API base URL for the generated client.
+//
+// EXPO_PUBLIC_API_URL is the primary source and is used verbatim, so it can
+// carry its own scheme and port (e.g. http://localhost:5000 for local preview).
+// auth-context already treats this variable as the API location, so honouring it
+// here keeps both request paths pointed at the same server.
+//
+// EXPO_PUBLIC_DOMAIN remains as the fallback with its original https:// form,
+// preserving existing Replit preview behaviour unchanged.
+const apiBaseUrl =
+  process.env.EXPO_PUBLIC_API_URL ||
+  (process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}` : null);
+
+if (apiBaseUrl) {
+  setBaseUrl(apiBaseUrl);
 }
 
 function RootLayoutNav() {
