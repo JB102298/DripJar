@@ -15,6 +15,7 @@ import { logActivity } from "../lib/activity.js";
 import { notifyAllMembers } from "../lib/notifications.js";
 import { deriveJarPhase, toUTCDateString } from "../lib/phase.js";
 import { getJarSavedPrincipalCents } from "../lib/financial-balance.js";
+import { parseStatusFilter, invalidStatusMessage } from "../lib/jar-status.js";
 
 const router = Router();
 
@@ -95,7 +96,19 @@ async function buildJarSummary(jar: typeof jars.$inferSelect, userId: string) {
 // GET /jars
 router.get("/jars", requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const { status } = req.query as { status?: string };
+
+  // `status` is a SET, not a single value — the My Jars "Active" tab spans
+  // several live lifecycle statuses. An unrecognised status is rejected rather
+  // than filtered to nothing, so a stale client cannot make a populated account
+  // look empty. See lib/jar-status.ts (Owner QA item 10).
+  const statusFilter = parseStatusFilter(req.query["status"]);
+  if (!statusFilter.ok) {
+    res.status(400).json({
+      error: "BadRequest",
+      message: invalidStatusMessage(statusFilter.invalid),
+    });
+    return;
+  }
 
   // Find all jars where user is organizer or active member
   const userMembers = await db
@@ -105,17 +118,24 @@ router.get("/jars", requireAuth, async (req, res) => {
 
   const memberJarIds = userMembers.map((m) => m.jarId);
 
-  let query = db.select().from(jars).where(
-    memberJarIds.length > 0
-      ? or(eq(jars.organizerId, userId), inArray(jars.id, memberJarIds))
-      : eq(jars.organizerId, userId),
-  ).orderBy(desc(jars.updatedAt));
+  const scope = memberJarIds.length > 0
+    ? or(eq(jars.organizerId, userId), inArray(jars.id, memberJarIds))
+    : eq(jars.organizerId, userId);
 
-  const jarList = await query;
-  const filtered = status ? jarList.filter((j) => j.status === status) : jarList;
+  // parseStatusFilter never returns an empty array, so `inArray` is always
+  // given at least one value.
+  const where = statusFilter.statuses
+    ? and(scope, inArray(jars.status, statusFilter.statuses))
+    : scope;
+
+  const jarList = await db
+    .select()
+    .from(jars)
+    .where(where)
+    .orderBy(desc(jars.updatedAt));
 
   const summaries = await Promise.all(
-    filtered.map((jar) => buildJarSummary(jar, userId)),
+    jarList.map((jar) => buildJarSummary(jar, userId)),
   );
 
   res.json(summaries);

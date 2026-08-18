@@ -1,36 +1,58 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useListJars } from '@workspace/api-client-react';
+import {
+  useListJars,
+  getListJarsQueryKey,
+  useListMyInvitations,
+  getListMyInvitationsQueryKey,
+} from '@workspace/api-client-react';
 import { JarCard } from '@/components/JarCard';
+import { InvitationCard } from '@/components/InvitationCard';
 import { EmptyState } from '@/components/EmptyState';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
 import { Feather } from '@expo/vector-icons';
-
-type TabType = 'Active' | 'Invited' | 'Completed' | 'Archived';
+import { JAR_TABS, statusParamForTab, pendingInvitations, type JarTab } from '@/lib/jar-status';
 
 export default function JarsScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<TabType>('Active');
+  const [activeTab, setActiveTab] = useState<JarTab>('Active');
 
-  // Map local tab state to API status parameter
-  const getStatusParam = () => {
-    switch (activeTab) {
-      case 'Active': return 'Saving,FullyFunded';
-      case 'Invited': return 'Inviting';
-      case 'Completed': return 'Completed';
-      case 'Archived': return 'Cancelled';
-      default: return undefined;
-    }
-  };
+  const isInvitedTab = activeTab === 'Invited';
+  const statusParam = statusParamForTab(activeTab);
 
-  const { data: jars, isLoading, refetch, isRefetching } = useListJars({ status: getStatusParam() });
+  // Two sources, one list. The lifecycle tabs read GET /jars; Invited reads
+  // GET /invitations, because an invitation you have not accepted yet is
+  // membership state and GET /jars only returns jars you already belong to.
+  // Each query is disabled on the other tab's turn so switching tabs does not
+  // fire a request whose result can never be shown.
+  const jarsQuery = useListJars(
+    { status: statusParam },
+    {
+      query: {
+        queryKey: getListJarsQueryKey({ status: statusParam }),
+        enabled: !isInvitedTab,
+      },
+    },
+  );
+  const invitationsQuery = useListMyInvitations({
+    query: {
+      queryKey: getListMyInvitationsQueryKey(),
+      enabled: isInvitedTab,
+    },
+  });
 
-  const tabs: TabType[] = ['Active', 'Invited', 'Completed', 'Archived'];
+  const activeQuery = isInvitedTab ? invitationsQuery : jarsQuery;
+  const { isLoading, refetch, isRefetching } = activeQuery;
+
+  const jars = jarsQuery.data;
+  const invitations = pendingInvitations(invitationsQuery.data);
+
+  const tabs = JAR_TABS;
 
   const renderHeader = () => (
     <View style={[styles.header, { paddingTop: insets.top + 16, backgroundColor: colors.background }]}>
@@ -84,9 +106,34 @@ export default function JarsScreen() {
       );
     }
 
-    let message = "You don't have any jars in this category.";
-    if (activeTab === 'Active') message = "You don't have any active jars right now.";
-    else if (activeTab === 'Invited') message = "You have no pending invitations.";
+    // A failed request must not read as an empty account. Owner QA item 10 was
+    // exactly this: the Active tab said "you have no active jars" while the
+    // user had one, because the request came back empty rather than erroring.
+    if (activeQuery.isError) {
+      return (
+        <EmptyState
+          icon="alert-circle"
+          title="Couldn't load your jars"
+          description="Something went wrong reaching DripJar. Pull down to try again."
+        />
+      );
+    }
+
+    if (isInvitedTab) {
+      return (
+        <EmptyState
+          icon="mail"
+          title="No invitations"
+          description="When someone invites you to a jar, it will show up here."
+        />
+      );
+    }
+
+    const message = activeTab === 'Active'
+      ? "You don't have any active jars right now."
+      : activeTab === 'Completed'
+        ? "You haven't completed any jars yet."
+        : "You don't have any archived jars.";
 
     return (
       <EmptyState
@@ -104,18 +151,33 @@ export default function JarsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {renderHeader()}
-      <FlatList
-        data={jars || []}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <JarCard jar={item} />}
-        contentContainerStyle={[
-          styles.listContent,
-          { paddingBottom: insets.bottom + 100 },
-        ]}
-        ListEmptyComponent={renderEmpty}
-        refreshing={isRefetching}
-        onRefresh={refetch}
-      />
+      {isInvitedTab ? (
+        <FlatList
+          data={invitations}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => <InvitationCard invitation={item} />}
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingBottom: insets.bottom + 100 },
+          ]}
+          ListEmptyComponent={renderEmpty}
+          refreshing={isRefetching}
+          onRefresh={refetch}
+        />
+      ) : (
+        <FlatList
+          data={jars || []}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => <JarCard jar={item} />}
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingBottom: insets.bottom + 100 },
+          ]}
+          ListEmptyComponent={renderEmpty}
+          refreshing={isRefetching}
+          onRefresh={refetch}
+        />
+      )}
     </View>
   );
 }
