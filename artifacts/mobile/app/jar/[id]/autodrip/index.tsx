@@ -144,7 +144,7 @@ export default function AutoDripStatusScreen() {
   const load = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
     try {
-      const data = await customFetch<AutoDripState>(`/jars/${jarId}/autodrip`);
+      const data = await customFetch<AutoDripState>(`/api/jars/${jarId}/autodrip`);
       setState(data);
     } catch {
       // keep existing
@@ -171,7 +171,7 @@ export default function AutoDripStatusScreen() {
     confirm('Pause AutoDrip?', 'AutoDrip will be paused. No automatic Drips will be created until you resume.', async () => {
       setActing('pause');
       try {
-        await customFetch(`/jars/${jarId}/autodrip/pause`, { method: 'POST' });
+        await customFetch(`/api/jars/${jarId}/autodrip/pause`, { method: 'POST' });
         await load();
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Failed to pause';
@@ -184,7 +184,7 @@ export default function AutoDripStatusScreen() {
   const handleResume = async () => {
     setActing('resume');
     try {
-      await customFetch(`/jars/${jarId}/autodrip/resume`, { method: 'POST' });
+      await customFetch(`/api/jars/${jarId}/autodrip/resume`, { method: 'POST' });
       await load();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to resume';
@@ -200,7 +200,7 @@ export default function AutoDripStatusScreen() {
       async () => {
         setActing('cancel');
         try {
-          await customFetch(`/jars/${jarId}/autodrip`, { method: 'DELETE' });
+          await customFetch(`/api/jars/${jarId}/autodrip`, { method: 'DELETE' });
           await load();
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : 'Failed to cancel';

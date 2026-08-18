@@ -44,7 +44,7 @@ export function useJarGoals(jarId: string | undefined, options?: { enabled?: boo
   return useQuery<JarGoalsResponse>({
     queryKey: getJarGoalsQueryKey(jarId ?? ''),
     queryFn: () =>
-      customFetch<JarGoalsResponse>(`/jars/${jarId}/goals`),
+      customFetch<JarGoalsResponse>(`/api/jars/${jarId}/goals`),
     enabled: !!jarId && (options?.enabled ?? true),
     staleTime: 30_000,
   });

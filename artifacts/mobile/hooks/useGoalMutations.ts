@@ -42,7 +42,7 @@ export function useGoalMutations(jarId: string) {
       setSubmitting(true);
       setError(null);
       try {
-        return await customFetch<unknown>(`/jars/${jarId}/goals`, {
+        return await customFetch<unknown>(`/api/jars/${jarId}/goals`, {
           method: 'POST',
           body: JSON.stringify(input),
         });
@@ -61,7 +61,7 @@ export function useGoalMutations(jarId: string) {
       setSubmitting(true);
       setError(null);
       try {
-        return await customFetch<unknown>(`/jars/${jarId}/goals/${goalId}`, {
+        return await customFetch<unknown>(`/api/jars/${jarId}/goals/${goalId}`, {
           method: 'PATCH',
           body: JSON.stringify(input),
         });
@@ -80,7 +80,7 @@ export function useGoalMutations(jarId: string) {
       setSubmitting(true);
       setError(null);
       try {
-        return await customFetch<unknown>(`/jars/${jarId}/goals/${goalId}/archive`, {
+        return await customFetch<unknown>(`/api/jars/${jarId}/goals/${goalId}/archive`, {
           method: 'POST',
         });
       } catch (e: any) {
@@ -98,7 +98,7 @@ export function useGoalMutations(jarId: string) {
       setSubmitting(true);
       setError(null);
       try {
-        return await customFetch<ReorderResult>(`/jars/${jarId}/goals/reorder`, {
+        return await customFetch<ReorderResult>(`/api/jars/${jarId}/goals/reorder`, {
           method: 'POST',
           body: JSON.stringify({ goalIds }),
         });

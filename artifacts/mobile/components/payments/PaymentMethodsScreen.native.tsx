@@ -135,7 +135,7 @@ function PaymentMethodsContent() {
   const fetchMethods = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
     try {
-      const data = await customFetch<SavedPaymentMethod[]>('/payment-methods');
+      const data = await customFetch<SavedPaymentMethod[]>('/api/payment-methods');
       setMethods(Array.isArray(data) ? data : []);
     } catch {
       // keep existing
@@ -149,7 +149,7 @@ function PaymentMethodsContent() {
 
   const handleSetDefault = async (id: string) => {
     try {
-      await customFetch(`/payment-methods/${id}/default`, { method: 'POST' });
+      await customFetch(`/api/payment-methods/${id}/default`, { method: 'POST' });
       await fetchMethods();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to set default';
@@ -180,7 +180,7 @@ function PaymentMethodsContent() {
   const doRemove = async (id: string) => {
     setRemoving(id);
     try {
-      await customFetch(`/payment-methods/${id}`, { method: 'DELETE' });
+      await customFetch(`/api/payment-methods/${id}`, { method: 'DELETE' });
       setMethods(prev => prev.filter(m => m.id !== id));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to remove';
@@ -200,7 +200,7 @@ function PaymentMethodsContent() {
     try {
       // 1. Create SetupIntent
       const { setupIntentId, clientSecret } = await customFetch<{ setupIntentId: string; clientSecret: string }>(
-        '/payment-methods/setup',
+        '/api/payment-methods/setup',
         { method: 'POST', body: JSON.stringify({ type }) },
       );
 
@@ -220,7 +220,7 @@ function PaymentMethodsContent() {
       }
 
       // 4. Confirm with backend
-      const saved = await customFetch<SavedPaymentMethod>('/payment-methods/setup-confirm', {
+      const saved = await customFetch<SavedPaymentMethod>('/api/payment-methods/setup-confirm', {
         method: 'POST',
         body: JSON.stringify({ setupIntentId }),
       });

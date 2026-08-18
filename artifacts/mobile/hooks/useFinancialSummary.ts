@@ -68,7 +68,7 @@ export function useFinancialSummary(jarId: string | undefined, options?: { enabl
   return useQuery<FinancialSummaryResponse>({
     queryKey: getFinancialSummaryQueryKey(jarId ?? ''),
     queryFn: () =>
-      customFetch<FinancialSummaryResponse>(`/jars/${jarId}/financial-summary`),
+      customFetch<FinancialSummaryResponse>(`/api/jars/${jarId}/financial-summary`),
     enabled: !!jarId && (options?.enabled ?? true),
     staleTime: 30_000,
   });

@@ -108,7 +108,7 @@ export default function AutoDripSetupScreen() {
   const loadMethods = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await customFetch<SavedPaymentMethod[]>('/payment-methods');
+      const data = await customFetch<SavedPaymentMethod[]>('/api/payment-methods');
       const active = (Array.isArray(data) ? data : []).filter(m => m.status === 'active');
       setMethods(active);
       // Auto-select default
@@ -131,7 +131,7 @@ export default function AutoDripSetupScreen() {
     setLoading(true);
     setError('');
     try {
-      const data = await customFetch<Preview>(`/jars/${jarId}/autodrip/preview`, {
+      const data = await customFetch<Preview>(`/api/jars/${jarId}/autodrip/preview`, {
         method: 'POST',
         body: JSON.stringify({ principalCents, frequency, paymentMethodId: selectedPmId }),
       });
@@ -152,7 +152,7 @@ export default function AutoDripSetupScreen() {
     setLoading(true);
     setError('');
     try {
-      await customFetch(`/jars/${jarId}/autodrip`, {
+      await customFetch(`/api/jars/${jarId}/autodrip`, {
         method: 'POST',
         body: JSON.stringify({ principalCents, frequency, paymentMethodId: selectedPmId, consentGiven: true }),
       });
