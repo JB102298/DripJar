@@ -4,6 +4,11 @@ import { jars, jarMembers, contributions, profiles, contributionSchedules } from
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
 import { calculateMemberHealth } from "../lib/jar-health.js";
+import {
+  getMemberSavedPrincipalCents,
+  computePercentFunded,
+} from "../lib/financial-balance.js";
+import { resolveDisplayName } from "../lib/display-name.js";
 import { logActivity } from "../lib/activity.js";
 import { createNotification } from "../lib/notifications.js";
 
@@ -50,21 +55,13 @@ router.get("/jars/:jarId/members", requireAuth, async (req, res) => {
 
   const result = await Promise.all(
     allMembers.map(async (m) => {
-      const contribResult = await db
-        .select({ total: sql<number>`coalesce(sum(${contributions.amountCents}), 0)` })
-        .from(contributions)
-        .where(
-          and(
-            eq(contributions.jarId, jarId),
-            eq(contributions.memberId, m.id),
-            inArray(contributions.status, ["completed", "simulated"]),
-          ),
-        );
-      const contributedAmountCents = Number(contribResult[0]?.total ?? 0);
-      const percentComplete =
-        m.contributionTargetCents > 0
-          ? Math.min(100, Math.round((contributedAmountCents / m.contributionTargetCents) * 1000) / 10)
-          : 0;
+      // Canonical, ledger-backed. Summing `contributions` here made member
+      // balances disagree with the jar total on Jar Detail.
+      const contributedAmountCents = await getMemberSavedPrincipalCents(jarId, m.id);
+      const percentComplete = computePercentFunded(
+        contributedAmountCents,
+        m.contributionTargetCents,
+      );
 
       const healthStatus = calculateMemberHealth(
         m.contributionTargetCents,
@@ -193,13 +190,17 @@ router.post("/jars/:jarId/members/leave", requireAuth, async (req, res) => {
   });
 
   const prof = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
-  const name = prof[0]?.displayName ?? "A member";
+  const name = resolveDisplayName(prof[0]);
 
+  // Description is deliberately name-free. `activity_events.description` is
+  // written once and read for ever, so a name baked in here would be a
+  // permanent snapshot — renaming yourself could never correct it. The actor
+  // is this member, so the feed resolves their current name from `userId`.
   await logActivity({
     jarId,
     userId,
     eventType: "member_left",
-    description: `${name} left the jar`,
+    description: `left the jar`,
   });
 
   await createNotification({
@@ -256,13 +257,19 @@ router.delete("/jars/:jarId/members/:memberId", requireAuth, async (req, res) =>
   });
 
   const prof = await db.select().from(profiles).where(eq(profiles.userId, membership.userId)).limit(1);
-  const name = prof[0]?.displayName ?? "A member";
+  const name = resolveDisplayName(prof[0]);
 
+  // Unlike member_left, the actor here is the ORGANIZER while the name belongs
+  // to the person removed, so `actorName` cannot supply it and the description
+  // has to carry a name. `subjectUserId` is recorded alongside so a later pass
+  // can resolve the current name at read time and stop relying on this
+  // snapshot. Tracked as debt in the QA notes.
   await logActivity({
     jarId,
     userId,
     eventType: "member_removed",
     description: `${name} was removed from the jar`,
+    metadata: { subjectUserId: membership.userId },
   });
 
   await createNotification({

@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { jars, jarMembers, milestones, contributions } from "@workspace/db";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
+import { getMilestoneAllocations, computePercentFunded } from "../lib/financial-balance.js";
 import { logActivity } from "../lib/activity.js";
 
 const router = Router();
@@ -25,22 +26,18 @@ router.get("/jars/:jarId/milestones", requireAuth, async (req, res) => {
 
   const allMilestones = await db.select().from(milestones).where(eq(milestones.jarId, jarId));
 
-  // Calculate allocated amounts from contributions
+  // Allocated amounts come from the canonical ledger-backed split, not from
+  // summing `contributions.amount_cents`. The old sum reported the ORIGINAL
+  // payment for ever, so refunded money kept showing as funded, and it counted
+  // Test Mode rows the jar total correctly excluded.
+  const allocations = await getMilestoneAllocations(jarId);
+
   const result = await Promise.all(
     allMilestones.map(async (ms) => {
-      const allocated = await db
-        .select({ total: sql<number>`coalesce(sum(${contributions.amountCents}), 0)` })
-        .from(contributions)
-        .where(
-          and(
-            eq(contributions.milestoneId, ms.id),
-            inArray(contributions.status, ["completed", "simulated"]),
-          ),
-        );
-      const allocatedAmountCents = Number(allocated[0]?.total ?? 0);
-      const percentFunded = ms.targetAmountCents > 0
-        ? Math.min(100, Math.round((allocatedAmountCents / ms.targetAmountCents) * 1000) / 10)
-        : 0;
+      // When attribution could not be trusted the breakdown is empty, so every
+      // milestone reports 0 rather than a plausible-looking wrong number.
+      const allocatedAmountCents = allocations.byMilestoneId.get(ms.id) ?? 0;
+      const percentFunded = computePercentFunded(allocatedAmountCents, ms.targetAmountCents);
 
       return {
         id: ms.id,
@@ -59,6 +56,41 @@ router.get("/jars/:jarId/milestones", requireAuth, async (req, res) => {
   );
 
   res.json(result.sort((a, b) => a.priority - b.priority));
+});
+
+// GET /jars/:jarId/milestones/summary
+//
+// Additive sibling of the list endpoint, which returns a bare array and so has
+// nowhere to carry jar-level totals.
+//
+// Exists because milestone funding shown on its own hides money: Hawaii 2027
+// listed $5,778 across five milestones while the jar held $7,274, and nothing
+// accounted for the $1,496 difference. It was legitimate — five contributions
+// carried no milestone tag — but a member reading the screen could only
+// conclude that money had gone missing. `unallocatedCents` names it.
+router.get("/jars/:jarId/milestones/summary", requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const { jarId } = req.params as { jarId: string };
+
+  const { jar, isOrganizer, isMember } = await checkJarAccess(jarId, userId);
+  if (!jar) { res.status(404).json({ error: "NotFound", message: "Jar not found" }); return; }
+  if (!isOrganizer && !isMember) { res.status(403).json({ error: "Forbidden", message: "Access denied" }); return; }
+
+  const allocations = await getMilestoneAllocations(jarId);
+
+  res.json({
+    jarId,
+    goalAmountCents: jar.goalAmountCents,
+    savedPrincipalCents: allocations.savedPrincipalCents,
+    totalAllocatedCents: allocations.totalAllocatedCents,
+    unallocatedCents: allocations.unallocatedCents,
+    /**
+     * False when milestone attribution exceeded canonical saved principal.
+     * Clients must then show savedPrincipalCents alone and hide the per-
+     * milestone split rather than display figures that do not add up.
+     */
+    reconciles: allocations.reconciles,
+  });
 });
 
 // POST /jars/:jarId/milestones

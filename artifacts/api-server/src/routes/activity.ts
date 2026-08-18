@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { activityEvents, jars, jarMembers, profiles } from "@workspace/db";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
+import { resolveActorName } from "../lib/display-name.js";
 
 const router = Router();
 
@@ -44,7 +45,9 @@ router.get("/jars/:jarId/activity", requireAuth, async (req, res) => {
       userId: e.userId,
       eventType: e.eventType,
       description: e.description,
-      actorName: prof?.displayName ?? null,
+      // Resolved at read time, so renaming yourself updates historic entries.
+      // Null only for genuine system events with no actor.
+      actorName: resolveActorName(prof, Boolean(e.userId)),
       actorAvatarUrl: prof?.avatarUrl ?? null,
       amountCents: e.amountCents,
       metadata: e.metadata,
@@ -95,7 +98,9 @@ router.get("/activity", requireAuth, async (req, res) => {
       userId: e.userId,
       eventType: e.eventType,
       description: e.description,
-      actorName: prof?.displayName ?? null,
+      // Resolved at read time, so renaming yourself updates historic entries.
+      // Null only for genuine system events with no actor.
+      actorName: resolveActorName(prof, Boolean(e.userId)),
       actorAvatarUrl: prof?.avatarUrl ?? null,
       amountCents: e.amountCents,
       metadata: { ...((e.metadata as Record<string, unknown>) ?? {}), jarName: jarNameMap.get(e.jarId) },

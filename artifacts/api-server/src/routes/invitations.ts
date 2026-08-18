@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { jars, jarMembers, invitations, profiles, users } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
+import { resolveDisplayName } from "../lib/display-name.js";
 import { logActivity } from "../lib/activity.js";
 import { createNotification } from "../lib/notifications.js";
 import crypto from "node:crypto";
@@ -67,7 +68,7 @@ router.post("/jars/:jarId/invitations", requireAuth, invitationLimiter, async (r
 
   // Send invitation email (non-blocking — errors are logged but don't fail the request)
   const inviterProfile = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
-  const inviterName = inviterProfile[0]?.displayName ?? "A DripJar member";
+  const inviterName = resolveDisplayName(inviterProfile[0]);
   sendInvitationEmail({
     toEmail: email.toLowerCase(),
     jarName: jar[0].name,
@@ -370,7 +371,7 @@ router.post("/invitations/:invitationId/accept", requireAuth, async (req, res) =
       userId: jar[0].organizerId,
       type: "member_joined",
       title: "New member joined!",
-      message: `${prof[0]?.displayName ?? "Someone"} accepted your invitation to ${jar[0].name}.`,
+      message: `${resolveDisplayName(prof[0])} accepted your invitation to ${jar[0].name}.`,
       relatedJarId: inv.jarId,
     });
   }

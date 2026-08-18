@@ -128,6 +128,12 @@ vi.mock("@/hooks/useJarGoals", () => ({
 vi.mock("@/hooks/useFinancialSummary", () => ({
   useFinancialSummary: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
 }));
+// Owner QA item 3 — hand-written like the two above, so it needs a
+// QueryClientProvider this suite does not set up.
+vi.mock("@/hooks/useMilestoneSummary", () => ({
+  useMilestoneSummary: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
+  canShowAllocationBreakdown: (s: unknown) => s !== undefined && (s as { reconciles: boolean }).reconciles,
+}));
 
 // Static import must come after all vi.mock calls
 import JarDetailScreen from "../app/jar/[id]";

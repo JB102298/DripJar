@@ -13,6 +13,12 @@ import { eq, and, desc, sql, inArray, count, gte, lte } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
 import { calculateJarHealth, calculateMemberHealth } from "../lib/jar-health.js";
 import { computeNextDueDate, computePreviousDueDate, toISODate } from "../lib/schedule-utils.js";
+import {
+  getJarProgressSummary,
+  getMemberSavedPrincipalCents,
+  computePercentFunded,
+} from "../lib/financial-balance.js";
+import { resolveDisplayName } from "../lib/display-name.js";
 
 const router = Router();
 
@@ -57,20 +63,12 @@ router.get("/dashboard", requireAuth, async (req, res) => {
   let upcomingActivity: unknown[] = [];
 
   if (featuredJar) {
-    // Total saved for featured jar
-    const savedResult = await db
-      .select({ total: sql<number>`coalesce(sum(${contributions.amountCents}), 0)` })
-      .from(contributions)
-      .where(
-        and(
-          eq(contributions.jarId, featuredJar.id),
-          inArray(contributions.status, ["completed", "simulated"]),
-        ),
-      );
-    const totalSavedCents = Number(savedResult[0]?.total ?? 0);
-    const percentFunded = featuredJar.goalAmountCents > 0
-      ? Math.min(100, Math.round((totalSavedCents / featuredJar.goalAmountCents) * 1000) / 10)
-      : 0;
+    // Total saved for featured jar — canonical, ledger-backed. Home previously
+    // summed `contributions` here and so disagreed with Jar Detail, which has
+    // always read the ledger. See lib/financial-balance.ts.
+    const progress = await getJarProgressSummary(featuredJar.id, featuredJar.goalAmountCents);
+    const totalSavedCents = progress.savedPrincipalCents;
+    const percentFunded = progress.percentFunded;
 
     const memberCount = await db
       .select({ count: sql<number>`count(*)` })
@@ -111,17 +109,10 @@ router.get("/dashboard", requireAuth, async (req, res) => {
     // Personal progress for featured jar
     const myMembership = userMemberships.find((m) => m.jarId === featuredJar.id);
     if (myMembership) {
-      const myContribs = await db
-        .select({ total: sql<number>`coalesce(sum(${contributions.amountCents}), 0)` })
-        .from(contributions)
-        .where(
-          and(
-            eq(contributions.jarId, featuredJar.id),
-            eq(contributions.memberId, myMembership.id),
-            inArray(contributions.status, ["completed", "simulated"]),
-          ),
-        );
-      const contributedAmountCents = Number(myContribs[0]?.total ?? 0);
+      const contributedAmountCents = await getMemberSavedPrincipalCents(
+        featuredJar.id,
+        myMembership.id,
+      );
       const remainingAmountCents = Math.max(0, myMembership.contributionTargetCents - contributedAmountCents);
       const percentComplete = myMembership.contributionTargetCents > 0
         ? Math.min(100, (contributedAmountCents / myMembership.contributionTargetCents) * 100)
@@ -211,20 +202,11 @@ router.get("/dashboard", requireAuth, async (req, res) => {
 
     memberProgress = await Promise.all(
       allMembers.map(async (m) => {
-        const memberContribs = await db
-          .select({ total: sql<number>`coalesce(sum(${contributions.amountCents}), 0)` })
-          .from(contributions)
-          .where(
-            and(
-              eq(contributions.jarId, featuredJar.id),
-              eq(contributions.memberId, m.id),
-              inArray(contributions.status, ["completed", "simulated"]),
-            ),
-          );
-        const contributedAmountCents = Number(memberContribs[0]?.total ?? 0);
-        const percentComplete = m.contributionTargetCents > 0
-          ? Math.min(100, Math.round((contributedAmountCents / m.contributionTargetCents) * 1000) / 10)
-          : 0;
+        const contributedAmountCents = await getMemberSavedPrincipalCents(featuredJar.id, m.id);
+        const percentComplete = computePercentFunded(
+          contributedAmountCents,
+          m.contributionTargetCents,
+        );
         const status = calculateMemberHealth(
           m.contributionTargetCents,
           contributedAmountCents,
@@ -236,7 +218,7 @@ router.get("/dashboard", requireAuth, async (req, res) => {
         return {
           memberId: m.id,
           userId: m.userId,
-          displayName: prof?.displayName ?? "Unknown",
+          displayName: resolveDisplayName(prof),
           avatarUrl: prof?.avatarUrl ?? null,
           role: m.role,
           contributionTargetCents: m.contributionTargetCents,

@@ -3,6 +3,8 @@ import { db } from "@workspace/db";
 import { jars, jarMembers, contributions, profiles, milestones } from "@workspace/db";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
+import { getJarSavedPrincipalCents } from "../lib/financial-balance.js";
+import { resolveDisplayName } from "../lib/display-name.js";
 import { logActivity } from "../lib/activity.js";
 import { createNotification, notifyAllMembers } from "../lib/notifications.js";
 import { contributionLimiter } from "../lib/rate-limit.js";
@@ -68,7 +70,7 @@ router.get("/jars/:jarId/contributions", requireAuth, async (req, res) => {
     sourceType: c.sourceType,
     milestoneId: c.milestoneId,
     note: c.note,
-    memberName: profileByMemberId.get(c.memberId)?.displayName ?? null,
+    memberName: resolveDisplayName(profileByMemberId.get(c.memberId)),
     createdAt: c.createdAt,
   }));
 
@@ -146,12 +148,12 @@ router.post("/jars/:jarId/contributions", requireAuth, contributionLimiter, asyn
     amountCents,
   });
 
-  // Check if jar is now fully funded
-  const totalResult = await db
-    .select({ total: sql<number>`coalesce(sum(${contributions.amountCents}), 0)` })
-    .from(contributions)
-    .where(and(eq(contributions.jarId, jarId), inArray(contributions.status, ["completed", "simulated"])));
-  const totalSaved = Number(totalResult[0]?.total ?? 0);
+  // Check if jar is now fully funded.
+  //
+  // Uses canonical ledger-backed principal, so Test Mode money cannot flip a
+  // jar to FullyFunded. The contribution just recorded above is `simulated`
+  // and therefore deliberately does not count toward this.
+  const totalSaved = await getJarSavedPrincipalCents(jarId);
 
   if (totalSaved >= jar[0].goalAmountCents) {
     await db.update(jars).set({ status: "FullyFunded", updatedAt: new Date() }).where(eq(jars.id, jarId));
@@ -176,7 +178,7 @@ router.post("/jars/:jarId/contributions", requireAuth, contributionLimiter, asyn
     memberUserIds: allMembers.map((m) => m.userId),
     type: "contribution_recorded",
     title: "New contribution!",
-    message: `${prof[0]?.displayName ?? "A member"} added $${(amountCents / 100).toFixed(2)} to ${jar[0].name}.`,
+    message: `${resolveDisplayName(prof[0])} added $${(amountCents / 100).toFixed(2)} to ${jar[0].name}.`,
     excludeUserId: userId,
   });
 
@@ -190,7 +192,7 @@ router.post("/jars/:jarId/contributions", requireAuth, contributionLimiter, asyn
     sourceType: contribution.sourceType,
     milestoneId: contribution.milestoneId,
     note: contribution.note,
-    memberName: prof[0]?.displayName ?? null,
+    memberName: resolveDisplayName(prof[0]),
     createdAt: contribution.createdAt,
   });
 });

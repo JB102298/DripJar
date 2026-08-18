@@ -52,7 +52,17 @@ export default function ActivityScreen() {
           )}
         </View>
         <View style={styles.activityContent}>
-          <Text style={[styles.description, { color: colors.foreground }]}>
+          {/* The actor is rendered separately rather than prefixed into the
+              description. Descriptions are written once and never updated, so
+              a name inside one is frozen at write time; `actorName` is
+              resolved on every read and follows renames. Null for genuine
+              system events, which then show the description alone. */}
+          {item.actorName ? (
+            <Text style={[styles.actorName, { color: colors.foreground }]} numberOfLines={1}>
+              {item.actorName}
+            </Text>
+          ) : null}
+          <Text style={[styles.description, { color: colors.mutedForeground }]}>
             {item.description}
           </Text>
           <Text style={[styles.timeText, { color: colors.mutedForeground }]}>
@@ -139,6 +149,11 @@ const styles = StyleSheet.create({
   activityContent: {
     flex: 1,
     marginRight: 12,
+  },
+  actorName: {
+    fontSize: 15,
+    fontWeight: '600',
+    lineHeight: 20,
   },
   description: {
     fontSize: 15,

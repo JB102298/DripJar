@@ -132,6 +132,14 @@ vi.mock("@/hooks/useJarGoals", () => ({
 vi.mock("@/hooks/useFinancialSummary", () => ({
   useFinancialSummary: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
 }));
+// Owner QA item 3 — same reason as the two hooks above: hand-written, so it
+// needs a QueryClientProvider this suite does not set up. canShowAllocationBreakdown
+// is pure and is kept real; its behaviour is covered by
+// milestone-reconciliation-ui.test.tsx.
+vi.mock("@/hooks/useMilestoneSummary", () => ({
+  useMilestoneSummary: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
+  canShowAllocationBreakdown: (s: unknown) => s !== undefined && (s as { reconciles: boolean }).reconciles,
+}));
 
 import JarDetailScreen from "../app/jar/[id]";
 

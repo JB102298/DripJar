@@ -39,11 +39,14 @@ import { CircularProgress } from '@/components/CircularProgress';
 import { JarHealthBadge } from '@/components/JarHealthBadge';
 import { ProgressBar } from '@/components/ProgressBar';
 import { MemberAvatar } from '@/components/MemberAvatar';
+import { resolveDisplayName, UNKNOWN_DISPLAY_NAME } from '@/lib/display-name';
 import { EmptyState } from '@/components/EmptyState';
 import { ScheduleSetupSheet } from '@/components/ScheduleSetupSheet';
 import { useAuth } from '@/contexts/auth-context';
 import { useJarGoals } from '@/hooks/useJarGoals';
 import { useFinancialSummary } from '@/hooks/useFinancialSummary';
+import { useMilestoneSummary, canShowAllocationBreakdown } from '@/hooks/useMilestoneSummary';
+import { MilestoneAllocationSummary } from '@/components/MilestoneAllocationSummary';
 
 type Tab = 'Overview' | 'Members' | 'Milestones' | 'Activity' | 'Agreements' | 'Settings';
 const TABS: Tab[] = ['Overview', 'Members', 'Milestones', 'Activity', 'Agreements', 'Settings'];
@@ -67,6 +70,10 @@ export default function JarDetailScreen() {
   const { data: health, refetch: refetchHealth } = useGetJarHealth(id!, { query: { queryKey: getGetJarHealthQueryKey(id!), enabled: !!id } });
   const { data: members, refetch: refetchMembers } = useListJarMembers(id!, { query: { queryKey: getListJarMembersQueryKey(id!), enabled: !!id && activeTab === 'Members' } });
   const { data: milestones, refetch: refetchMilestones } = useListMilestones(id!, { query: { queryKey: getListMilestonesQueryKey(id!), enabled: !!id && activeTab === 'Milestones' } });
+  // Jar-level allocation totals. The list endpoint returns a bare array and so
+  // cannot carry them, but without them the per-milestone amounts cannot be
+  // shown to add up to the jar's saved principal — Owner QA item 3.
+  const { data: milestoneSummary, refetch: refetchMilestoneSummary } = useMilestoneSummary(id, { enabled: !!id && activeTab === 'Milestones' });
   const { data: activity, refetch: refetchActivity } = useListJarActivity(id!, undefined, { query: { queryKey: getListJarActivityQueryKey(id!), enabled: !!id && activeTab === 'Activity' } });
   const { data: agreements, refetch: refetchAgreements } = useListAgreements(id!, { query: { queryKey: getListAgreementsQueryKey(id!), enabled: !!id && activeTab === 'Agreements' } });
   const { data: mySchedule, refetch: refetchSchedule } = useGetContributionSchedule(id!, { query: { queryKey: getGetContributionScheduleQueryKey(id!), enabled: !!id && activeTab === 'Overview' } });
@@ -219,7 +226,11 @@ export default function JarDetailScreen() {
       await Promise.all([refetchSchedule(), refetchGoals(), refetchFinancialSummary()]);
     }
     if (activeTab === 'Members') await refetchMembers();
-    if (activeTab === 'Milestones') await refetchMilestones();
+    // Refetched together: the list and the summary must never be rendered from
+    // different points in time, or the breakdown would visibly fail to add up.
+    if (activeTab === 'Milestones') {
+      await Promise.all([refetchMilestones(), refetchMilestoneSummary()]);
+    }
     if (activeTab === 'Activity') await refetchActivity();
     if (activeTab === 'Agreements') await refetchAgreements();
     setRefreshing(false);
@@ -604,7 +615,7 @@ export default function JarDetailScreen() {
         {members.map(member => (
           <View key={member.id} style={[styles.memberRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <MemberAvatar 
-              displayName={member.profile?.displayName || 'Unknown'} 
+              displayName={resolveDisplayName(member.profile)}
               avatarUrl={member.profile?.avatarUrl} 
               size={48} 
               showStatus
@@ -612,7 +623,7 @@ export default function JarDetailScreen() {
             />
             <View style={styles.memberInfo}>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                <Text style={[styles.memberName, { color: colors.foreground }]}>{member.profile?.displayName}</Text>
+                <Text style={[styles.memberName, { color: colors.foreground }]}>{resolveDisplayName(member.profile)}</Text>
                 {member.role === 'organizer' && (
                   <View style={[styles.roleChip, { backgroundColor: '#FEF3C7' }]}>
                     <Feather name="award" size={12} color="#92400E" />
@@ -630,7 +641,7 @@ export default function JarDetailScreen() {
             </View>
             {isOrganizerUser && member.userId !== user?.id && (
               <Pressable
-                onPress={() => handleRemoveMember(member.id, member.profile?.displayName || 'this member')}
+                onPress={() => handleRemoveMember(member.id, resolveDisplayName(member.profile))}
                 style={styles.memberRemoveBtn}
                 testID={`remove-member-${member.id}`}
               >
@@ -656,22 +667,37 @@ export default function JarDetailScreen() {
 
   const renderMilestones = () => {
     if (!milestones) return <SkeletonLoader height={200} />;
+
+    // Owner QA item 3. Funding figures are shown only when the jar-level
+    // summary has arrived AND confirms the split reconciles with canonical
+    // saved principal. A summary that is still loading or that failed to load
+    // counts as "not proven", not as "fine" — see canShowAllocationBreakdown.
+    //
+    // Suppressing the per-milestone amounts matters as much as the header:
+    // when reconciles is false the API zeroes every allocatedAmountCents, so
+    // rendering them would state that nothing is funded, which is its own
+    // wrong answer.
+    const showFunding = canShowAllocationBreakdown(milestoneSummary);
+
     return (
       <View style={styles.tabContent}>
+        {milestoneSummary && <MilestoneAllocationSummary summary={milestoneSummary} />}
         {milestones.map(milestone => (
           <View key={milestone.id} style={[styles.milestoneCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.milestoneHeader}>
               <Text style={[styles.milestoneName, { color: colors.foreground }]}>{milestone.name}</Text>
-              <View style={[styles.statusChip, { backgroundColor: milestone.status === 'funded' ? colors.success : colors.muted }]}>
-                <Text style={[styles.statusText, { color: milestone.status === 'funded' ? '#fff' : colors.foreground }]}>
+              <View style={[styles.statusChip, { backgroundColor: showFunding && milestone.status === 'funded' ? colors.success : colors.muted }]}>
+                <Text style={[styles.statusText, { color: showFunding && milestone.status === 'funded' ? '#fff' : colors.foreground }]}>
                   {milestone.status.toUpperCase()}
                 </Text>
               </View>
             </View>
-            <ProgressBar progress={milestone.percentFunded} height={8} />
+            {showFunding && <ProgressBar progress={milestone.percentFunded} height={8} />}
             <View style={styles.milestoneFooter}>
               <Text style={[styles.milestoneAmount, { color: colors.mutedForeground }]}>
-                {formatCurrency(milestone.allocatedAmountCents)} of {formatCurrency(milestone.targetAmountCents)}
+                {showFunding
+                  ? `${formatCurrency(milestone.allocatedAmountCents)} of ${formatCurrency(milestone.targetAmountCents)}`
+                  : `Target ${formatCurrency(milestone.targetAmountCents)}`}
               </Text>
               {milestone.dueDate && (
                 <Text style={[styles.milestoneDate, { color: colors.mutedForeground }]}>
@@ -694,7 +720,7 @@ export default function JarDetailScreen() {
           <View key={item.id} style={[styles.activityItem, { borderBottomColor: colors.border }]}>
              <View style={styles.activityIcon}>
                {item.actorAvatarUrl || item.actorName ? (
-                 <MemberAvatar displayName={item.actorName || ''} avatarUrl={item.actorAvatarUrl} size={32} />
+                 <MemberAvatar displayName={item.actorName || UNKNOWN_DISPLAY_NAME} avatarUrl={item.actorAvatarUrl} size={32} />
                ) : (
                  <View style={[styles.systemAvatar, { backgroundColor: colors.muted }]}>
                    <Feather name="bell" size={16} color={colors.foreground} />

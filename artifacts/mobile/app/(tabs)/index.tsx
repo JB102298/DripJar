@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGetDashboard } from '@workspace/api-client-react';
 import { useAuth } from '@/contexts/auth-context';
 import { MemberAvatar } from '@/components/MemberAvatar';
+import { greetingName, shortDisplayName } from '@/lib/display-name';
 import { ProgressBar } from '@/components/ProgressBar';
 import { EmptyState } from '@/components/EmptyState';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
@@ -72,7 +73,7 @@ export default function HomeScreen() {
     >
       <View style={styles.header}>
         <Text style={[styles.greeting, { color: colors.foreground }]}>
-          {getTimeOfDay()}, {profile?.firstName || 'Traveler'}!
+          {getTimeOfDay()}, {greetingName(profile)}!
         </Text>
         <Text style={[styles.dateText, { color: colors.mutedForeground }]}>{getTodayDate()}</Text>
       </View>
@@ -180,7 +181,7 @@ export default function HomeScreen() {
                       status={member.status}
                     />
                     <Text style={[styles.memberName, { color: colors.foreground }]} numberOfLines={1}>
-                      {member.displayName.split(' ')[0]}
+                      {shortDisplayName(member.displayName)}
                     </Text>
                     <Text style={[styles.memberPercent, { color: colors.primary }]}>{member.percentComplete}%</Text>
                   </View>

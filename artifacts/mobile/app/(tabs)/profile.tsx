@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/auth-context';
 import { useGetDashboard, useSendVerification, useGetAuthPreferences, useUpdateAuthPreferences } from '@workspace/api-client-react';
 import { MemberAvatar } from '@/components/MemberAvatar';
+import { resolveDisplayName } from '@/lib/display-name';
 import { Feather } from '@expo/vector-icons';
 
 export default function ProfileScreen() {
@@ -134,7 +135,7 @@ export default function ProfileScreen() {
           style={styles.avatarWrapper}
         >
           <MemberAvatar 
-            displayName={profile?.displayName || 'Traveler'} 
+            displayName={resolveDisplayName(profile)}
             avatarUrl={profile?.avatarUrl} 
             size={80} 
           />
@@ -143,7 +144,7 @@ export default function ProfileScreen() {
           </View>
         </Pressable>
         <Text style={[styles.name, { color: colors.foreground }]}>
-          {profile?.displayName || `${profile?.firstName} ${profile?.lastName}`}
+          {resolveDisplayName(profile)}
         </Text>
         <Text style={[styles.email, { color: colors.mutedForeground }]}>
           {user?.email}

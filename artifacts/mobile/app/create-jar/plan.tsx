@@ -6,6 +6,12 @@ import { useCreateJarContext } from '@/contexts/create-jar-context';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProgressBar } from '@/components/ProgressBar';
+import {
+  buildCadencePlan,
+  parseLocalDate,
+  frequencyUnitLabel,
+  type SavingsFrequency,
+} from '@/lib/savings-cadence';
 
 export default function CreateJarStep6() {
   const colors = useColors();
@@ -13,29 +19,56 @@ export default function CreateJarStep6() {
   const insets = useSafeAreaInsets();
   const { state, updateState } = useCreateJarContext();
 
-  const [frequency, setFrequency] = useState<'weekly' | 'biweekly' | 'monthly'>('monthly');
+  const [frequency, setFrequency] = useState<SavingsFrequency>('monthly');
 
-  const goalAmount = state.goalAmountCents || 0;
+  // `invitees` holds invited emails only, so +1 is the organizer. The cadence
+  // module takes the total and does not add the organizer again.
   const totalPeople = (state.invitees?.length || 0) + 1;
-  const splitAmount = goalAmount / totalPeople;
+  const targetDate = parseLocalDate(state.targetDate);
 
-  // Let's assume there's 6 months to target date for mockup calculation
-  const months = 6; 
-  let paymentAmount = splitAmount / months;
-  if (frequency === 'weekly') paymentAmount = splitAmount / (months * 4);
-  if (frequency === 'biweekly') paymentAmount = splitAmount / (months * 2);
+  // Previously this screen hardcoded `const months = 6` and never read the
+  // target date, then rendered one base amount scaled ×1/×2/×4 across the three
+  // cards. Each cadence is now costed from the real horizon independently.
+  const plan = targetDate
+    ? buildCadencePlan({
+        goalAmountCents: state.goalAmountCents || 0,
+        participantCount: totalPeople,
+        startDate: new Date(),
+        targetDate,
+      })
+    : null;
+
+  const selected = plan?.byFrequency[frequency] ?? null;
+
+  const FREQUENCY_TITLES: Record<SavingsFrequency, string> = {
+    weekly: 'Weekly',
+    biweekly: 'Bi-weekly',
+    monthly: 'Monthly',
+  };
 
   const handleNext = () => {
-    updateState({ contributionPlan: { frequency, amountCents: paymentAmount } });
+    if (selected) {
+      updateState({ contributionPlan: { frequency, amountCents: selected.amountCents } });
+    }
     router.push('/create-jar/rules');
   };
 
-  const formatCurrency = (cents: number) => {
-    return '$' + (Math.round(cents / 100)).toLocaleString('en-US');
-  };
+  /** Cents → "$1,041.67". Cents are shown because a $240.39/week plan rounded
+   *  to "$240" drifts by nearly $20 a year against the goal. */
+  const formatCurrency = (cents: number) =>
+    (cents / 100).toLocaleString('en-US', {
+      style: 'currency',
+      currency: state.currency || 'USD',
+    });
 
-  const OptionCard = ({ type, title, subtitle }: { type: any, title: string, subtitle: string }) => {
+  const OptionCard = ({ type, title }: { type: SavingsFrequency; title: string }) => {
     const isSelected = frequency === type;
+    const rec = plan?.byFrequency[type];
+
+    // Each card quotes its own amount in its own unit.
+    const subtitle = rec
+      ? `${formatCurrency(rec.amountCents)} ${frequencyUnitLabel(type)}`
+      : 'Set a target date to see an estimate';
     return (
       <Pressable
         style={[
@@ -76,14 +109,37 @@ export default function CreateJarStep6() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={[styles.title, { color: colors.foreground }]}>How will you save?</Text>
         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-          Based on your goal and target date, here's what each person needs to save.
+          {plan
+            ? `Split evenly across ${totalPeople} ${totalPeople === 1 ? 'person' : 'people'}, here's what each person needs to save to reach the goal by your target date.`
+            : "Choose a target date first and we'll work out what each person needs to save."}
         </Text>
 
         <View style={styles.optionsContainer}>
-          <OptionCard type="weekly" title="Weekly" subtitle={`${formatCurrency(paymentAmount)} / week`} />
-          <OptionCard type="biweekly" title="Bi-weekly" subtitle={`${formatCurrency(paymentAmount * 2)} / 2 weeks`} />
-          <OptionCard type="monthly" title="Monthly" subtitle={`${formatCurrency(paymentAmount * 4)} / month`} />
+          <OptionCard type="weekly" title="Weekly" />
+          <OptionCard type="biweekly" title="Bi-weekly" />
+          <OptionCard type="monthly" title="Monthly" />
         </View>
+
+        {plan?.isPastDue && (
+          <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.warning, marginBottom: 16 }]}>
+            <Feather name="alert-triangle" size={20} color={colors.warning} style={{ marginRight: 12, marginTop: 2 }} />
+            <Text style={[styles.infoText, { color: colors.foreground }]}>
+              Your target date has already passed, so the full amount is shown as a single
+              contribution. Pick a later date to spread it out.
+            </Text>
+          </View>
+        )}
+
+        {plan && !plan.isPastDue && selected?.isSinglePayment && (
+          <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 16 }]}>
+            <Feather name="clock" size={20} color={colors.primary} style={{ marginRight: 12, marginTop: 2 }} />
+            <Text style={[styles.infoText, { color: colors.foreground }]}>
+              {plan.isDueToday
+                ? 'Your target date is today, so this shows the full amount at once.'
+                : `Your target date arrives before a full ${FREQUENCY_TITLES[frequency].toLowerCase()} cycle, so this shows the full amount at once.`}
+            </Text>
+          </View>
+        )}
 
         <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Feather name="info" size={20} color={colors.primary} style={{ marginRight: 12, marginTop: 2 }} />
