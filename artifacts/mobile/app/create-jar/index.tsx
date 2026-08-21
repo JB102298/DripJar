@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TextInput, Pressable, ScrollView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TextInput, Pressable, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useCreateJarContext } from '@/contexts/create-jar-context';
@@ -7,17 +7,12 @@ import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProgressBar } from '@/components/ProgressBar';
 import { CreateJarRequestCategory } from '@workspace/api-client-react';
-
-const CATEGORIES = [
-  { id: 'Vacation', icon: 'sun', label: 'Vacation' },
-  { id: 'Cruise', icon: 'anchor', label: 'Cruise' },
-  { id: 'Wedding', icon: 'heart', label: 'Wedding' },
-  { id: 'Honeymoon', icon: 'map', label: 'Honeymoon' },
-  { id: 'MissionTrip', icon: 'globe', label: 'Mission Trip' },
-  { id: 'Reunion', icon: 'users', label: 'Reunion' },
-  { id: 'Celebration', icon: 'award', label: 'Celebration' },
-  { id: 'Other', icon: 'star', label: 'Other' },
-] as const;
+import {
+  CATEGORY_GROUP_LABELS,
+  CATEGORY_GROUP_ORDER,
+  categoriesInGroup,
+  resolveCategory,
+} from '@/lib/jar-categories';
 
 export default function CreateJarStep1() {
   const colors = useColors();
@@ -25,12 +20,35 @@ export default function CreateJarStep1() {
   const insets = useSafeAreaInsets();
   const { state, updateState } = useCreateJarContext();
 
-  const isFormValid = state.name && state.category;
+  // Before a category is chosen the copy has to come from somewhere; `Other`'s
+  // deliberately neutral wording is the right placeholder for "not yet told".
+  const category = resolveCategory(state.category);
+
+  const isFormValid = !!state.name && !!state.category;
 
   const handleNext = () => {
     if (isFormValid) {
       router.push('/create-jar/dates');
     }
+  };
+
+  /**
+   * Switching category can invalidate answers already given.
+   *
+   * A destination entered under "Vacation" is meaningless under "Emergency
+   * Fund", which has no place field at all; likewise trip start and end dates
+   * under a category with no event. Merely hiding those fields would leave the
+   * values in state and ship them to the server, where several screens render
+   * `destination` unconditionally — so a jar would show a stale destination the
+   * organizer could no longer see or edit. Clear them instead.
+   */
+  const selectCategory = (id: string) => {
+    const next = resolveCategory(id);
+    updateState({
+      category: id as CreateJarRequestCategory,
+      ...(next.locationField ? {} : { destination: undefined }),
+      ...(next.eventWindow ? {} : { startDate: undefined, endDate: undefined }),
+    });
   };
 
   return (
@@ -53,8 +71,9 @@ export default function CreateJarStep1() {
           <Text style={[styles.label, { color: colors.foreground }]}>Jar Name</Text>
           <View style={[styles.inputContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <TextInput
+              testID="jar-name-input"
               style={[styles.input, { color: colors.foreground }]}
-              placeholder="e.g., Hawaii 2027"
+              placeholder={category.namePlaceholder}
               placeholderTextColor={colors.mutedForeground}
               value={state.name || ''}
               onChangeText={(text) => updateState({ name: text })}
@@ -64,55 +83,74 @@ export default function CreateJarStep1() {
 
         <View style={styles.inputGroup}>
           <Text style={[styles.label, { color: colors.foreground }]}>Category</Text>
-          <View style={styles.categoryGrid}>
-            {CATEGORIES.map((cat) => (
-              <Pressable
-                key={cat.id}
-                style={[
-                  styles.categoryCard,
-                  { backgroundColor: colors.card, borderColor: colors.border },
-                  state.category === cat.id && { backgroundColor: colors.secondary, borderColor: colors.primary },
-                ]}
-                onPress={() => updateState({ category: cat.id as CreateJarRequestCategory })}
-              >
-                <Feather
-                  name={cat.icon as any}
-                  size={24}
-                  color={state.category === cat.id ? colors.primary : colors.mutedForeground}
-                  style={{ marginBottom: 8 }}
-                />
-                <Text
-                  style={[
-                    styles.categoryText,
-                    { color: state.category === cat.id ? colors.primary : colors.foreground },
-                  ]}
-                >
-                  {cat.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+          {CATEGORY_GROUP_ORDER.map((group) => (
+            <View key={group} style={styles.groupBlock}>
+              <Text style={[styles.groupLabel, { color: colors.mutedForeground }]}>
+                {CATEGORY_GROUP_LABELS[group]}
+              </Text>
+              <View style={styles.categoryGrid}>
+                {categoriesInGroup(group).map((cat) => {
+                  const selected = state.category === cat.id;
+                  return (
+                    <Pressable
+                      key={cat.id}
+                      testID={`category-${cat.id}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      style={[
+                        styles.categoryCard,
+                        { backgroundColor: colors.card, borderColor: colors.border },
+                        selected && { backgroundColor: colors.secondary, borderColor: colors.primary },
+                      ]}
+                      onPress={() => selectCategory(cat.id)}
+                    >
+                      <Feather
+                        name={cat.icon}
+                        size={24}
+                        color={selected ? colors.primary : colors.mutedForeground}
+                        style={{ marginBottom: 8 }}
+                      />
+                      <Text
+                        style={[
+                          styles.categoryText,
+                          { color: selected ? colors.primary : colors.foreground },
+                        ]}
+                      >
+                        {cat.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          ))}
         </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={[styles.label, { color: colors.foreground }]}>Destination (Optional)</Text>
-          <View style={[styles.inputContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <TextInput
-              style={[styles.input, { color: colors.foreground }]}
-              placeholder="e.g., Maui, Hawaii"
-              placeholderTextColor={colors.mutedForeground}
-              value={state.destination || ''}
-              onChangeText={(text) => updateState({ destination: text })}
-            />
+        {category.locationField ? (
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: colors.foreground }]}>
+              {category.locationField.label}
+            </Text>
+            <View style={[styles.inputContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <TextInput
+                testID="jar-location-input"
+                style={[styles.input, { color: colors.foreground }]}
+                placeholder={category.locationField.placeholder}
+                placeholderTextColor={colors.mutedForeground}
+                value={state.destination || ''}
+                onChangeText={(text) => updateState({ destination: text })}
+              />
+            </View>
           </View>
-        </View>
+        ) : null}
 
         <View style={styles.inputGroup}>
           <Text style={[styles.label, { color: colors.foreground }]}>Description (Optional)</Text>
           <View style={[styles.textAreaContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <TextInput
+              testID="jar-description-input"
               style={[styles.textArea, { color: colors.foreground }]}
-              placeholder="What makes this trip special?"
+              placeholder={category.descriptionPlaceholder}
               placeholderTextColor={colors.mutedForeground}
               multiline
               numberOfLines={4}
@@ -156,6 +194,14 @@ const styles = StyleSheet.create({
   title: { fontSize: 32, fontWeight: 'bold', marginBottom: 32 },
   inputGroup: { marginBottom: 24 },
   label: { fontSize: 16, fontWeight: '600', marginBottom: 12 },
+  groupBlock: { marginBottom: 16 },
+  groupLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
   inputContainer: {
     borderWidth: 1,
     borderRadius: 12,
@@ -183,7 +229,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  categoryText: { fontSize: 14, fontWeight: '600' },
+  categoryText: { fontSize: 14, fontWeight: '600', textAlign: 'center' },
   footer: {
     paddingHorizontal: 24,
     paddingTop: 16,

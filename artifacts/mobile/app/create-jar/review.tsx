@@ -8,6 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProgressBar } from '@/components/ProgressBar';
 import { useCreateJar } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
+import { resolveCategory } from '@/lib/jar-categories';
+import { formatISOForPrecision } from '@/lib/date-precision';
 
 export default function CreateJarStep8() {
   const colors = useColors();
@@ -18,6 +20,9 @@ export default function CreateJarStep8() {
 
   const [isLoading, setIsLoading] = useState(false);
   const { mutateAsync: createJar } = useCreateJar();
+
+  const category = resolveCategory(state.category);
+  const targetPrecision = state.targetDatePrecision ?? category.defaultTargetPrecision;
 
   const handleLaunch = async () => {
     try {
@@ -30,6 +35,10 @@ export default function CreateJarStep8() {
           destination: state.destination,
           description: state.description,
           targetDate: state.targetDate!,
+          // Sent so the jar remembers how precisely its date was actually
+          // known. Without it the server stores 'exact' and every later screen
+          // renders a day the organizer never chose.
+          targetDatePrecision: targetPrecision,
           goalAmountCents: state.goalAmountCents!,
           startDate: state.startDate,
           endDate: state.endDate,
@@ -74,9 +83,9 @@ export default function CreateJarStep8() {
         <View style={styles.iconContainer}>
           <Feather name="check-circle" size={64} color={colors.primary} />
         </View>
-        <Text style={[styles.title, { color: colors.foreground }]}>Ready for takeoff!</Text>
+        <Text style={[styles.title, { color: colors.foreground }]}>{category.reviewTitle}</Text>
         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-          Review your trip details before we create your jar.
+          {category.reviewSubtitle}
         </Text>
 
         <View style={[styles.summaryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -86,9 +95,26 @@ export default function CreateJarStep8() {
           </View>
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
           
+          {/*
+            Only shown when the category actually has a place, and labelled with
+            that category's word for it. Previously this row said "Destination"
+            for every jar and rendered an empty value whenever none was given.
+          */}
+          {category.locationField && state.destination ? (
+            <>
+              <View style={styles.summaryRow}>
+                <Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>
+                  {category.locationField.reviewLabel}
+                </Text>
+                <Text style={[styles.summaryValue, { color: colors.foreground }]}>{state.destination}</Text>
+              </View>
+              <View style={[styles.divider, { backgroundColor: colors.border }]} />
+            </>
+          ) : null}
+
           <View style={styles.summaryRow}>
-            <Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>Destination</Text>
-            <Text style={[styles.summaryValue, { color: colors.foreground }]}>{state.destination}</Text>
+            <Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>Category</Text>
+            <Text style={[styles.summaryValue, { color: colors.foreground }]}>{category.label}</Text>
           </View>
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
@@ -99,8 +125,18 @@ export default function CreateJarStep8() {
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
           <View style={styles.summaryRow}>
-            <Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>Target Date</Text>
-            <Text style={[styles.summaryValue, { color: colors.foreground }]}>{state.targetDate ? new Date(state.targetDate).toLocaleDateString() : ''}</Text>
+            <Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>
+              {category.targetDateLabel}
+            </Text>
+            {/*
+              Rendered at the precision the organizer chose. The old
+              `new Date(state.targetDate).toLocaleDateString()` also parsed the
+              stored YYYY-MM-DD as UTC midnight, which displays as the previous
+              day everywhere west of Greenwich.
+            */}
+            <Text testID="review-target-date" style={[styles.summaryValue, { color: colors.foreground }]}>
+              {formatISOForPrecision(state.targetDate, targetPrecision)}
+            </Text>
           </View>
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 

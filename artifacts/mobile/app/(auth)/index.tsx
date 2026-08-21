@@ -4,8 +4,8 @@ import { ImageBackground } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
-import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { BrandLogo } from '@/components/BrandLogo';
 
 export default function WelcomeScreen() {
   const router = useRouter();
@@ -24,13 +24,14 @@ export default function WelcomeScreen() {
         />
         
         <View style={styles.content}>
+          {/*
+            The full lockup, which already carries the strapline — so the
+            wordmark and slogan are the approved artwork rather than a
+            re-typeset imitation of it. Over a photographic hero the jar is
+            glass on nothing, so it goes on a light plate.
+          */}
           <View style={styles.logoContainer}>
-            <View style={styles.iconRow}>
-              <Feather name="archive" size={48} color="#FFFFFF" />
-              <Feather name="send" size={32} color="#FFFFFF" style={{ marginLeft: -12, marginTop: -20 }} />
-            </View>
-            <Text style={styles.brandName}>DripJar</Text>
-            <Text style={styles.tagline}>Making Meaningful Moments Happen</Text>
+            <BrandLogo variant="lockup" width={280} tone="onDark" testID="welcome-logo" />
           </View>
 
           <View style={styles.actionContainer}>
@@ -78,23 +79,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  iconRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  brandName: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    letterSpacing: -1,
-  },
-  tagline: {
-    fontSize: 18,
-    color: '#E8F6EF',
-    marginTop: 8,
-    fontWeight: '500',
   },
   actionContainer: {
     width: '100%',

@@ -8,6 +8,7 @@ import { JarHealthBadge } from './JarHealthBadge';
 import { useRouter } from 'expo-router';
 import type { JarSummary } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
+import { describeTimeRemaining, resolvePrecision } from '@/lib/date-precision';
 
 interface JarCardProps {
   jar: JarSummary;
@@ -17,6 +18,13 @@ interface JarCardProps {
 export function JarCard({ jar, hero = false }: JarCardProps) {
   const colors = useColors();
   const router = useRouter();
+
+  // Phrased at the jar's stored precision — see lib/date-precision.ts.
+  const timeRemaining = describeTimeRemaining(
+    jar.targetDate,
+    resolvePrecision(jar.targetDatePrecision),
+    jar.daysRemaining,
+  );
 
   const formatCurrency = (cents: number) => {
     return '$' + (cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -51,11 +59,11 @@ export function JarCard({ jar, hero = false }: JarCardProps) {
             style={StyleSheet.absoluteFill}
           />
           <View style={styles.imageOverlayContent}>
-            {jar.daysRemaining !== null && jar.daysRemaining !== undefined && (
+            {timeRemaining ? (
               <View style={styles.daysChip}>
-                <Text style={styles.daysText}>{jar.daysRemaining} days left</Text>
+                <Text testID="jar-card-time-remaining" style={styles.daysText}>{timeRemaining}</Text>
               </View>
-            )}
+            ) : null}
             <View style={styles.titleContainer}>
               <Text style={styles.title} numberOfLines={1}>
                 {jar.name}

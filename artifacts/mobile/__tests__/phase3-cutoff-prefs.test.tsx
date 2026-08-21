@@ -38,8 +38,21 @@ vi.mock("@expo/vector-icons", () => ({ Feather: () => null }));
 
 // ─── API client ───────────────────────────────────────────────────────────────
 vi.mock("@workspace/api-client-react", () => ({
-  useGetDashboard: () => ({
-    data: { totalJars: 2, personalProgress: { contributedAmountCents: 0 } },
+  // The profile stats now come from GET /me/jars, not from the dashboard — the
+  // dashboard's `personalProgress` is scoped to the featured jar and was never
+  // a lifetime figure. See api-server/src/lib/member-history.ts.
+  useListMyJars: () => ({
+    data: {
+      summary: {
+        lifetimeContributedPrincipalCents: 0,
+        currentlySavedPrincipalCents: 0,
+        refundedPrincipalCents: 0,
+        jarCount: 2,
+        contributionCount: 0,
+        reconciles: true,
+      },
+      jars: [],
+    },
   }),
   useSendVerification: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useGetAuthPreferences: () => ({

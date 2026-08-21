@@ -298,7 +298,9 @@ function AddContributionInner() {
           <Text style={styles.successTitle}>Funds Added!</Text>
           <Text style={styles.successSubtitle}>
             {fmt(quote?.principalCents ?? amountCents)} added to {jar?.name}.
-            {'\n'}Your trip is one step closer.
+            {/* Category-neutral: this screen serves emergency funds and college
+                funds as well as trips. */}
+            {'\n'}You&apos;re one step closer.
           </Text>
         </View>
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>

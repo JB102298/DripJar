@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/auth-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { sanitizeReturnPath } from '@/lib/return-path';
+import { BrandLogo } from '@/components/BrandLogo';
 
 export default function LoginScreen() {
   const colors = useColors();
@@ -45,10 +46,8 @@ export default function LoginScreen() {
     >
       <View style={[styles.content, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 20 }]}>
         <View style={styles.header}>
-          <View style={styles.logoRow}>
-            <Feather name="archive" size={32} color={colors.primary} />
-            <Text style={[styles.brandName, { color: colors.primary }]}>DripJar</Text>
-          </View>
+          {/* Light surface — the transparent artwork goes on directly. */}
+          <BrandLogo variant="wordmark" width={168} tone="onLight" style={styles.logoRow} testID="login-logo" />
           <Text style={[styles.title, { color: colors.foreground }]}>Welcome back</Text>
         </View>
 
@@ -139,14 +138,7 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   logoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     marginBottom: 16,
-  },
-  brandName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginLeft: 8,
   },
   title: {
     fontSize: 32,

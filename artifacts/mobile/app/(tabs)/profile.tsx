@@ -12,7 +12,7 @@ import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/auth-context';
-import { useGetDashboard, useSendVerification, useGetAuthPreferences, useUpdateAuthPreferences } from '@workspace/api-client-react';
+import { useListMyJars, useSendVerification, useGetAuthPreferences, useUpdateAuthPreferences } from '@workspace/api-client-react';
 import { MemberAvatar } from '@/components/MemberAvatar';
 import { resolveDisplayName } from '@/lib/display-name';
 import { Feather } from '@expo/vector-icons';
@@ -23,7 +23,21 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { profile, user, logout } = useAuth();
   
-  const { data: dashboard } = useGetDashboard();
+  /**
+   * Both stats come from `GET /me/jars`, not from the dashboard.
+   *
+   * "Contributed" previously rendered `dashboard.personalProgress.
+   * contributedAmountCents` — the caller's saved principal in the *featured*
+   * jar, i.e. whichever jar was updated most recently. Sitting next to a "Jars"
+   * count that spans every jar, on a profile page, it read unmistakably as a
+   * lifetime total, and it moved whenever an unrelated jar changed.
+   *
+   * `summary` is caller-scoped, cross-jar, and ledger-derived, and the Jar
+   * History screen below lists exactly the rows it was summed from. See
+   * api-server/src/lib/member-history.ts.
+   */
+  const { data: myJars } = useListMyJars();
+  const summary = myJars?.summary;
   const { mutateAsync: sendVerification, isPending: isSendingVerification } = useSendVerification();
   const { data: emailPrefs } = useGetAuthPreferences();
   const { mutateAsync: updatePrefs } = useUpdateAuthPreferences();
@@ -61,8 +75,19 @@ export default function ProfileScreen() {
     );
   };
 
+  /**
+   * Cents are shown, not rounded away.
+   *
+   * This stat and the Jar History screen behind it must be the same number. A
+   * rounded "$850" here against "$850.49" there reads as a disagreement, which
+   * is precisely the class of thing this pass exists to remove — and it is the
+   * headline figure, so it is the one people check.
+   */
   const formatCurrency = (cents: number) => {
-    return '$' + (cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 });
+    return '$' + (cents / 100).toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
   };
 
   // `unavailable` renders the muted "Soon" treatment like `placeholder`, but
@@ -179,19 +204,39 @@ export default function ProfileScreen() {
         ) : null}
       </View>
 
-      <View style={[styles.statsContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <Pressable
+        testID="profile-stats"
+        onPress={() => router.push('/history/jars')}
+        style={({ pressed }) => [
+          styles.statsContainer,
+          { backgroundColor: colors.card, borderColor: colors.border },
+          pressed && { opacity: 0.9 },
+        ]}
+      >
         <View style={styles.statItem}>
-          <Text style={[styles.statValue, { color: colors.foreground }]}>
-            {dashboard?.totalJars || 0}
+          <Text testID="profile-jar-count" style={[styles.statValue, { color: colors.foreground }]}>
+            {summary?.jarCount ?? 0}
           </Text>
           <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Jars</Text>
         </View>
         <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
         <View style={styles.statItem}>
-          <Text style={[styles.statValue, { color: colors.primary }]}>
-            {formatCurrency(dashboard?.personalProgress?.contributedAmountCents || 0)}
+          <Text testID="profile-contributed" style={[styles.statValue, { color: colors.primary }]}>
+            {formatCurrency(summary?.lifetimeContributedPrincipalCents ?? 0)}
           </Text>
           <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Contributed</Text>
+        </View>
+      </Pressable>
+
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>History</Text>
+        <View style={[styles.settingsGroup, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <SettingRow icon="archive" title="Jar History" onPress={() => router.push('/history/jars')} />
+          <SettingRow
+            icon="droplet"
+            title="Contribution History"
+            onPress={() => router.push('/history/contributions')}
+          />
         </View>
       </View>
 

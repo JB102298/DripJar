@@ -47,6 +47,12 @@ import { useJarGoals } from '@/hooks/useJarGoals';
 import { useFinancialSummary } from '@/hooks/useFinancialSummary';
 import { useMilestoneSummary, canShowAllocationBreakdown } from '@/hooks/useMilestoneSummary';
 import { MilestoneAllocationSummary } from '@/components/MilestoneAllocationSummary';
+import {
+  describeTimeRemaining,
+  formatISOForPrecision,
+  resolvePrecision,
+} from '@/lib/date-precision';
+import { resolveCategory } from '@/lib/jar-categories';
 
 type Tab = 'Overview' | 'Members' | 'Milestones' | 'Activity' | 'Agreements' | 'Settings';
 const TABS: Tab[] = ['Overview', 'Members', 'Milestones', 'Activity', 'Agreements', 'Settings'];
@@ -380,6 +386,14 @@ export default function JarDetailScreen() {
     // requirement for refunds, only that the jar is in an active Saving/Commitment state.
     const showCommitBtn = cutoffReached && (phase === 'Saving' || phase === 'Commitment');
     const showRefundBtn = phase === 'Saving' || phase === 'Commitment';
+
+    // Target date and remaining time, rendered at the precision the organizer
+    // actually gave. `resolvePrecision` tolerates a missing field so a jar from
+    // an older server still renders.
+    const targetPrecision = resolvePrecision((jar as any)?.targetDatePrecision);
+    const targetDateLabel = `${resolveCategory(jar.category).targetDateLabel}: ${formatISOForPrecision(jar.targetDate, targetPrecision)}`;
+    const timeRemaining = describeTimeRemaining(jar.targetDate, targetPrecision, jar.daysRemaining);
+
     return (
       <View style={styles.tabContent}>
         <View style={styles.overviewTopRow}>
@@ -401,11 +415,21 @@ export default function JarDetailScreen() {
             <Text style={[styles.overviewTarget, { color: colors.mutedForeground }]}>
               of {formatCurrency(jar.goalAmountCents)}
             </Text>
-            {jar.daysRemaining !== null && jar.daysRemaining !== undefined && (
+            {/*
+              The target date and how much time is left, both phrased at the
+              jar's stored precision. A year-precision jar shows "2044", never
+              "January 1, 2044" and never a nightly-decrementing day count.
+            */}
+            <Text testID="jar-detail-target-date" style={[styles.targetDateText, { color: colors.mutedForeground }]}>
+              {targetDateLabel}
+            </Text>
+            {timeRemaining ? (
               <View style={[styles.daysLeftChip, { backgroundColor: colors.secondary }]}>
-                <Text style={[styles.daysLeftText, { color: colors.primary }]}>{jar.daysRemaining} days left</Text>
+                <Text testID="jar-detail-time-remaining" style={[styles.daysLeftText, { color: colors.primary }]}>
+                  {timeRemaining}
+                </Text>
               </View>
-            )}
+            ) : null}
             {renderPhaseBadge()}
           </View>
         </View>
@@ -1222,6 +1246,10 @@ const styles = StyleSheet.create({
   overviewTarget: {
     fontSize: 16,
     marginBottom: 12,
+  },
+  targetDateText: {
+    fontSize: 13,
+    marginBottom: 8,
   },
   daysLeftChip: {
     alignSelf: 'flex-start',

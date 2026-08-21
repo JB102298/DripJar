@@ -2,15 +2,21 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
+import { useCreateJarContext } from '@/contexts/create-jar-context';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProgressBar } from '@/components/ProgressBar';
+import { AGREEMENT_SHORT_RULES, AGREEMENT_VERSION } from '@/lib/agreement-rules';
+import { resolveCategory } from '@/lib/jar-categories';
 
 export default function CreateJarStep7() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { state } = useCreateJarContext();
   const [agreed, setAgreed] = useState(false);
+
+  const category = resolveCategory(state.category);
 
   const handleNext = () => {
     if (agreed) {
@@ -34,28 +40,30 @@ export default function CreateJarStep7() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={[styles.title, { color: colors.foreground }]}>Set the rules</Text>
         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-          Clear expectations make group trips stress-free. Review the standard agreement below.
+          {category.rulesHelper}
         </Text>
 
+        {/*
+          Rendered from AGREEMENT_SHORT_RULES rather than written inline. The
+          previous hard-coded list said a majority vote decides "before the jar
+          funds are spent", which implied the group could move an individual's
+          money — it cannot, and never could. Nothing tied the screen to the
+          document, so nothing caught it. See lib/agreement-rules.ts.
+        */}
         <View style={[styles.agreementCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.ruleTitle, { color: colors.foreground }]}>1. The Commitment</Text>
-          <Text style={[styles.ruleText, { color: colors.mutedForeground }]}>
-            All members agree to save their designated portion by the target date.
-          </Text>
-
-          <Text style={[styles.ruleTitle, { color: colors.foreground }]}>2. Spending Approvals</Text>
-          <Text style={[styles.ruleText, { color: colors.mutedForeground }]}>
-            Major expenses (like flights and lodging) require a majority vote before the jar funds are spent.
-          </Text>
-
-          <Text style={[styles.ruleTitle, { color: colors.foreground }]}>3. Refunds</Text>
-          <Text style={[styles.ruleText, { color: colors.mutedForeground }]}>
-            Members can withdraw uncommitted funds anytime. Once funds are committed to a booking, refunds are subject to vendor policies.
-          </Text>
-          
-          <Text style={[styles.ruleTitle, { color: colors.foreground }]}>4. Transparency</Text>
-          <Text style={[styles.ruleText, { color: colors.mutedForeground }]}>
-            All members can see the jar's progress, member contributions, and activity.
+          {AGREEMENT_SHORT_RULES.map((rule, index) => (
+            <View key={rule.id} testID={`agreement-rule-${rule.id}`}>
+              <Text style={[styles.ruleTitle, { color: colors.foreground }]}>
+                {index + 1}. {rule.title}
+              </Text>
+              <Text style={[styles.ruleText, { color: colors.mutedForeground }]}>
+                {rule.summary}
+              </Text>
+            </View>
+          ))}
+          <Text style={[styles.versionNote, { color: colors.mutedForeground }]}>
+            Summary of the DripJar Savings Agreement v{AGREEMENT_VERSION}. Every member sees the full
+            agreement on the jar and must accept it before contributing.
           </Text>
         </View>
 
@@ -117,6 +125,7 @@ const styles = StyleSheet.create({
   },
   ruleTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 8, marginTop: 16 },
   ruleText: { fontSize: 14, lineHeight: 20 },
+  versionNote: { fontSize: 12, lineHeight: 18, marginTop: 24, fontStyle: 'italic' },
   checkboxRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

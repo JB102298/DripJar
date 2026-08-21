@@ -7,6 +7,14 @@ import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProgressBar } from '@/components/ProgressBar';
 import { DateInput } from '@/components/DateInput';
+import { resolveCategory } from '@/lib/jar-categories';
+import {
+  formatISOForPrecision,
+  normalizeToPrecision,
+  parseLocalISO,
+  toLocalISO,
+  type DatePrecision,
+} from '@/lib/date-precision';
 
 export default function CreateJarStep2() {
   const colors = useColors();
@@ -14,21 +22,61 @@ export default function CreateJarStep2() {
   const insets = useSafeAreaInsets();
   const { state, updateState } = useCreateJarContext();
 
-  // Parse stored YYYY-MM-DD at noon local time to avoid UTC-shift off-by-one
-  const parseLocal = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d, 12, 0, 0); };
-  // Store as YYYY-MM-DD using local calendar date (not UTC)
-  const toLocalISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const category = resolveCategory(state.category);
 
-  const startDate = state.startDate ? parseLocal(state.startDate) : undefined;
-  const endDate = state.endDate ? parseLocal(state.endDate) : undefined;
-  const targetDate = state.targetDate ? parseLocal(state.targetDate) : undefined;
+  // Precision falls back to the category default until the organizer picks one.
+  const targetPrecision: DatePrecision = state.targetDatePrecision ?? category.defaultTargetPrecision;
+  const eventPrecision: DatePrecision = state.eventDatePrecision ?? category.defaultEventPrecision;
 
-  const isFormValid = !!targetDate && (!startDate || targetDate <= startDate);
+  const startDate = parseLocalISO(state.startDate);
+  const endDate = parseLocalISO(state.endDate);
+  const targetDate = parseLocalISO(state.targetDate);
+  const cutoffDate = parseLocalISO(state.cutoffDate);
+
+  const targetAfterStart = !!targetDate && !!startDate && targetDate > startDate;
+
+  /**
+   * Commitment date must fall strictly before the savings target.
+   *
+   * Compared on the STORED strings, not on parsed Dates. The stored target is
+   * already normalised to its precision — the 1st of the month at `monthYear`,
+   * 1 January at `year` — so a lexicographic `yyyy-MM-dd` comparison asks
+   * exactly the question the server will ask, with no invented day anywhere. A
+   * year-precision target of "2044" is the boundary 2044-01-01, which is both
+   * what is stored and what the API enforces, so the screen and the server
+   * cannot disagree about which dates are legal.
+   */
+  const cutoffNotBeforeTarget =
+    !!state.cutoffDate && !!state.targetDate && state.cutoffDate >= state.targetDate;
+
+  /**
+   * Continue is blocked while any date relationship is invalid.
+   *
+   * Previously the screen rendered the commitment-date error and let the user
+   * continue anyway — six further steps, then a 400 from the server at the
+   * final "Launch Jar". Showing someone why they are stuck and then not
+   * stopping them is worse than either alternative.
+   */
+  const isFormValid = !!targetDate && !targetAfterStart && !cutoffNotBeforeTarget;
 
   const handleNext = () => {
-    if (isFormValid) {
-      router.push('/create-jar/goal');
-    }
+    // Guarded here as well as on `disabled`, so a press that slips through
+    // (web keyboard activation, a stale render) still cannot advance.
+    if (!isFormValid) return;
+    router.push('/create-jar/goal');
+  };
+
+  const setTargetPrecision = (precision: DatePrecision) => {
+    updateState({ targetDatePrecision: precision });
+  };
+
+  const setEventPrecision = (precision: DatePrecision) => {
+    // Re-snap both ends of the window together; leaving one at day precision
+    // while the other is coarse renders as a window nobody chose.
+    const next: Record<string, unknown> = { eventDatePrecision: precision };
+    if (startDate) next.startDate = toLocalISO(normalizeToPrecision(startDate, precision));
+    if (endDate) next.endDate = toLocalISO(normalizeToPrecision(endDate, precision));
+    updateState(next);
   };
 
   return (
@@ -45,43 +93,59 @@ export default function CreateJarStep2() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={[styles.title, { color: colors.foreground }]}>When is the trip?</Text>
+        <Text style={[styles.title, { color: colors.foreground }]}>{category.dateHeading}</Text>
+
+        {category.eventWindow ? (
+          <>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.foreground }]}>
+                {category.eventWindow.startLabel}
+              </Text>
+              <DateInput
+                testID="event-start-date"
+                value={startDate}
+                onChange={(d) => updateState({ startDate: toLocalISO(d) })}
+                placeholder={category.eventWindow.startPlaceholder}
+                precision={eventPrecision}
+                onPrecisionChange={setEventPrecision}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.foreground }]}>
+                {category.eventWindow.endLabel}
+              </Text>
+              <DateInput
+                testID="event-end-date"
+                value={endDate}
+                onChange={(d) => updateState({ endDate: toLocalISO(d) })}
+                placeholder={category.eventWindow.endPlaceholder}
+                precision={eventPrecision}
+              />
+            </View>
+
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+          </>
+        ) : null}
 
         <View style={styles.inputGroup}>
-          <Text style={[styles.label, { color: colors.foreground }]}>Trip Start Date (Optional)</Text>
-          <DateInput
-            value={startDate}
-            onChange={(d) => updateState({ startDate: toLocalISO(d) })}
-            placeholder="Select trip start date"
-          />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={[styles.label, { color: colors.foreground }]}>Trip End Date (Optional)</Text>
-          <DateInput
-            value={endDate}
-            onChange={(d) => updateState({ endDate: toLocalISO(d) })}
-            placeholder="Select trip end date"
-          />
-        </View>
-
-        <View style={[styles.divider, { backgroundColor: colors.border }]} />
-
-        <View style={styles.inputGroup}>
-          <Text style={[styles.label, { color: colors.foreground }]}>Savings Target Date</Text>
+          <Text style={[styles.label, { color: colors.foreground }]}>{category.targetDateLabel}</Text>
           <Text style={[styles.subLabel, { color: colors.mutedForeground }]}>
-            When do you want to have all the money saved by? We recommend 30-60 days before the trip.
+            {category.targetDateHelp}
           </Text>
           <DateInput
+            testID="savings-target-date"
             value={targetDate}
             onChange={(d) => updateState({ targetDate: toLocalISO(d) })}
             placeholder="Select target date"
+            precision={targetPrecision}
+            onPrecisionChange={setTargetPrecision}
           />
-          {targetDate && startDate && targetDate > startDate && (
+          {targetAfterStart && category.eventWindow ? (
             <Text style={[styles.errorText, { color: colors.destructive }]}>
-              Target date must be before the trip start date.
+              {category.eventWindow.targetAfterStartError}
             </Text>
-          )}
+          ) : null}
         </View>
 
         <View style={[styles.divider, { backgroundColor: colors.border }]} />
@@ -89,26 +153,40 @@ export default function CreateJarStep2() {
         <View style={styles.inputGroup}>
           <Text style={[styles.label, { color: colors.foreground }]}>Commitment Date (Optional)</Text>
           <Text style={[styles.subLabel, { color: colors.mutedForeground }]}>
-            The date when contributions become committed to the jar's purpose. After this date, members
-            enter the Commitment phase and schedules can no longer be changed. Must be before the
-            Savings Target Date.
+            The date when contributions become committed to the jar&apos;s purpose. After this date, members
+            enter the Commitment phase and schedules can no longer be changed. Must be before the{' '}
+            {category.targetDateLabel}.
           </Text>
+          {/*
+            Always an exact day. The server compares it to today and to the
+            target date to drive the jar's phase transition, so a coarse answer
+            would move real lifecycle behaviour by up to a year.
+          */}
           <DateInput
-            value={state.cutoffDate ? parseLocal(state.cutoffDate) : undefined}
+            testID="commitment-date"
+            value={cutoffDate}
             onChange={(d) => updateState({ cutoffDate: toLocalISO(d) })}
             placeholder="Select commitment date (optional)"
+            precision="exact"
           />
-          {state.cutoffDate && targetDate && parseLocal(state.cutoffDate) >= targetDate && (
-            <Text style={[styles.errorText, { color: colors.destructive }]}>
-              Commitment date must be before the savings target date.
+          {cutoffNotBeforeTarget ? (
+            <Text testID="cutoff-error" style={[styles.errorText, { color: colors.destructive }]}>
+              Commitment date must be before the {category.targetDateLabel.toLowerCase()}
+              {targetPrecision === 'exact'
+                ? ''
+                : ` (${formatISOForPrecision(state.targetDate, targetPrecision)}, which starts on ${formatISOForPrecision(state.targetDate, 'exact')})`}
+              .
             </Text>
-          )}
+          ) : null}
         </View>
 
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16), backgroundColor: colors.background, borderTopColor: colors.border }]}>
         <Pressable
+          testID="dates-continue"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !isFormValid }}
           style={[
             styles.button,
             { backgroundColor: isFormValid ? colors.primary : colors.muted },

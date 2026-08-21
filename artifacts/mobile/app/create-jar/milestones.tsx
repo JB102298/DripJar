@@ -7,14 +7,19 @@ import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProgressBar } from '@/components/ProgressBar';
 import { CurrencyInput } from '@/components/CurrencyInput';
-
-const SUGGESTIONS = ['Flights', 'Lodging', 'Activities', 'Food', 'Emergency Buffer'];
+import { resolveCategory } from '@/lib/jar-categories';
 
 export default function CreateJarStep4() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { state, updateState } = useCreateJarContext();
+
+  // "Flights, Lodging, Activities" is a useful prompt for a cruise and a
+  // baffling one for an emergency fund. Both the chips and the help line come
+  // from the category record.
+  const category = resolveCategory(state.category);
+  const suggestions = category.milestoneSuggestions;
 
   const [milestones, setMilestones] = useState<{name: string, targetAmountCents: number}[]>(state.milestones || []);
   
@@ -65,7 +70,7 @@ export default function CreateJarStep4() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={[styles.title, { color: colors.foreground }]}>Break it down</Text>
         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-          Milestones help track specific expenses like flights or lodging.
+          {category.milestoneHelp}
         </Text>
 
         <View style={[styles.summaryCard, { backgroundColor: colors.secondary }]}>
@@ -87,9 +92,10 @@ export default function CreateJarStep4() {
         <View style={styles.suggestionsContainer}>
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Quick Add</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionsScroll}>
-            {SUGGESTIONS.map(s => (
-              <Pressable 
-                key={s} 
+            {suggestions.map(s => (
+              <Pressable
+                key={s}
+                testID={`milestone-suggestion-${s}`}
                 style={[styles.suggestionChip, { backgroundColor: colors.card, borderColor: colors.border }]}
                 onPress={() => {
                   setNewName(s);
@@ -160,7 +166,7 @@ export default function CreateJarStep4() {
                     style={[styles.input, { color: colors.foreground }]}
                     value={newName}
                     onChangeText={setNewName}
-                    placeholder="e.g., Flights"
+                    placeholder={`e.g., ${suggestions[0] ?? 'Milestone'}`}
                   />
                 </View>
               </View>

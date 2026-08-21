@@ -16,6 +16,8 @@ import { ImageBackground } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { JarHealthBadge } from '@/components/JarHealthBadge';
 import * as Haptics from 'expo-haptics';
+import { BrandLogo } from '@/components/BrandLogo';
+import { describeTimeRemaining, resolvePrecision } from '@/lib/date-precision';
 
 export default function HomeScreen() {
   const colors = useColors();
@@ -72,6 +74,12 @@ export default function HomeScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
     >
       <View style={styles.header}>
+        {/*
+          Home is the app's top-level surface, so it carries the wordmark. The
+          background here is `colors.background` (near-white), which is what the
+          transparent artwork was drawn against — no plate needed.
+        */}
+        <BrandLogo variant="wordmark" width={132} tone="onLight" style={styles.headerLogo} testID="home-logo" />
         <Text style={[styles.greeting, { color: colors.foreground }]}>
           {getTimeOfDay()}, {greetingName(profile)}!
         </Text>
@@ -116,11 +124,24 @@ export default function HomeScreen() {
                         <Text style={styles.heroDestination}>{dashboard.featuredJar.destination}</Text>
                       )}
                     </View>
-                    {dashboard.featuredJar.daysRemaining !== null && dashboard.featuredJar.daysRemaining !== undefined && (
-                      <View style={styles.daysChip}>
-                        <Text style={styles.daysText}>{dashboard.featuredJar.daysRemaining} days left</Text>
-                      </View>
-                    )}
+                    {/*
+                      Phrased at the jar's stored precision. A day countdown on
+                      a year-precision goal asserts a day nobody chose, and
+                      ticks down nightly so the false precision looks
+                      maintained.
+                    */}
+                    {(() => {
+                      const remaining = describeTimeRemaining(
+                        dashboard.featuredJar.targetDate,
+                        resolvePrecision(dashboard.featuredJar.targetDatePrecision),
+                        dashboard.featuredJar.daysRemaining,
+                      );
+                      return remaining ? (
+                        <View style={styles.daysChip}>
+                          <Text testID="home-time-remaining" style={styles.daysText}>{remaining}</Text>
+                        </View>
+                      ) : null;
+                    })()}
                   </View>
 
                   <View style={styles.heroBottomRow}>
@@ -238,6 +259,9 @@ const styles = StyleSheet.create({
   },
   header: {
     marginBottom: 24,
+  },
+  headerLogo: {
+    marginBottom: 12,
   },
   greeting: {
     fontSize: 28,
