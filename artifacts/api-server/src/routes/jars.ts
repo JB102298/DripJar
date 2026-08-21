@@ -16,6 +16,14 @@ import { notifyAllMembers } from "../lib/notifications.js";
 import { deriveJarPhase, toUTCDateString } from "../lib/phase.js";
 import { getJarSavedPrincipalCents } from "../lib/financial-balance.js";
 import { parseStatusFilter, invalidStatusMessage } from "../lib/jar-status.js";
+import { AGREEMENT_VERSION, renderAgreementText } from "../lib/agreement.js";
+import {
+  DEFAULT_TARGET_DATE_PRECISION,
+  createJarContractSchema,
+  updateJarContractSchema,
+  validateBody,
+} from "../lib/validation.js";
+import { normalizeTargetDate } from "../lib/target-date.js";
 
 const router = Router();
 
@@ -79,6 +87,9 @@ async function buildJarSummary(jar: typeof jars.$inferSelect, userId: string) {
     destination: jar.destination,
     coverImageUrl: jar.coverImageUrl,
     targetDate: jar.targetDate,
+    // Every surface that renders a target date needs its precision alongside
+    // it, or it will render a day the organizer never chose.
+    targetDatePrecision: jar.targetDatePrecision,
     cutoffDate: jar.cutoffDate ?? null,
     goalAmountCents: jar.goalAmountCents,
     currency: jar.currency,
@@ -167,12 +178,26 @@ router.post("/jars", requireAuth, async (req, res) => {
     startDate?: string;
     endDate?: string;
     targetDate?: string;
+    targetDatePrecision?: string;
     cutoffDate?: string;
     goalAmountCents?: number;
     currency?: string;
     approvalThreshold?: number;
     timeZone?: string;
   };
+
+  // Closed-set fields are validated against their contract before anything is
+  // written. Both are optional: an older client that sends neither still
+  // succeeds, taking the historical 'Vacation' default and 'exact' precision.
+  const contract = validateBody(createJarContractSchema, {
+    ...(req.body.category !== undefined ? { category: req.body.category } : {}),
+    ...(req.body.targetDatePrecision !== undefined
+      ? { targetDatePrecision: req.body.targetDatePrecision }
+      : {}),
+  }, res);
+  if (!contract) return;
+
+  const resolvedPrecision = contract.targetDatePrecision ?? DEFAULT_TARGET_DATE_PRECISION;
 
   if (!name || !targetDate || !goalAmountCents) {
     res.status(400).json({ error: "BadRequest", message: "name, targetDate, and goalAmountCents are required" });
@@ -184,6 +209,12 @@ router.post("/jars", requireAuth, async (req, res) => {
     return;
   }
 
+  // Snap the stored date to the precision the caller claimed, so a coarse jar
+  // cannot carry a day no organizer chose and no surface will ever show. Done
+  // before the cutoff comparison below, which must run against the value that
+  // is actually stored.
+  const resolvedTargetDate = normalizeTargetDate(targetDate, resolvedPrecision);
+
   // Validate cutoffDate if provided
   if (cutoffDate) {
     const todayUTC = toUTCDateString(new Date());
@@ -191,7 +222,7 @@ router.post("/jars", requireAuth, async (req, res) => {
       res.status(400).json({ error: "BadRequest", message: "Cutoff date must be in the future" });
       return;
     }
-    if (cutoffDate >= targetDate) {
+    if (cutoffDate >= resolvedTargetDate) {
       res.status(400).json({ error: "BadRequest", message: "Cutoff date must be before the target date" });
       return;
     }
@@ -224,7 +255,8 @@ router.post("/jars", requireAuth, async (req, res) => {
       coverImageUrl: coverImageUrl ?? null,
       startDate: startDate ?? null,
       endDate: endDate ?? null,
-      targetDate,
+      targetDate: resolvedTargetDate,
+      targetDatePrecision: resolvedPrecision,
       cutoffDate: cutoffDate ?? null,
       goalAmountCents,
       currency,
@@ -249,11 +281,12 @@ router.post("/jars", requireAuth, async (req, res) => {
     joinedAt: new Date(),
   });
 
-  // Create default agreement
+  // Create the default agreement at the current version. Agreements already
+  // written for existing jars are never rewritten — see lib/agreement.ts.
   await db.insert(agreements).values({
     jarId: jar.id,
-    version: "1.0",
-    content: DEFAULT_AGREEMENT_TEXT,
+    version: AGREEMENT_VERSION,
+    content: renderAgreementText(),
     effectiveDate: new Date().toISOString().split("T")[0]!,
   });
 
@@ -316,6 +349,7 @@ router.get("/jars/:jarId", requireAuth, async (req, res) => {
     startDate: jar.startDate,
     endDate: jar.endDate,
     targetDate: jar.targetDate,
+    targetDatePrecision: jar.targetDatePrecision,
     cutoffDate: jar.cutoffDate ?? null,
     goalAmountCents: jar.goalAmountCents,
     currency: jar.currency,
@@ -350,8 +384,33 @@ router.patch("/jars/:jarId", requireAuth, async (req, res) => {
     return;
   }
 
+  // Closed-set fields first, so an invalid precision is a 400 before any other
+  // work happens. `category` is deliberately absent from `allowed` below and so
+  // is not editable at all; there is nothing to validate on that path.
+  const contract = validateBody(updateJarContractSchema, {
+    ...(req.body.targetDatePrecision !== undefined
+      ? { targetDatePrecision: req.body.targetDatePrecision }
+      : {}),
+  }, res);
+  if (!contract) return;
+
   const updates: Partial<typeof jar> = { updatedAt: new Date() };
-  const allowed = ["name", "description", "destination", "coverImageUrl", "startDate", "endDate", "targetDate", "goalAmountCents", "approvalThreshold", "cutoffDate"] as const;
+  const allowed = ["name", "description", "destination", "coverImageUrl", "startDate", "endDate", "targetDate", "targetDatePrecision", "goalAmountCents", "approvalThreshold", "cutoffDate"] as const;
+
+  /**
+   * Re-snap the target date whenever either half of the pair moves.
+   *
+   * Changing precision alone must re-normalise the existing date — switching a
+   * jar from exact to year while leaving 2044-07-19 in the column would leave a
+   * stored day that nothing displays. Changing the date alone must be snapped
+   * to the precision already on record, for the same reason.
+   */
+  const effectivePrecision =
+    contract.targetDatePrecision ?? (jar.targetDatePrecision as typeof DEFAULT_TARGET_DATE_PRECISION);
+  if (req.body["targetDate"] !== undefined || contract.targetDatePrecision !== undefined) {
+    const rawTarget = (req.body["targetDate"] as string | undefined) ?? jar.targetDate;
+    req.body["targetDate"] = normalizeTargetDate(rawTarget, effectivePrecision);
+  }
 
   // Financially sensitive fields are only editable before launch — once the
   // jar is Saving, member targets/progress are based on the agreed goal.
@@ -576,23 +635,5 @@ router.get("/jars/:jarId/health", requireAuth, async (req, res) => {
 
   res.json(health);
 });
-
-const DEFAULT_AGREEMENT_TEXT = `DripJar Savings Agreement
-
-1. SAVING PHASE: All contributions are made voluntarily. During the Saving Phase, contributions remain under the contributing member's control and may be refunded upon request, subject to the terms below.
-
-2. COMMITMENT REQUEST: Before any funds are designated for a specific purchase, the Organizer must submit a Commitment Request identifying the amount, purpose, and intended milestone. Members must approve the request according to the jar's approval threshold.
-
-3. COMMITTED FUNDS: Once a Commitment Request is approved and the Lock Date has passed, designated funds become committed to the specified purpose. Committed funds may not be unilaterally reclaimed by individual members.
-
-4. CANCELLATION: If the Jar is cancelled before any Commitment Request is approved, all members may request a full refund of their simulated contributions. DripJar does not guarantee refunds for amounts already paid to third-party vendors.
-
-5. REFUNDS: Refund requests are subject to review. DripJar is not responsible for amounts already transferred to external vendors, airlines, hotels, or other service providers.
-
-6. SIMULATED PAYMENTS: This version of DripJar uses simulated payment data. No real money is transferred. This agreement will be updated before real financial transactions are enabled.
-
-7. DISCLAIMER: The exact legal and financial terms governing real-money transactions will be provided separately before production payment processing is enabled.
-
-All members agree to treat each other fairly and communicate openly about any inability to meet contribution schedules.`;
 
 export default router;

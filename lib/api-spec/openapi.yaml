@@ -11,6 +11,7 @@ tags:
   - name: health
   - name: auth
   - name: profile
+  - name: me
   - name: jars
   - name: members
   - name: invitations
@@ -445,6 +446,64 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Profile"
+
+  # ME — caller-scoped history
+  #
+  # Both endpoints return only the authenticated caller's own data and carry the
+  # same `summary` object, so the Profile stat, the jar list, and the
+  # contribution list cannot disagree about the lifetime figure. See
+  # api-server/src/lib/member-history.ts.
+  /me/jars:
+    get:
+      operationId: listMyJars
+      tags: [me]
+      summary: Every jar the caller has joined, with their own contribution history in each
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyJarsResponse"
+
+  /me/contributions:
+    get:
+      operationId: listMyContributions
+      tags: [me]
+      summary: The caller's contributions, newest first, cursor-paginated
+      description: >-
+        Keyset pagination ordered by (occurredAt DESC, ledger entry id DESC).
+        Pass `pageInfo.nextCursor` back as `cursor` to fetch the next page; a
+        null `nextCursor` means the end. Offset paging is deliberately not
+        offered — new contributions arrive at the front of this ordering, so an
+        offset would repeat rows the reader has already seen.
+      parameters:
+        - name: limit
+          in: query
+          description: Rows per page. Defaults to 50, clamped to 200.
+          schema:
+            type: integer
+        - name: cursor
+          in: query
+          description: >-
+            Opaque cursor from a previous response's `pageInfo.nextCursor`. Pass
+            it back verbatim; do not construct or parse one. A malformed cursor
+            is rejected with 400 rather than silently restarting from the top.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyContributionsResponse"
+        "400":
+          description: Invalid cursor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   # DASHBOARD
   /dashboard:
@@ -1512,6 +1571,179 @@ components:
         defaultCurrency:
           type: string
 
+    # ME — caller-scoped history
+    MemberHistorySummary:
+      type: object
+      description: >-
+        Cross-jar totals for the caller. `lifetimeContributedPrincipalCents` is
+        principal ever contributed and only ever increases; it is deliberately
+        not the same as `currentlySavedPrincipalCents`.
+      properties:
+        lifetimeContributedPrincipalCents:
+          type: integer
+        currentlySavedPrincipalCents:
+          type: integer
+        refundedPrincipalCents:
+          type: integer
+        jarCount:
+          type: integer
+        contributionCount:
+          type: integer
+        reconciles:
+          type: boolean
+          description: >-
+            False when a per-jar ledger sum disagreed with the canonical member
+            balance. Clients must suppress the breakdown rather than render
+            figures that do not add up.
+      required:
+        - lifetimeContributedPrincipalCents
+        - currentlySavedPrincipalCents
+        - refundedPrincipalCents
+        - jarCount
+        - contributionCount
+        - reconciles
+
+    MemberJarHistoryEntry:
+      type: object
+      properties:
+        jarId:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+          nullable: true
+        status:
+          type: string
+        targetDate:
+          type: string
+          format: date
+        targetDatePrecision:
+          $ref: "#/components/schemas/TargetDatePrecision"
+        goalAmountCents:
+          type: integer
+        currency:
+          type: string
+        role:
+          type: string
+        membershipStatus:
+          type: string
+          description: Included so jars the caller has left can be labelled as past.
+        joinedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lifetimeContributedPrincipalCents:
+          type: integer
+        currentlySavedPrincipalCents:
+          type: integer
+        refundedPrincipalCents:
+          type: integer
+        contributionCount:
+          type: integer
+        reconciles:
+          type: boolean
+      required:
+        - jarId
+        - name
+        - status
+        - targetDate
+        - goalAmountCents
+        - currency
+        - role
+        - membershipStatus
+        - lifetimeContributedPrincipalCents
+        - currentlySavedPrincipalCents
+        - refundedPrincipalCents
+        - contributionCount
+        - reconciles
+
+    ContributionHistoryEntry:
+      type: object
+      description: >-
+        One contribution as the contributor sees it. Carries no internal
+        identifier — jarId is the only id, because the client needs it to
+        navigate.
+      properties:
+        jarId:
+          type: string
+        jarName:
+          type: string
+        principalCents:
+          type: integer
+        currency:
+          type: string
+        transactionType:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+      required:
+        - jarId
+        - jarName
+        - principalCents
+        - currency
+        - transactionType
+        - occurredAt
+
+    MyJarsResponse:
+      type: object
+      properties:
+        summary:
+          $ref: "#/components/schemas/MemberHistorySummary"
+        jars:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberJarHistoryEntry"
+      required:
+        - summary
+        - jars
+
+    ContributionPageInfo:
+      type: object
+      properties:
+        hasMore:
+          type: boolean
+        nextCursor:
+          type: string
+          nullable: true
+          description: Pass back as `cursor` to fetch the next page. Null on the last page.
+        limit:
+          type: integer
+          description: Page size actually applied after clamping.
+        totalCount:
+          type: integer
+          description: >-
+            Contributions across the caller's whole history, so a client can
+            show "N of M" without walking every page.
+      required:
+        - hasMore
+        - nextCursor
+        - limit
+        - totalCount
+
+    MyContributionsResponse:
+      type: object
+      description: >-
+        `summary` always spans the caller's complete canonical ledger history,
+        never just the returned page — the lifetime total must not shrink
+        because the reader has only loaded the first page. Reconciliation is
+        therefore between `summary` and the FULL cursor chain, not between
+        `summary` and one page.
+      properties:
+        summary:
+          $ref: "#/components/schemas/MemberHistorySummary"
+        contributions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContributionHistoryEntry"
+        pageInfo:
+          $ref: "#/components/schemas/ContributionPageInfo"
+      required:
+        - summary
+        - contributions
+        - pageInfo
+
     # DASHBOARD
     DashboardData:
       type: object
@@ -1613,6 +1845,18 @@ components:
       required: [type, title, description, date, jarId, jarName]
 
     # JARS
+    TargetDatePrecision:
+      type: string
+      enum: [exact, monthYear, year]
+      description: >-
+        How precisely the organizer knows the jar's target date. `targetDate` is
+        a real calendar date at every precision — coarser values are normalised
+        server-side to the start of their period (the 1st of the month, or 1
+        January) — so this affects DISPLAY only. A `year` jar must render as
+        "2044" and a `monthYear` jar as "March 2044"; rendering either as a full
+        date asserts a day the organizer never chose. Jars created before this
+        field existed are `exact`.
+
     Jar:
       type: object
       properties:
@@ -1626,7 +1870,24 @@ components:
           type: string
         category:
           type: string
-          enum: [Vacation, Cruise, Wedding, Honeymoon, MissionTrip, Reunion, Celebration, Other]
+          # DELIBERATELY NOT AN ENUM ON READ.
+          #
+          # `jars.category` is free text that predates the canonical list, and
+          # historical rows carry values outside it (82 rows read 'travel' in
+          # the development database). Declaring a closed enum here would make
+          # this contract state something false: the server genuinely does
+          # return values outside the list, and a generated client typed as a
+          # union would be wrong about its own data.
+          #
+          # New writes ARE constrained -- see CreateJarRequest.category -- so
+          # the set of legacy oddities is fixed and shrinks over time. Clients
+          # must resolve an unrecognised value to `Other` rather than assume the
+          # union holds.
+          description: >-
+            Jar category. Constrained to the canonical list on write, but
+            tolerant on read: legacy rows predating the list exist and are
+            returned as stored. Clients must render an unrecognised value as
+            `Other`.
         description:
           type: string
           nullable: true
@@ -1647,6 +1908,8 @@ components:
         targetDate:
           type: string
           format: date
+        targetDatePrecision:
+          $ref: "#/components/schemas/TargetDatePrecision"
         cutoffDate:
           type: string
           format: date
@@ -1705,6 +1968,8 @@ components:
         targetDate:
           type: string
           format: date
+        targetDatePrecision:
+          $ref: "#/components/schemas/TargetDatePrecision"
         cutoffDate:
           type: string
           format: date
@@ -1742,7 +2007,13 @@ components:
           type: string
         category:
           type: string
-          enum: [Vacation, Cruise, Wedding, Honeymoon, MissionTrip, Reunion, Celebration, Other]
+          # Canonical jar category list, grouped travel / life events / major
+          # purchases / financial / other. ENFORCED on write: the server rejects
+          # anything outside this set with 400 ValidationError, so no new
+          # arbitrary category can enter the column. Read responses stay
+          # tolerant for legacy rows -- see Jar.category.
+          enum: [Vacation, Cruise, MissionTrip, Wedding, Honeymoon, Reunion, Celebration, HomeDownPayment, Vehicle, LargePurchase, Education, EmergencyFund, BusinessProject, FamilyGoal, Other]
+          default: Vacation
         description:
           type: string
           nullable: true
@@ -1763,6 +2034,14 @@ components:
         targetDate:
           type: string
           format: date
+        targetDatePrecision:
+          allOf:
+            - $ref: "#/components/schemas/TargetDatePrecision"
+          description: >-
+            Optional. Omitted by older clients, in which case the jar is stored
+            as `exact` — which is what every jar created before this field
+            existed was implicitly asserting. The server re-normalises
+            `targetDate` to match, so a coarse jar can never carry a day.
         cutoffDate:
           type: string
           format: date
@@ -1803,6 +2082,14 @@ components:
         targetDate:
           type: string
           format: date
+        targetDatePrecision:
+          allOf:
+            - $ref: "#/components/schemas/TargetDatePrecision"
+          description: >-
+            Changing this re-normalises the stored `targetDate` to match, and
+            changing `targetDate` re-normalises it to the precision already on
+            record — so the pair can never drift into a stored day that no
+            surface displays.
         cutoffDate:
           type: string
           format: date

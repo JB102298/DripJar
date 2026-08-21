@@ -2,8 +2,9 @@
 # Fresh-database migration verification.
 #
 # Thin wrapper around scripts/run-fresh-migration.mjs, which is the single source
-# of truth for what a fresh provision must produce (chain 0000→0023, 33 tables,
-# 8 seeded ledger accounts, no duplicates, idempotent re-run).
+# of truth for what a fresh provision must produce (chain 0000→0024, 33 tables,
+# 8 seeded ledger accounts, jars.target_date_precision, no duplicates,
+# idempotent re-run).
 #
 # Requires DATABASE_URL pointing at a server where the role may CREATE DATABASE.
 set -euo pipefail

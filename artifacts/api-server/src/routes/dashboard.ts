@@ -95,6 +95,9 @@ router.get("/dashboard", requireAuth, async (req, res) => {
       destination: featuredJar.destination,
       coverImageUrl: featuredJar.coverImageUrl,
       targetDate: featuredJar.targetDate,
+      // Home renders this date's remaining time; without the precision it
+      // would imply a day the organizer never chose.
+      targetDatePrecision: featuredJar.targetDatePrecision,
       goalAmountCents: featuredJar.goalAmountCents,
       currency: featuredJar.currency,
       status: featuredJar.status,

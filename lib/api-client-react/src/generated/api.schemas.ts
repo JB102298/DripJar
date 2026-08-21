@@ -89,6 +89,87 @@ export interface UpdateProfileRequest {
   defaultCurrency?: string;
 }
 
+/**
+ * Cross-jar totals for the caller. `lifetimeContributedPrincipalCents` is principal ever contributed and only ever increases; it is deliberately not the same as `currentlySavedPrincipalCents`.
+ */
+export interface MemberHistorySummary {
+  lifetimeContributedPrincipalCents: number;
+  currentlySavedPrincipalCents: number;
+  refundedPrincipalCents: number;
+  jarCount: number;
+  contributionCount: number;
+  /** False when a per-jar ledger sum disagreed with the canonical member balance. Clients must suppress the breakdown rather than render figures that do not add up. */
+  reconciles: boolean;
+}
+
+/**
+ * How precisely the organizer knows the jar's target date. `targetDate` is a real calendar date at every precision — coarser values are normalised server-side to the start of their period (the 1st of the month, or 1 January) — so this affects DISPLAY only. A `year` jar must render as "2044" and a `monthYear` jar as "March 2044"; rendering either as a full date asserts a day the organizer never chose. Jars created before this field existed are `exact`.
+ */
+export type TargetDatePrecision = typeof TargetDatePrecision[keyof typeof TargetDatePrecision];
+
+
+export const TargetDatePrecision = {
+  exact: 'exact',
+  monthYear: 'monthYear',
+  year: 'year',
+} as const;
+
+export interface MemberJarHistoryEntry {
+  jarId: string;
+  name: string;
+  category?: string | null;
+  status: string;
+  targetDate: string;
+  targetDatePrecision?: TargetDatePrecision;
+  goalAmountCents: number;
+  currency: string;
+  role: string;
+  /** Included so jars the caller has left can be labelled as past. */
+  membershipStatus: string;
+  joinedAt?: string | null;
+  lifetimeContributedPrincipalCents: number;
+  currentlySavedPrincipalCents: number;
+  refundedPrincipalCents: number;
+  contributionCount: number;
+  reconciles: boolean;
+}
+
+/**
+ * One contribution as the contributor sees it. Carries no internal identifier — jarId is the only id, because the client needs it to navigate.
+ */
+export interface ContributionHistoryEntry {
+  jarId: string;
+  jarName: string;
+  principalCents: number;
+  currency: string;
+  transactionType: string;
+  occurredAt: string;
+}
+
+export interface MyJarsResponse {
+  summary: MemberHistorySummary;
+  jars: MemberJarHistoryEntry[];
+}
+
+export interface ContributionPageInfo {
+  hasMore: boolean;
+  /** Pass back as `cursor` to fetch the next page. Null on the last page. */
+  nextCursor: string | null;
+  /** Page size actually applied after clamping. */
+  limit: number;
+  /** Contributions across the caller's whole history, so a client can show "N of M" without walking every page. */
+  totalCount: number;
+}
+
+/**
+ * `summary` always spans the caller's complete canonical ledger history, never just the returned page — the lifetime total must not shrink because the reader has only loaded the first page. Reconciliation is therefore between `summary` and the FULL cursor chain, not between `summary` and one page.
+ */
+export interface MyContributionsResponse {
+  summary: MemberHistorySummary;
+  contributions: ContributionHistoryEntry[];
+  pageInfo: ContributionPageInfo;
+}
+
 export type JarSummaryPhase = typeof JarSummaryPhase[keyof typeof JarSummaryPhase];
 
 
@@ -130,6 +211,7 @@ export interface JarSummary {
   destination?: string | null;
   coverImageUrl?: string | null;
   targetDate: string;
+  targetDatePrecision?: TargetDatePrecision;
   cutoffDate?: string | null;
   goalAmountCents: number;
   currency: string;
@@ -243,20 +325,6 @@ export interface DashboardData {
   unreadNotifications: number;
 }
 
-export type JarCategory = typeof JarCategory[keyof typeof JarCategory];
-
-
-export const JarCategory = {
-  Vacation: 'Vacation',
-  Cruise: 'Cruise',
-  Wedding: 'Wedding',
-  Honeymoon: 'Honeymoon',
-  MissionTrip: 'MissionTrip',
-  Reunion: 'Reunion',
-  Celebration: 'Celebration',
-  Other: 'Other',
-} as const;
-
 export type JarStatus = typeof JarStatus[keyof typeof JarStatus];
 
 
@@ -291,13 +359,15 @@ export interface Jar {
   organizerId: string;
   name: string;
   slug: string;
-  category: JarCategory;
+  /** Jar category. Constrained to the canonical list on write, but tolerant on read: legacy rows predating the list exist and are returned as stored. Clients must render an unrecognised value as `Other`. */
+  category: string;
   description?: string | null;
   destination?: string | null;
   coverImageUrl?: string | null;
   startDate?: string | null;
   endDate?: string | null;
   targetDate: string;
+  targetDatePrecision?: TargetDatePrecision;
   /** Organizer-set date when Saving phase ends and Commitment phase begins */
   cutoffDate?: string | null;
   goalAmountCents: number;
@@ -321,11 +391,18 @@ export type CreateJarRequestCategory = typeof CreateJarRequestCategory[keyof typ
 export const CreateJarRequestCategory = {
   Vacation: 'Vacation',
   Cruise: 'Cruise',
+  MissionTrip: 'MissionTrip',
   Wedding: 'Wedding',
   Honeymoon: 'Honeymoon',
-  MissionTrip: 'MissionTrip',
   Reunion: 'Reunion',
   Celebration: 'Celebration',
+  HomeDownPayment: 'HomeDownPayment',
+  Vehicle: 'Vehicle',
+  LargePurchase: 'LargePurchase',
+  Education: 'Education',
+  EmergencyFund: 'EmergencyFund',
+  BusinessProject: 'BusinessProject',
+  FamilyGoal: 'FamilyGoal',
   Other: 'Other',
 } as const;
 
@@ -338,6 +415,8 @@ export interface CreateJarRequest {
   startDate?: string | null;
   endDate?: string | null;
   targetDate: string;
+  /** Optional. Omitted by older clients, in which case the jar is stored as `exact` — which is what every jar created before this field existed was implicitly asserting. The server re-normalises `targetDate` to match, so a coarse jar can never carry a day. */
+  targetDatePrecision?: TargetDatePrecision;
   /** Must be before targetDate and in the future */
   cutoffDate?: string | null;
   goalAmountCents: number;
@@ -353,6 +432,8 @@ export interface UpdateJarRequest {
   startDate?: string | null;
   endDate?: string | null;
   targetDate?: string;
+  /** Changing this re-normalises the stored `targetDate` to match, and changing `targetDate` re-normalises it to the precision already on record — so the pair can never drift into a stored day that no surface displays. */
+  targetDatePrecision?: TargetDatePrecision;
   cutoffDate?: string | null;
   goalAmountCents?: number;
   approvalThreshold?: number;
@@ -962,6 +1043,17 @@ export interface DripPaymentStatusResponse {
   /** Payment method type used for this quote. */
   paymentMethodCategory?: DripPaymentStatusResponsePaymentMethodCategory;
 }
+
+export type ListMyContributionsParams = {
+/**
+ * Rows per page. Defaults to 50, clamped to 200.
+ */
+limit?: number;
+/**
+ * Opaque cursor from a previous response's `pageInfo.nextCursor`. Pass it back verbatim; do not construct or parse one. A malformed cursor is rejected with 400 rather than silently restarting from the top.
+ */
+cursor?: string;
+};
 
 export type ListJarsParams = {
 status?: string;

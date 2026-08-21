@@ -233,27 +233,33 @@ describe("Agreement enforcement", () => {
     expect(schedRes.status).toBe(201);
   });
 
+  // NOTE: this version must differ from AGREEMENT_VERSION in lib/agreement.ts,
+  // which every new jar is already created with. It was literally "2.0" until
+  // 2.0 became the default, at which point posting it was rejected as a
+  // duplicate and the test proved nothing about re-acceptance.
+  const NEXT_VERSION = "2.1";
+
   it("creating a new agreement version invalidates previous acceptance", async () => {
-    // Organizer creates v2 agreement
+    // Organizer publishes a version later than the one the jar was created with
     const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
     const newAg = await request(app)
       .post(`${BASE}/jars/${jarId}/agreements`)
       .set("Authorization", `Bearer ${org.token}`)
       .send({
-        version: "2.0",
-        content: "Updated terms for version 2",
+        version: NEXT_VERSION,
+        content: "Updated terms for the next version",
         effectiveDate: tomorrow.toISOString().slice(0, 10),
       });
     expect(newAg.status).toBe(201);
-    expect(newAg.body.version).toBe("2.0");
+    expect(newAg.body.version).toBe(NEXT_VERSION);
 
-    // Check status — organizer has not yet accepted v2
+    // Check status — organizer has not yet accepted the new version
     const status = await request(app)
       .get(`${BASE}/jars/${jarId}/agreements/status`)
       .set("Authorization", `Bearer ${org.token}`);
     expect(status.status).toBe(200);
-    expect(status.body.accepted).toBe(false); // v2 not accepted
-    expect(status.body.version).toBe("2.0");
+    expect(status.body.accepted).toBe(false); // new version not accepted
+    expect(status.body.version).toBe(NEXT_VERSION);
   });
 
   it("duplicate agreement version is rejected with 409", async () => {
@@ -261,7 +267,7 @@ describe("Agreement enforcement", () => {
     const res = await request(app)
       .post(`${BASE}/jars/${jarId}/agreements`)
       .set("Authorization", `Bearer ${org.token}`)
-      .send({ version: "2.0", content: "Duplicate", effectiveDate: tomorrow.toISOString().slice(0, 10) });
+      .send({ version: NEXT_VERSION, content: "Duplicate", effectiveDate: tomorrow.toISOString().slice(0, 10) });
     expect(res.status).toBe(409);
   });
 

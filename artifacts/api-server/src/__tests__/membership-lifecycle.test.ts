@@ -36,7 +36,12 @@ async function createJar(token: string) {
     .set("Authorization", `Bearer ${token}`)
     .send({
       name: `Trip ${unique()}`,
-      category: "travel",
+      // Was the free-text value "travel". `POST /jars` now enforces the
+      // canonical category list, which is exactly the arbitrary-value case the
+      // contract exists to reject. 82 rows in the development database still
+      // carry "travel" and are still read back fine — see
+      // jar-category-contract.test.ts.
+      category: "Vacation",
       goalAmountCents: 100_000,
       targetDate: new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10),
     });

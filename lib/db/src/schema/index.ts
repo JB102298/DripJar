@@ -113,6 +113,22 @@ export const jars = pgTable("jars", {
   startDate: date("start_date"),
   endDate: date("end_date"),
   targetDate: date("target_date").notNull(),
+  /**
+   * How precisely the organizer actually knows `target_date`:
+   * 'exact' | 'monthYear' | 'year'.
+   *
+   * `target_date` remains a real `date` in every case — coarser precisions are
+   * normalised to the start of their period (the 1st of the month, or 1
+   * January) — so every existing comparison (`cutoff_date < target_date`,
+   * schedule maths, reminder windows) keeps working untouched. What this column
+   * governs is DISPLAY: "sometime in 2044" and "14 March 2044" are stored
+   * identically at year precision, and rendering the first as "January 1, 2044"
+   * invents a certainty the organizer never claimed.
+   *
+   * Existing rows backfill to 'exact', which is what every jar created before
+   * this column was effectively asserting.
+   */
+  targetDatePrecision: text("target_date_precision").notNull().default("exact"),
   // cutoffDate: organizer-set date when the Saving phase ends and the
   // Commitment phase begins. Must be before targetDate. The jar's derived
   // `phase` is "Commitment" when status is "Saving" and today >= cutoffDate.

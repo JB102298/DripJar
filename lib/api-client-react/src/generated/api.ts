@@ -57,10 +57,13 @@ import type {
   ListContributionsParams,
   ListJarActivityParams,
   ListJarsParams,
+  ListMyContributionsParams,
   ListNotificationsParams,
   LoginRequest,
   MessageResponse,
   Milestone,
+  MyContributionsResponse,
+  MyJarsResponse,
   Notification,
   Profile,
   RegisterRequest,
@@ -1348,6 +1351,168 @@ export const useUpdateProfile = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getUpdateProfileMutationOptions(options));
     }
+
+export const getListMyJarsUrl = () => {
+
+
+
+
+  return `/api/me/jars`
+}
+
+/**
+ * @summary Every jar the caller has joined, with their own contribution history in each
+ */
+export const listMyJars = async ( options?: Parameters<typeof customFetch>[1]): Promise<MyJarsResponse> => {
+
+  return customFetch<MyJarsResponse>(getListMyJarsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMyJarsQueryKey = () => {
+    return [
+    `/api/me/jars`
+    ] as const;
+    }
+
+
+export const getListMyJarsQueryOptions = <TData = Awaited<ReturnType<typeof listMyJars>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyJars>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMyJarsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMyJars>>> = ({ signal }) => listMyJars({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMyJars>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMyJarsQueryResult = NonNullable<Awaited<ReturnType<typeof listMyJars>>>
+export type ListMyJarsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Every jar the caller has joined, with their own contribution history in each
+ */
+
+export function useListMyJars<TData = Awaited<ReturnType<typeof listMyJars>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyJars>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMyJarsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListMyContributionsUrl = (params?: ListMyContributionsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/me/contributions?${stringifiedParams}` : `/api/me/contributions`
+}
+
+/**
+ * Keyset pagination ordered by (occurredAt DESC, ledger entry id DESC). Pass `pageInfo.nextCursor` back as `cursor` to fetch the next page; a null `nextCursor` means the end. Offset paging is deliberately not offered — new contributions arrive at the front of this ordering, so an offset would repeat rows the reader has already seen.
+ * @summary The caller's contributions, newest first, cursor-paginated
+ */
+export const listMyContributions = async (params?: ListMyContributionsParams, options?: Parameters<typeof customFetch>[1]): Promise<MyContributionsResponse> => {
+
+  return customFetch<MyContributionsResponse>(getListMyContributionsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMyContributionsQueryKey = (params?: ListMyContributionsParams,) => {
+    return [
+    `/api/me/contributions`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListMyContributionsQueryOptions = <TData = Awaited<ReturnType<typeof listMyContributions>>, TError = ErrorType<ErrorResponse>>(params?: ListMyContributionsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyContributions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMyContributionsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMyContributions>>> = ({ signal }) => listMyContributions(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMyContributions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMyContributionsQueryResult = NonNullable<Awaited<ReturnType<typeof listMyContributions>>>
+export type ListMyContributionsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary The caller's contributions, newest first, cursor-paginated
+ */
+
+export function useListMyContributions<TData = Awaited<ReturnType<typeof listMyContributions>>, TError = ErrorType<ErrorResponse>>(
+ params?: ListMyContributionsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyContributions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMyContributionsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetDashboardUrl = () => {
 

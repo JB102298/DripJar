@@ -6,7 +6,7 @@
  * and idempotent.
  *
  * Steps:
- *   1. Validate the local migration chain on disk (journal 0000→0023 + SQL files).
+ *   1. Validate the local migration chain on disk (journal 0000→0024 + SQL files).
  *   2. Create a clean temporary database.
  *   3. Provision it with `pnpm --filter @workspace/db run migrate`.
  *   4. Verify 33 base tables, all 8 seeded ledger accounts, and no duplicates.
@@ -35,8 +35,8 @@ const JOURNAL_PATH = path.join(DRIZZLE_DIR, "meta", "_journal.json");
 // ─── Expectations ─────────────────────────────────────────────────────────────
 
 /** Highest migration index in the current chain. */
-const LAST_MIGRATION_IDX = 23;
-/** 24 migrations: 0000 … 0023. */
+const LAST_MIGRATION_IDX = 24;
+/** 25 migrations: 0000 … 0024. */
 const EXPECTED_MIGRATION_COUNT = LAST_MIGRATION_IDX + 1;
 /** Base tables in `public` after the full chain (34 created, 1 dropped in 0015). */
 const EXPECTED_TABLE_COUNT = 33;
@@ -99,7 +99,7 @@ try {
   const entries = journal.entries ?? [];
 
   if (entries.length === EXPECTED_MIGRATION_COUNT) {
-    pass(`Journal registers ${EXPECTED_MIGRATION_COUNT} migrations (0000→0023)`);
+    pass(`Journal registers ${EXPECTED_MIGRATION_COUNT} migrations (0000→0024)`);
   } else {
     fail(
       `Journal migration count`,
@@ -119,6 +119,38 @@ try {
     } else {
       fail(`Chain step ${String(i).padStart(4, "0")} SQL file missing`, `${entry.tag}.sql`);
     }
+  }
+
+  // ── The newest migration must be able to reach an existing database ────────
+  //
+  // `drizzle-kit migrate` reads the highest `created_at` already recorded in a
+  // target database and applies only journal entries whose `when` exceeds it.
+  // A new migration timestamped below the journal's running maximum therefore
+  // applies cleanly to a fresh database and is SILENTLY SKIPPED on every
+  // existing one — the worst possible failure mode, because provisioning
+  // verification passes while production never gets the change.
+  //
+  // This chain already contains such a regression: entries 0010–0023 were
+  // timestamped about a year BELOW 0009, so `migrate` cannot apply them to a
+  // database that recorded 0009. Those tables reached existing databases by
+  // `drizzle-kit push` instead. The historical entries are deliberately not
+  // rewritten — databases that did apply them hold those `created_at` values,
+  // and raising them would re-run migrations that are not idempotent.
+  //
+  // What is enforced is the property that matters going forward: the NEWEST
+  // entry must sit above every earlier one.
+  const newest = entries.find((e) => e.idx === LAST_MIGRATION_IDX);
+  const priorMax = Math.max(...entries.filter((e) => e.idx !== LAST_MIGRATION_IDX).map((e) => e.when));
+  if (newest && newest.when > priorMax) {
+    pass(
+      `Newest migration timestamp is above every earlier entry`,
+      `${newest.when} > ${priorMax}`,
+    );
+  } else {
+    fail(
+      "Newest migration would be skipped on an existing database",
+      `when=${newest?.when} is not above the journal maximum ${priorMax}`,
+    );
   }
 
   // Guard against orphaned SQL files that the journal does not register — these
@@ -199,6 +231,60 @@ try {
     pass("refund_request_placeholders correctly dropped by migration 0015");
   } else {
     fail("refund_request_placeholders still present after full chain");
+  }
+
+  // ── Migration 0024: jars.target_date_precision ─────────────────────────────
+  //
+  // Checked explicitly rather than by table count, because this migration adds
+  // a column rather than a table — the table count alone would not notice if it
+  // silently failed to apply.
+  const precisionCol = await testClient.query(
+    `SELECT data_type, is_nullable, column_default
+       FROM information_schema.columns
+      WHERE table_schema='public' AND table_name='jars'
+        AND column_name='target_date_precision'`,
+  );
+  if (precisionCol.rows.length === 1) {
+    const col = precisionCol.rows[0];
+    pass("jars.target_date_precision exists (migration 0024)");
+    if (col.is_nullable === "NO") pass("jars.target_date_precision is NOT NULL");
+    else fail("jars.target_date_precision is nullable");
+    if ((col.column_default ?? "").includes("exact")) {
+      pass("jars.target_date_precision defaults to 'exact'");
+    } else {
+      fail("jars.target_date_precision default", `found ${col.column_default}`);
+    }
+  } else {
+    fail("jars.target_date_precision missing after full chain");
+  }
+
+  const precisionConstraint = await testClient.query(
+    `SELECT conname FROM pg_constraint WHERE conname = 'jars_target_date_precision_check'`,
+  );
+  if (precisionConstraint.rows.length === 1) {
+    pass("jars_target_date_precision_check constraint present");
+  } else {
+    fail("jars_target_date_precision_check constraint missing");
+  }
+
+  // The constraint must actually reject an out-of-model value, not merely exist.
+  try {
+    await testClient.query("BEGIN");
+    await testClient.query(
+      `INSERT INTO jars (organizer_id, name, slug, target_date, goal_amount_cents, target_date_precision)
+       VALUES ('00000000-0000-0000-0000-000000000000', 'x', 'x', '2030-01-01', 100, 'decade')`,
+    );
+    await testClient.query("ROLLBACK");
+    fail("target_date_precision CHECK did not reject an invalid value");
+  } catch (err) {
+    await testClient.query("ROLLBACK");
+    const message = err instanceof Error ? err.message : String(err);
+    // A foreign-key failure would also throw, so require the CHECK by name.
+    if (message.includes("jars_target_date_precision_check")) {
+      pass("target_date_precision CHECK rejects values outside the model");
+    } else {
+      fail("target_date_precision CHECK rejection", message.split("\n")[0]);
+    }
   }
 
   // ── Ledger accounts: all 8 present, exactly once each ──────────────────────
