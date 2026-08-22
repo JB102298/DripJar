@@ -17,7 +17,7 @@ import {
   notifications,
   invitations,
 } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { purgeSyntheticAccounts } from "../../artifacts/api-server/src/lib/owner-reset.js";
 import bcrypt from "bcryptjs";
 
 const PASSWORD = "password123";
@@ -44,21 +44,36 @@ function daysAgo(n: number): string {
 }
 
 // ─── Clear existing seed data ──────────────────────────────────────────────
+
+/** The accounts this seed owns, and the only ones its cleanup may remove. */
+export const SEED_EMAILS = [
+  "jordan@dripjar.dev",
+  "demo@dripjar.dev",
+  "caitlyn@dripjar.dev",
+  "mom@dripjar.dev",
+  "dad@dripjar.dev",
+  "tyler@dripjar.dev",
+] as const;
+
+/**
+ * Remove the previous seed run.
+ *
+ * This used to be `db.delete(users)` with the comment "cascade deletes will
+ * handle related records". They do not — `jars.organizer_id`,
+ * `jar_members.user_id`, `activity_events.user_id`, and
+ * `agreement_acceptances.user_id` are all NO ACTION, so a second `pnpm seed`
+ * against an already-seeded database raised a foreign-key violation. The seed
+ * was single-use and nobody noticed because it was only ever run on an empty
+ * database.
+ *
+ * It now delegates to `purgeSyntheticAccounts`, which walks the same ordered
+ * delete plan the owner reset uses. One delete order, derived from the live
+ * foreign-key graph, rather than two that can disagree. That helper carries the
+ * production, non-local-host, unknown-database, and allowlist guards, so the
+ * seed inherits them rather than reimplementing them.
+ */
 async function clearSeedData() {
-  const seedEmails = [
-    "jordan@dripjar.dev",
-    "caitlyn@dripjar.dev",
-    "mom@dripjar.dev",
-    "dad@dripjar.dev",
-    "tyler@dripjar.dev",
-  ];
-  for (const email of seedEmails) {
-    const [u] = await db.select().from(users).where(eq(users.email, email)).limit(1);
-    if (u) {
-      // Cascade deletes will handle related records
-      await db.delete(users).where(eq(users.id, u.id));
-    }
-  }
+  await purgeSyntheticAccounts(SEED_EMAILS);
   console.log("Cleared existing seed data");
 }
 
@@ -104,10 +119,29 @@ async function main() {
   await clearSeedData();
 
   // ── Create Users ────────────────────────────────────────────────────────
+  //
+  // OWNER vs DEMO.
+  //
+  // `jordan@dripjar.dev` is the owner QA account. It is deliberately created
+  // BARE — verified, with a profile, and owning nothing. Owner QA is about what
+  // a brand-new account sees, and that walkthrough is impossible if signing in
+  // lands on somebody else's half-funded holiday.
+  //
+  // The rich demonstration fixtures below (Hawaii 2027 and its five members,
+  // milestones, and contributions) hang off `demo@dripjar.dev` instead, so they
+  // remain available for development and screenshots without being in the
+  // owner's way. Nothing in the test suite depends on either account's
+  // persisted rows — every test builds the data it asserts on.
   const { user: jordan } = await createUser({
     email: "jordan@dripjar.dev",
     firstName: "Jordan",
     lastName: "Barrett",
+  });
+  const { user: demo } = await createUser({
+    email: "demo@dripjar.dev",
+    firstName: "Demo",
+    lastName: "Organizer",
+    displayName: "Demo Organizer",
   });
   const { user: caitlyn } = await createUser({
     email: "caitlyn@dripjar.dev",
@@ -133,13 +167,13 @@ async function main() {
     displayName: "Brother",
   });
 
-  console.log("✓ Created 5 users");
+  console.log("✓ Created 6 users (owner jordan@dripjar.dev intentionally has no jars)");
 
   // ── Create Hawaii 2027 Jar ───────────────────────────────────────────────
   const [hawaiiJar] = await db
     .insert(jars)
     .values({
-      organizerId: jordan.id,
+      organizerId: demo.id,
       name: "Hawaii 2027",
       slug: "hawaii-2027-demo",
       category: "Vacation",
@@ -163,7 +197,7 @@ async function main() {
 
   // ── Create Jar Members ───────────────────────────────────────────────────
   const memberTargets = [
-    { user: jordan, role: "organizer" as const, targetCents: 220_000 }, // $2,200
+    { user: demo, role: "organizer" as const, targetCents: 220_000 },   // $2,200
     { user: caitlyn, role: "member" as const, targetCents: 200_000 },  // $2,000
     { user: mary, role: "member" as const, targetCents: 180_000 },     // $1,800
     { user: robert, role: "member" as const, targetCents: 220_000 },   // $2,200
@@ -187,7 +221,7 @@ async function main() {
     memberRecords.push(member);
   }
 
-  const [jordanMember, caitlynMember, maryMember, robertMember, tylerMember] = memberRecords as [
+  const [demoMember, caitlynMember, maryMember, robertMember, tylerMember] = memberRecords as [
     typeof jarMembers.$inferSelect,
     typeof jarMembers.$inferSelect,
     typeof jarMembers.$inferSelect,
@@ -236,7 +270,7 @@ async function main() {
   // ── Create Contributions ─────────────────────────────────────────────────
   // Jordan: $1,800 total ($220,000 target = 81.8%)
   // Flights: $500, Lodging: $504, Activities: $200, Food: $140, Emergency: $200, Unallocated: $256
-  const jordanContribs = [
+  const demoContribs = [
     { amountCents: 50_000, daysAgoN: 55, milestoneId: flightsMilestone.id, note: "First payment toward flights!" },
     { amountCents: 50_400, daysAgoN: 45, milestoneId: lodgingMilestone.id },
     { amountCents: 36_000, daysAgoN: 35, milestoneId: null },
@@ -297,7 +331,7 @@ async function main() {
     }
   }
 
-  await insertContribs(jordanMember.id, jordanContribs);
+  await insertContribs(demoMember.id, demoContribs);
   await insertContribs(caitlynMember.id, caitlynContribs);
   await insertContribs(maryMember.id, maryContribs);
   await insertContribs(robertMember.id, robertContribs);
@@ -319,7 +353,7 @@ async function main() {
   if (!agreement) throw new Error("Failed to create agreement");
 
   // All members accept the agreement
-  for (const userId of [jordan.id, caitlyn.id, mary.id, robert.id, tyler.id]) {
+  for (const userId of [demo.id, caitlyn.id, mary.id, robert.id, tyler.id]) {
     await db.insert(agreementAcceptances).values({
       agreementId: agreement.id,
       userId,
@@ -331,24 +365,24 @@ async function main() {
 
   // ── Create Activity Events ───────────────────────────────────────────────
   const activityItems = [
-    { userId: jordan.id, eventType: "jar_created", description: "Hawaii 2027 was created", daysAgoN: 62, amountCents: null },
+    { userId: demo.id, eventType: "jar_created", description: "Hawaii 2027 was created", daysAgoN: 62, amountCents: null },
     { userId: robert.id, eventType: "contribution_added", description: "Robert added $700.00 toward Flights", daysAgoN: 58, amountCents: 70_000 },
-    { userId: jordan.id, eventType: "contribution_added", description: "Jordan added $500.00 toward Flights", daysAgoN: 55, amountCents: 50_000 },
+    { userId: demo.id, eventType: "contribution_added", description: "Demo added $500.00 toward Flights", daysAgoN: 55, amountCents: 50_000 },
     { userId: caitlyn.id, eventType: "contribution_added", description: "Caitlyn added $400.00 toward Flights", daysAgoN: 52, amountCents: 40_000 },
     { userId: mary.id, eventType: "contribution_added", description: "Mary added $300.00 toward Flights", daysAgoN: 50, amountCents: 30_000 },
     { userId: null, eventType: "milestone_funded", description: "Flights are fully funded! ($2,500)", daysAgoN: 48, amountCents: 250_000 },
     { userId: caitlyn.id, eventType: "contribution_added", description: "Caitlyn added $504.00 toward Lodging", daysAgoN: 42, amountCents: 50_400 },
-    { userId: jordan.id, eventType: "contribution_added", description: "Jordan added $504.00 toward Lodging", daysAgoN: 45, amountCents: 50_400 },
+    { userId: demo.id, eventType: "contribution_added", description: "Demo added $504.00 toward Lodging", daysAgoN: 45, amountCents: 50_400 },
     { userId: robert.id, eventType: "contribution_added", description: "Robert added $840.00 toward Lodging", daysAgoN: 44, amountCents: 84_000 },
     { userId: mary.id, eventType: "contribution_added", description: "Mary added $420.00 toward Lodging", daysAgoN: 38, amountCents: 42_000 },
     { userId: tyler.id, eventType: "member_joined", description: "Tyler joined the jar", daysAgoN: 35, amountCents: null },
     { userId: tyler.id, eventType: "contribution_added", description: "Tyler added $600.00 toward Flights", daysAgoN: 30, amountCents: 60_000 },
-    { userId: jordan.id, eventType: "contribution_added", description: "Jordan added $200.00 toward Activities", daysAgoN: 25, amountCents: 20_000 },
+    { userId: demo.id, eventType: "contribution_added", description: "Demo added $200.00 toward Activities", daysAgoN: 25, amountCents: 20_000 },
     { userId: mary.id, eventType: "contribution_added", description: "Mary added $480.00", daysAgoN: 20, amountCents: 48_000 },
-    { userId: jordan.id, eventType: "contribution_added", description: "Jordan added $140.00 toward Food", daysAgoN: 15, amountCents: 14_000 },
+    { userId: demo.id, eventType: "contribution_added", description: "Demo added $140.00 toward Food", daysAgoN: 15, amountCents: 14_000 },
     { userId: robert.id, eventType: "contribution_added", description: "Robert added $80.00", daysAgoN: 10, amountCents: 8_000 },
     { userId: tyler.id, eventType: "contribution_added", description: "Tyler added $300.00", daysAgoN: 7, amountCents: 30_000 },
-    { userId: jordan.id, eventType: "contribution_added", description: "Jordan added $200.00 toward Emergency Buffer", daysAgoN: 5, amountCents: 20_000 },
+    { userId: demo.id, eventType: "contribution_added", description: "Demo added $200.00 toward Emergency Buffer", daysAgoN: 5, amountCents: 20_000 },
     { userId: caitlyn.id, eventType: "contribution_added", description: "Caitlyn added $276.00", daysAgoN: 3, amountCents: 27_600 },
   ];
 
@@ -410,7 +444,7 @@ async function main() {
     const createdAt = new Date(now);
     createdAt.setDate(createdAt.getDate() - item.daysAgoN);
     await db.insert(notifications).values({
-      userId: jordan.id,
+      userId: demo.id,
       type: item.type,
       title: item.title,
       message: item.message,
@@ -424,8 +458,11 @@ async function main() {
 
   // ── Summary ──────────────────────────────────────────────────────────────
   console.log("\n🎉 Seed complete!\n");
-  console.log("Demo account:");
+  console.log("Owner QA account — signs in to an EMPTY product state:");
   console.log("  Email:    jordan@dripjar.dev");
+  console.log("  Password: password123\n");
+  console.log("Demo account — owns Hawaii 2027 and all demonstration fixtures:");
+  console.log("  Email:    demo@dripjar.dev");
   console.log("  Password: password123\n");
   console.log("Other accounts (same password):");
   console.log("  caitlyn@dripjar.dev");

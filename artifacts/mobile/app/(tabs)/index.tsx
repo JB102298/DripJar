@@ -90,9 +90,9 @@ export default function HomeScreen() {
         <EmptyState
           icon="archive"
           title="You don't have any Jars yet"
-          description="Create your first goal and start saving together."
+          description="Set a goal, invite the people saving with you, and watch it fill up."
           action={{
-            label: 'Create a Jar',
+            label: 'Create Your First Jar',
             onPress: () => router.push('/create-jar'),
           }}
         />

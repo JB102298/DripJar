@@ -6,6 +6,7 @@
   "scripts": {
     "hello": "tsx src/hello.ts",
     "seed": "tsx src/seed.ts",
+    "reset-owner": "tsx src/reset-owner.ts",
     "verify-migration": "node ./run-fresh-migration.mjs",
     "generate-pdf": "tsx src/generate-codebase-pdf.ts"
   },
