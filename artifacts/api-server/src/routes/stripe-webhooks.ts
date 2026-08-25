@@ -38,6 +38,7 @@ import {
   refundRequests,
   autoDripRuns,
   autoDripAuthorizations,
+  jars,
 } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { getStripeClient } from "../lib/stripe.js";
@@ -49,6 +50,8 @@ import {
 } from "../lib/ledger.js";
 import { mapStripeRefundStatus, recomputeRefundRequestStatus, TERMINAL_ALLOCATION_STATES } from "../lib/refund-helpers.js";
 import { notifyAutoDripSucceeded } from "./autodrip.js";
+import { notifyContributionSettled } from "../lib/notification-financial.js";
+import { emitNotificationOnce, notificationEventKey } from "../lib/notification-events.js";
 import { logger } from "../lib/logger.js";
 import type Stripe from "stripe";
 
@@ -346,6 +349,25 @@ async function handlePaymentIntentSucceeded(
       .where(eq(stripeWebhookEvents.id, eventRowId));
   });
 
+  // Canonical financial notifications — contribution, then any progress
+  // threshold or milestone the settlement completed.
+  //
+  // Deliberately AFTER the transaction commits, and deliberately awaited.
+  //
+  // After: a notification failure must never roll back a ledger posting, and
+  // the notification layer must read the committed row, not the uncommitted
+  // one. Awaited: the handler marks the Stripe event 'processed' inside the
+  // transaction above, so an un-awaited emission could still be running when
+  // the process exits after responding.
+  //
+  // Called unconditionally rather than only on the branch that did the
+  // posting. Every emission is keyed on the financial transaction id, so a
+  // delivery that lost the FOR UPDATE race re-derives the same keys and
+  // creates nothing — while a delivery that WON the race but crashed before
+  // notifying is recovered by the next redelivery. Gating on "did I post?"
+  // would give up that recovery for no benefit.
+  await notifyContributionSettled(ft.id);
+
   // Attempt to reconcile actual Stripe fee (best-effort; null on failure)
   void reconcileActualFee(ft.id, pi).catch((err: unknown) => {
     logger.warn(
@@ -379,8 +401,19 @@ async function handleAutoDripSucceeded(
     return;
   }
 
-  // Idempotency: if already succeeded, acknowledge
+  // Idempotency: if already succeeded, acknowledge.
+  //
+  // Still runs the notification path before returning. The run is already
+  // settled, so nothing financial can change; what this recovers is the
+  // window where a previous delivery committed the ledger posting and then
+  // died before notifying. Without this the early return would make the
+  // AutoDrip path at-most-once while the card path is exactly-once, for no
+  // reason other than where the guard sits. Every emission is keyed, so the
+  // ordinary case — a redelivery of an already-notified run — writes nothing.
   if (run.status === "succeeded") {
+    if (run.financialTransactionId) {
+      await notifyContributionSettled(run.financialTransactionId);
+    }
     await db
       .update(stripeWebhookEvents)
       .set({ processingStatus: "processed", processedAt: new Date() })
@@ -404,6 +437,10 @@ async function handleAutoDripSucceeded(
 
   const now = new Date();
   type DbOrTx = typeof db;
+
+  // Set by whichever delivery actually posts. Read after the transaction so
+  // the notification layer can be pointed at the canonical FT.
+  let postedFinancialTransactionId: string | null = null;
 
   await db.transaction(async (tx) => {
     const txDb = tx as unknown as DbOrTx;
@@ -436,6 +473,8 @@ async function handleAutoDripSucceeded(
       providerTransactionId: pi.id,
       providerStatus: "succeeded",
     });
+
+    postedFinancialTransactionId = financialTransactionId;
 
     // Insert contribution row
     const today = now.toISOString().slice(0, 10);
@@ -473,13 +512,58 @@ async function handleAutoDripSucceeded(
       .where(eq(stripeWebhookEvents.id, eventRowId));
   });
 
-  // Send success notification (best-effort, outside transaction)
-  void notifyAutoDripSucceeded({
-    userId: auth.userId,
-    jarId: auth.jarId,
-    principalCents: run.principalCents,
-    frequency: auth.frequency,
-  });
+  // ─── Notifications ────────────────────────────────────────────────────────
+  //
+  // This block used to run unconditionally, including when the FOR UPDATE
+  // guard above found the run already 'succeeded' and returned without doing
+  // anything. Twenty concurrent deliveries of one AutoDrip success therefore
+  // produced twenty "AutoDrip Processed" notifications and twenty emails.
+  //
+  // Two independent fixes, because they protect against different failures:
+  //
+  //   postedFinancialTransactionId  suppresses the losing concurrent delivery
+  //                                 before it reaches the email path, which
+  //                                 has no event identity of its own.
+  //   emitNotificationOnce          makes the in-app notification exactly-once
+  //                                 durably, so a redelivery arriving minutes
+  //                                 later — a different process, with its own
+  //                                 empty locals — also creates nothing.
+  const settledFtId = postedFinancialTransactionId as string | null;
+  if (settledFtId !== null) {
+    // AutoDrip principal is jar principal like any other. The contributor and
+    // the other active members hear about it through the same canonical path
+    // as a card drip, including any threshold or milestone it completes.
+    await notifyContributionSettled(settledFtId);
+
+    // Plus the AutoDrip-specific confirmation, to the authorizing member only.
+    const [jarRow] = await db
+      .select({ name: jars.name })
+      .from(jars)
+      .where(eq(jars.id, auth.jarId))
+      .limit(1);
+
+    if (jarRow) {
+      await emitNotificationOnce({
+        eventKey: notificationEventKey.autoDripSucceeded(run.id),
+        eventType: "autodrip_succeeded",
+        userId: auth.userId,
+        jarId: auth.jarId,
+        type: "autodrip_succeeded",
+        title: "AutoDrip Processed",
+        message: `Your automatic Drip to ${jarRow.name} was processed successfully.`,
+      });
+    }
+
+    // Email channel, unchanged in content and now guarded by the same
+    // condition. Left fire-and-forget: it is a separate channel and must not
+    // delay the webhook response.
+    void notifyAutoDripSucceeded({
+      userId: auth.userId,
+      jarId: auth.jarId,
+      principalCents: run.principalCents,
+      frequency: auth.frequency,
+    });
+  }
 }
 
 // ─── AutoDrip failed handler ──────────────────────────────────────────────────
@@ -531,18 +615,30 @@ async function handleAutoDripFailed(
       .where(eq(autoDripAuthorizations.id, auth.id));
 
     // Notify (best-effort)
+    //
+    // Keyed on the RUN, not the authorization. A redelivery of this run's
+    // failure is one event; a later run failing is a new event the member must
+    // see. The message stays generic on purpose — `failureMessage` is a raw
+    // Stripe `last_payment_error.message` and must not reach a customer.
     if (auth) {
       void (async () => {
         try {
-          const { users, jars, profiles } = await import("@workspace/db");
+          const { users, jars: jarsTable, profiles } = await import("@workspace/db");
           const [userRow] = await db.select({ email: users.email }).from(users).where(eq(users.id, auth.userId));
           const [profileRow] = await db.select({ displayName: profiles.displayName }).from(profiles).where(eq(profiles.userId, auth.userId));
-          const [jarRow] = await db.select({ name: jars.name }).from(jars).where(eq(jars.id, auth.jarId));
+          const [jarRow] = await db.select({ name: jarsTable.name }).from(jarsTable).where(eq(jarsTable.id, auth.jarId));
           if (userRow && jarRow) {
             const { sendAutoDripNeedsAttentionEmail } = await import("../lib/autodrip-email.js");
-            const { createNotification } = await import("../lib/notifications.js");
             void sendAutoDripNeedsAttentionEmail({ toEmail: userRow.email, displayName: profileRow?.displayName ?? userRow.email, jarName: jarRow.name, jarId: auth.jarId, reason: failureMessage });
-            void createNotification({ userId: auth.userId, type: "autodrip_needs_attention", title: "AutoDrip Needs Attention", message: `Your AutoDrip to ${jarRow.name} failed. Tap to fix.`, relatedJarId: auth.jarId });
+            await emitNotificationOnce({
+              eventKey: notificationEventKey.autoDripNeedsAttention(run.id),
+              eventType: "autodrip_needs_attention",
+              userId: auth.userId,
+              jarId: auth.jarId,
+              type: "autodrip_needs_attention",
+              title: "AutoDrip Needs Attention",
+              message: `Your AutoDrip to ${jarRow.name} could not be processed. Tap to fix.`,
+            });
           }
         } catch (err) { logger.warn({ err: { message: (err as Error).message } }, "Failed to send autodrip failure notification"); }
       })();

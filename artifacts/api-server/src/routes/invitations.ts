@@ -6,6 +6,7 @@ import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
 import { resolveDisplayName } from "../lib/display-name.js";
 import { logActivity } from "../lib/activity.js";
 import { createNotification } from "../lib/notifications.js";
+import { emitNotificationOnce, notificationEventKey } from "../lib/notification-events.js";
 import crypto from "node:crypto";
 import { sendInvitationEmail } from "../lib/email.js";
 import { invitationLimiter } from "../lib/rate-limit.js";
@@ -83,15 +84,22 @@ router.post("/jars/:jarId/invitations", requireAuth, invitationLimiter, async (r
     description: `Invitation sent to ${email}`,
   });
 
-  // If the invited email belongs to an existing user, notify them
+  // If the invited email belongs to an existing user, notify them.
+  //
+  // Keyed on the invitation row. A pending invitation already 409s above, so
+  // the duplicate this closes is the re-invite: decline or expire, invite
+  // again, and the invitee previously accumulated one notification per round.
+  // A genuinely new invitation is a new row, so it still notifies.
   const invitedUser = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
   if (invitedUser[0]) {
-    await createNotification({
+    await emitNotificationOnce({
+      eventKey: notificationEventKey.invitationReceived(invitation.id, invitedUser[0].id),
+      eventType: "invitation_received",
       userId: invitedUser[0].id,
+      jarId,
       type: "invitation_received",
       title: `You're invited to ${jar[0].name}!`,
       message: `Join the ${jar[0].name} savings jar and start saving together.`,
-      relatedJarId: jarId,
     });
   }
 

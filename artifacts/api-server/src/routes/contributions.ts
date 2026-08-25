@@ -7,7 +7,7 @@ import { getJarSavedPrincipalCents } from "../lib/financial-balance.js";
 import { resolveDisplayName } from "../lib/display-name.js";
 import { logActivity } from "../lib/activity.js";
 import { lifecycleAllowsNewContribution, contributionLifecycleMessage } from "../lib/jar-status.js";
-import { createNotification, notifyAllMembers } from "../lib/notifications.js";
+import { notifyJarProgressThresholds } from "../lib/notification-financial.js";
 import { contributionLimiter } from "../lib/rate-limit.js";
 import { enforceAgreement } from "../lib/agreement-check.js";
 
@@ -163,30 +163,36 @@ router.post("/jars/:jarId/contributions", requireAuth, contributionLimiter, asyn
 
   if (totalSaved >= jar[0].goalAmountCents) {
     await db.update(jars).set({ status: "FullyFunded", updatedAt: new Date() }).where(eq(jars.id, jarId));
-    const allMembers = await db.select({ userId: jarMembers.userId }).from(jarMembers)
-      .where(and(eq(jarMembers.jarId, jarId), eq(jarMembers.status, "active")));
-    await notifyAllMembers({
-      jarId,
-      memberUserIds: allMembers.map((m) => m.userId),
-      type: "goal_fully_funded",
-      title: `${jar[0].name} is fully funded!`,
-      message: "Congratulations! Your group has reached the savings goal.",
-    });
+
+    // Routed through the canonical threshold emitter rather than a direct
+    // broadcast. The figure was already canonical, but the announcement was
+    // not idempotent: every subsequent POST to this route re-entered this
+    // branch while `saved >= goal` and told the whole jar again.
+    await notifyJarProgressThresholds(jarId);
   }
 
-  // Notify jar members
-  const allMembers = await db.select({ userId: jarMembers.userId }).from(jarMembers)
-    .where(and(eq(jarMembers.jarId, jarId), eq(jarMembers.status, "active")));
+  // ─── NO CONTRIBUTION NOTIFICATION IS SENT FROM THIS ROUTE ──────────────────
+  //
+  // This route writes `status:'simulated'` — Test Mode principal. It posts
+  // nothing to the ledger, and `getJarSavedPrincipalCents` excludes it by
+  // design, so the money it records does not exist in canonical accounting.
+  //
+  // It nevertheless used to broadcast to every other member:
+  //
+  //   `${resolveDisplayName(prof[0])} added $${(amountCents / 100)...} to ${jar.name}`
+  //
+  // built from `req.body.amountCents`. Three separate violations in one line:
+  // a settled-contribution notification for an unsettled row, an amount taken
+  // from a mutable client payload, and other members told that principal had
+  // arrived when the jar's canonical balance had not moved. A jar could
+  // therefore accumulate "X added $Y" notifications while its saved principal
+  // stayed at $0 — the shape of the QA contradiction, reproducible on any jar.
+  //
+  // Settled-contribution notifications now have exactly one origin: a posted
+  // ledger transaction, via lib/notification-financial.ts. Test Mode money
+  // announces nothing. If Test Mode ever needs its own visibly-labelled
+  // notification, that is a new product decision, not a restoration of this.
   const prof = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
-
-  await notifyAllMembers({
-    jarId,
-    memberUserIds: allMembers.map((m) => m.userId),
-    type: "contribution_recorded",
-    title: "New contribution!",
-    message: `${resolveDisplayName(prof[0])} added $${(amountCents / 100).toFixed(2)} to ${jar[0].name}.`,
-    excludeUserId: userId,
-  });
 
   res.status(201).json({
     id: contribution.id,

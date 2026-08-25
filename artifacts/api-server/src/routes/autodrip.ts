@@ -50,6 +50,7 @@ import { computeGrossedUpProviderFee, type PaymentMethodType } from "../lib/prov
 import { getStripeClient } from "../lib/stripe.js";
 import { logActivity } from "../lib/activity.js";
 import { createNotification } from "../lib/notifications.js";
+import { emitNotificationOnce, notificationEventKey } from "../lib/notification-events.js";
 import { sendAutoDripSucceededEmail, sendAutoDripNeedsAttentionEmail } from "../lib/autodrip-email.js";
 import { logger } from "../lib/logger.js";
 import { lifecycleAllowsNewContribution, contributionLifecycleMessage } from "../lib/jar-status.js";
@@ -992,7 +993,7 @@ async function processOneAuthorization(
         })
         .where(eq(autoDripAuthorizations.id, authId));
       // Email notification (best-effort, outside tx commit)
-      void notifyAutoDripNeedsAttention(auth, failMsg);
+      void notifyAutoDripNeedsAttention(auth, failMsg, runId);
       results.errors++;
       return;
     }
@@ -1032,7 +1033,7 @@ async function processOneAuthorization(
           updatedAt: now,
         })
         .where(eq(autoDripAuthorizations.id, authId));
-      void notifyAutoDripNeedsAttention(auth, "Payment requires additional authentication");
+      void notifyAutoDripNeedsAttention(auth, "Payment requires additional authentication", runId);
     }
 
     results.processed++;
@@ -1042,9 +1043,23 @@ async function processOneAuthorization(
 
 // ─── Post-processor notification helpers ─────────────────────────────────────
 
+/**
+ * AutoDrip needs-attention, on both channels.
+ *
+ * `autoDripRunId` gives the in-app notification a durable identity. Without
+ * it, the processor's two failure branches and the webhook's failure handler
+ * could each announce the same run's failure independently — three rows for
+ * one event. Keyed on the run, a redelivery or a retry is silent while a
+ * genuinely later failure still notifies.
+ *
+ * `reason` reaches the EMAIL only. It carries raw provider text
+ * (`last_payment_error.message`, Stripe SDK error strings) and must never
+ * appear in a customer-visible in-app message.
+ */
 export async function notifyAutoDripNeedsAttention(
   auth: typeof autoDripAuthorizations.$inferSelect,
   reason: string,
+  autoDripRunId?: string,
 ) {
   try {
     const [profile] = await db
@@ -1070,18 +1085,44 @@ export async function notifyAutoDripNeedsAttention(
       reason,
     });
 
-    void createNotification({
-      userId: auth.userId,
-      type: "autodrip_needs_attention",
-      title: "AutoDrip Needs Attention",
-      message: `Your AutoDrip to ${jarRow.name} encountered a problem and has been paused. Tap to fix.`,
-      relatedJarId: auth.jarId,
-    });
+    const message = `Your AutoDrip to ${jarRow.name} encountered a problem and has been paused. Tap to fix.`;
+
+    if (autoDripRunId) {
+      await emitNotificationOnce({
+        eventKey: notificationEventKey.autoDripNeedsAttention(autoDripRunId),
+        eventType: "autodrip_needs_attention",
+        userId: auth.userId,
+        jarId: auth.jarId,
+        type: "autodrip_needs_attention",
+        title: "AutoDrip Needs Attention",
+        message,
+      });
+    } else {
+      // No run context — an authorization-level problem with no repeating
+      // trigger behind it. Falls back to the unkeyed insert rather than
+      // inventing an identity that a retry could not reproduce.
+      void createNotification({
+        userId: auth.userId,
+        type: "autodrip_needs_attention",
+        title: "AutoDrip Needs Attention",
+        message,
+        relatedJarId: auth.jarId,
+      });
+    }
   } catch (err) {
     logger.warn({ err: { message: (err as Error).message } }, "Failed to send AutoDrip needs-attention notification");
   }
 }
 
+/**
+ * AutoDrip success — EMAIL ONLY.
+ *
+ * The in-app notification moved to the webhook handler, where it is emitted
+ * through `emitNotificationOnce` keyed on the AutoDrip run. Leaving an
+ * unkeyed insert here as well would have reintroduced the duplicate this
+ * phase removed: the webhook already emits the row, and this function is
+ * called from that same code path.
+ */
 export async function notifyAutoDripSucceeded(
   auth: { userId: string; jarId: string; principalCents: number; frequency: string },
 ) {
@@ -1108,14 +1149,6 @@ export async function notifyAutoDripSucceeded(
       jarId: auth.jarId,
       principalCents: auth.principalCents,
       frequency: auth.frequency,
-    });
-
-    void createNotification({
-      userId: auth.userId,
-      type: "autodrip_succeeded",
-      title: "AutoDrip Processed",
-      message: `Your automatic Drip to ${jarRow.name} was processed successfully.`,
-      relatedJarId: auth.jarId,
     });
   } catch (err) {
     logger.warn({ err: { message: (err as Error).message } }, "Failed to send AutoDrip succeeded notification");
