@@ -14,7 +14,7 @@ import { describe, it, expect } from "vitest";
 import {
   ACTIVE_JAR_STATUSES,
   COMPLETED_JAR_STATUSES,
-  ARCHIVED_JAR_STATUSES,
+  CANCELLED_JAR_STATUSES,
   JAR_TABS,
   statusParamForTab,
   pendingInvitations,
@@ -53,7 +53,7 @@ describe("the tabs partition the status space", () => {
   const jarBackedStatuses = [
     ...ACTIVE_JAR_STATUSES,
     ...COMPLETED_JAR_STATUSES,
-    ...ARCHIVED_JAR_STATUSES,
+    ...CANCELLED_JAR_STATUSES,
   ];
 
   it("assigns every generated JarStatus to exactly one tab", () => {
@@ -83,7 +83,9 @@ describe("statusParamForTab", () => {
 
   it("maps the terminal tabs to their single status", () => {
     expect(statusParamForTab("Completed")).toBe("Completed");
-    expect(statusParamForTab("Archived")).toBe("Cancelled");
+    // The tab is named for the status it holds. There is no archive concept in
+    // the product, so there is no "Archived" tab to map.
+    expect(statusParamForTab("Cancelled")).toBe("Cancelled");
   });
 
   it("returns undefined for Invited — it is not backed by GET /jars", () => {

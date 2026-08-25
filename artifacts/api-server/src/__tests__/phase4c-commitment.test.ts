@@ -142,7 +142,7 @@ describe("Phase 4C Commitment — PART A: Phase gate", () => {
       .post(`${BASE}/jars/${jarId}/commitment/preview`)
       .set("Authorization", `Bearer ${token}`);
     expect(res.status).toBe(422);
-    expect(res.body.error).toBe("PhaseGate");
+    expect(res.body.error).toBe("JarLifecycle");
     expect(res.body.phase).toBe("Saving");
   });
 
@@ -152,7 +152,7 @@ describe("Phase 4C Commitment — PART A: Phase gate", () => {
       .post(`${BASE}/jars/${jarId}/commitment/preview`)
       .set("Authorization", `Bearer ${token}`);
     expect(res.status).toBe(422);
-    expect(res.body.error).toBe("PhaseGate");
+    expect(res.body.error).toBe("JarLifecycle");
   });
 
   it("proceeds to next gate when cutoffDate <= today UTC", async () => {

@@ -14,6 +14,23 @@ export interface ErrorResponse {
   message?: string;
 }
 
+export type JarLifecycleErrorError = typeof JarLifecycleErrorError[keyof typeof JarLifecycleErrorError];
+
+
+export const JarLifecycleErrorError = {
+  JarLifecycle: 'JarLifecycle',
+} as const;
+
+/**
+ * Returned when a jar's lifecycle status forbids the requested action. Shared by every money-in route (contributions, payment-intent creation, finance quote, AutoDrip authorization) and by fund-commitment confirmation. The gate is an allowlist, so terminal statuses (Cancelled, Completed) and any unrecognised status are refused.
+ * This is only the lifecycle half of authorization — authentication, membership, agreement acceptance, payment readiness, amount, idempotency and rate-limit checks are applied independently and may refuse a request that passes this gate.
+ */
+export interface JarLifecycleError {
+  error: JarLifecycleErrorError;
+  /** Human-readable reason naming the offending jar status. */
+  message: string;
+}
+
 export interface MessageResponse {
   message: string;
 }

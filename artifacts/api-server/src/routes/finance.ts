@@ -38,6 +38,7 @@ import {
   getFinancialTransactionDetail,
 } from "../lib/financial-balance.js";
 import { computeGrossedUpProviderFee, type PaymentMethodType } from "../lib/provider-fees.js";
+import { lifecycleAllowsNewContribution, contributionLifecycleMessage } from "../lib/jar-status.js";
 
 const router = Router();
 
@@ -136,12 +137,23 @@ router.post("/finance/quote", requireAuth, async (req, res) => {
 
     // Verify jar exists
     const [jar] = await db
-      .select({ id: jars.id })
+      .select({ id: jars.id, status: jars.status })
       .from(jars)
       .where(eq(jars.id, jarId));
 
     if (!jar) {
       res.status(404).json({ error: "NotFound", message: "Jar not found" });
+      return;
+    }
+
+    // Lifecycle gate — lib/jar-status.ts. A quote is the first step of putting
+    // real money into a jar, so it must refuse a terminal or unrecognised jar
+    // rather than leaving that check to whatever runs next.
+    if (!lifecycleAllowsNewContribution(jar.status)) {
+      res.status(422).json({
+        error: "JarLifecycle",
+        message: contributionLifecycleMessage(jar.status),
+      });
       return;
     }
 

@@ -66,6 +66,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: >-
+            The jar's lifecycle does not permit new contributions, so no quote
+            is issued. Only Saving and CommitmentPending accept them.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JarLifecycleError"
 
   # DRIPS — Stripe test-mode payment flow (Phase 4B)
   /jars/{jarId}/drips/payment-intent:
@@ -121,6 +129,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: >-
+            The jar's lifecycle does not permit new contributions, so no
+            PaymentIntent is created. Only Saving and CommitmentPending accept
+            them.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JarLifecycleError"
         "409":
           description: Quote already consumed (succeeded/failed/cancelled)
           content:
@@ -959,6 +976,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Contribution"
+        "422":
+          description: >-
+            The jar's lifecycle does not permit new contributions. Only Saving
+            and CommitmentPending accept them.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JarLifecycleError"
 
   /jars/{jarId}/contributions/{contributionId}/reverse:
     post:
@@ -1430,6 +1455,28 @@ components:
         message:
           type: string
       required: [error]
+
+    JarLifecycleError:
+      type: object
+      description: >-
+        Returned when a jar's lifecycle status forbids the requested action.
+        Shared by every money-in route (contributions, payment-intent creation,
+        finance quote, AutoDrip authorization) and by fund-commitment
+        confirmation. The gate is an allowlist, so terminal statuses
+        (Cancelled, Completed) and any unrecognised status are refused.
+
+        This is only the lifecycle half of authorization — authentication,
+        membership, agreement acceptance, payment readiness, amount,
+        idempotency and rate-limit checks are applied independently and may
+        refuse a request that passes this gate.
+      properties:
+        error:
+          type: string
+          enum: [JarLifecycle]
+        message:
+          type: string
+          description: Human-readable reason naming the offending jar status.
+      required: [error, message]
 
     MessageResponse:
       type: object

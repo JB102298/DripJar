@@ -104,6 +104,11 @@ export default function CommitmentScreen() {
       const apiMsg = e?.body?.message ?? '';
 
       if (
+        // `JarLifecycle` replaced `PhaseGate` on the commitment endpoints.
+        // `PhaseGate` is kept so a client running against an older server, or
+        // any other route still using it, still lands on the explanatory
+        // screen rather than a generic failure.
+        apiError === 'JarLifecycle' ||
         apiError === 'PhaseGate' ||
         apiError === 'NoActiveAgreement' ||
         apiError === 'AgreementNotAccepted' ||

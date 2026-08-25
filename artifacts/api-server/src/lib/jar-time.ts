@@ -146,3 +146,35 @@ export function formatInZone(instant: Date, timeZone: string): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${p.year}-${pad(p.month)}-${pad(p.day)} ${pad(p.hour)}:${pad(p.minute)}`;
 }
+
+/**
+ * The calendar date, `yyyy-MM-dd`, currently in effect in `timeZone`.
+ *
+ * Date gates that decide when money may move must be asked in the jar's own
+ * time, not the server's. `lib/phase.ts` compares `toUTCDateString(now)` with
+ * `cutoff_date`, so the commitment window opens on the UTC calendar date: about
+ * ten hours early for `Pacific/Honolulu` (UTC−10) and a day late for
+ * `Pacific/Auckland` (UTC+13). AutoDrip already schedules in Jar Time via
+ * `computeJarTimeRunAt`; this is the same clock, asked for a date instead of an
+ * instant.
+ *
+ * `jars.time_zone` is NOT NULL and immutable — it is set at creation and is
+ * absent from the PATCH allowlist — so a jar's answer here cannot drift.
+ *
+ * FAILS CLOSED. An unrecognised or unavailable zone returns `null` rather than
+ * silently falling back to UTC or to the host zone. Callers must treat `null`
+ * as "cannot evaluate this date gate" and refuse, because a wrong date here
+ * opens a financial window at the wrong moment.
+ */
+export function jarToday(timeZone: string | null | undefined, now: Date = new Date()): string | null {
+  if (typeof timeZone !== "string" || timeZone.trim().length === 0) return null;
+  try {
+    const p = getZonedParts(now, timeZone);
+    if (!Number.isFinite(p.year) || !Number.isFinite(p.month) || !Number.isFinite(p.day)) return null;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
+  } catch {
+    // Intl throws RangeError on an unknown IANA zone.
+    return null;
+  }
+}

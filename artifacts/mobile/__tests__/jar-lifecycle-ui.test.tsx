@@ -74,6 +74,19 @@ const updateMutate = vi.fn(async () => ({}));
 const cancelMutate = vi.fn(async () => ({}));
 
 vi.mock("@workspace/api-client-react", () => ({
+  // The generated enum. lib/jar-status.ts builds its lifecycle model from it,
+  // and JarCard/the detail screen now read that model, so this mock must
+  // provide it or the module graph fails to load.
+  JarStatus: {
+    Draft: "Draft",
+    Inviting: "Inviting",
+    Saving: "Saving",
+    CommitmentPending: "CommitmentPending",
+    Committed: "Committed",
+    FullyFunded: "FullyFunded",
+    Completed: "Completed",
+    Cancelled: "Cancelled",
+  },
   useGetJar: () => ({ data: baseJar, isLoading: false, refetch: vi.fn() }),
   useGetJarHealth: () => ({ data: undefined, refetch: vi.fn() }),
   useListJarMembers: () => ({ data: members, refetch: vi.fn() }),

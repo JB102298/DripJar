@@ -29,6 +29,7 @@ import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
 import { getStripeClient } from "../lib/stripe.js";
 import { getOrCreateStripeCustomer } from "../lib/stripe-customer.js";
 import { logger } from "../lib/logger.js";
+import { lifecycleAllowsNewContribution, contributionLifecycleMessage } from "../lib/jar-status.js";
 
 const router = Router();
 
@@ -61,12 +62,24 @@ router.post("/jars/:jarId/drips/payment-intent", requireAuth, async (req, res) =
 
   // Auth: caller must be an active member of the jar
   const [jar] = await db
-    .select({ id: jars.id })
+    .select({ id: jars.id, status: jars.status })
     .from(jars)
     .where(eq(jars.id, jarId));
 
   if (!jar) {
     res.status(404).json({ error: "NotFound", message: "Jar not found" });
+    return;
+  }
+
+  // Lifecycle gate — lib/jar-status.ts. This route previously selected only
+  // `jars.id` and never looked at status, so a cancelled jar would happily mint
+  // a real payment intent even though the legacy contributions route refused
+  // one. Fails closed for terminal and unrecognised statuses.
+  if (!lifecycleAllowsNewContribution(jar.status)) {
+    res.status(422).json({
+      error: "JarLifecycle",
+      message: contributionLifecycleMessage(jar.status),
+    });
     return;
   }
 

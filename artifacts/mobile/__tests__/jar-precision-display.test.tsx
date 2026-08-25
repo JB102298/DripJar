@@ -52,6 +52,19 @@ const { myJarsData } = vi.hoisted(() => ({
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
+  // The generated enum. lib/jar-status.ts builds its lifecycle model from it,
+  // and JarCard/the detail screen now read that model, so this mock must
+  // provide it or the module graph fails to load.
+  JarStatus: {
+    Draft: "Draft",
+    Inviting: "Inviting",
+    Saving: "Saving",
+    CommitmentPending: "CommitmentPending",
+    Committed: "Committed",
+    FullyFunded: "FullyFunded",
+    Completed: "Completed",
+    Cancelled: "Cancelled",
+  },
   useListMyJars: () => ({ data: myJarsData.value, isLoading: false, isError: false }),
 }));
 

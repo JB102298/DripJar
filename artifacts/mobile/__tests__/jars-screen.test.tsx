@@ -175,10 +175,10 @@ describe("Active tab request", () => {
 
 // ─── Terminal tabs ───────────────────────────────────────────────────────────
 
-describe("Completed and Archived tabs", () => {
+describe("Completed and Cancelled tabs", () => {
   it.each([
     ["Completed", "Completed"],
-    ["Archived", "Cancelled"],
+    ["Cancelled", "Cancelled"],
   ])("%s requests status=%s", (tab, expected) => {
     jarsState.data = [];
     render(<JarsScreen />);

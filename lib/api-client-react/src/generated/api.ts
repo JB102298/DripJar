@@ -52,6 +52,7 @@ import type {
   InvitationWithJar,
   Jar,
   JarHealth,
+  JarLifecycleError,
   JarMember,
   JarSummary,
   ListContributionsParams,
@@ -133,7 +134,7 @@ export const getFinancialQuote = async (financialQuoteRequest: FinancialQuoteReq
 
 
 
-export const getGetFinancialQuoteMutationOptions = <TError = ErrorType<ErrorResponse>,
+export const getGetFinancialQuoteMutationOptions = <TError = ErrorType<ErrorResponse | JarLifecycleError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getFinancialQuote>>, TError,{data: BodyType<FinancialQuoteRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof getFinancialQuote>>, TError,{data: BodyType<FinancialQuoteRequest>}, TContext> => {
 
@@ -162,12 +163,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type GetFinancialQuoteMutationResult = NonNullable<Awaited<ReturnType<typeof getFinancialQuote>>>
     export type GetFinancialQuoteMutationBody = BodyType<FinancialQuoteRequest>
-    export type GetFinancialQuoteMutationError = ErrorType<ErrorResponse>
+    export type GetFinancialQuoteMutationError = ErrorType<ErrorResponse | JarLifecycleError>
 
     /**
  * @summary Get a server-authoritative financial quote for a contribution
  */
-export const useGetFinancialQuote = <TError = ErrorType<ErrorResponse>,
+export const useGetFinancialQuote = <TError = ErrorType<ErrorResponse | JarLifecycleError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getFinancialQuote>>, TError,{data: BodyType<FinancialQuoteRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof getFinancialQuote>>,
@@ -206,7 +207,7 @@ export const createDripPaymentIntent = async (jarId: string,
 
 
 
-export const getCreateDripPaymentIntentMutationOptions = <TError = ErrorType<ErrorResponse>,
+export const getCreateDripPaymentIntentMutationOptions = <TError = ErrorType<ErrorResponse | JarLifecycleError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDripPaymentIntent>>, TError,{jarId: string;data: BodyType<DripPaymentIntentRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createDripPaymentIntent>>, TError,{jarId: string;data: BodyType<DripPaymentIntentRequest>}, TContext> => {
 
@@ -235,12 +236,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateDripPaymentIntentMutationResult = NonNullable<Awaited<ReturnType<typeof createDripPaymentIntent>>>
     export type CreateDripPaymentIntentMutationBody = BodyType<DripPaymentIntentRequest>
-    export type CreateDripPaymentIntentMutationError = ErrorType<ErrorResponse>
+    export type CreateDripPaymentIntentMutationError = ErrorType<ErrorResponse | JarLifecycleError>
 
     /**
  * @summary Create (or return existing) Stripe PaymentIntent for a persisted quote
  */
-export const useCreateDripPaymentIntent = <TError = ErrorType<ErrorResponse>,
+export const useCreateDripPaymentIntent = <TError = ErrorType<ErrorResponse | JarLifecycleError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDripPaymentIntent>>, TError,{jarId: string;data: BodyType<DripPaymentIntentRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof createDripPaymentIntent>>,
@@ -3044,7 +3045,7 @@ export const createContribution = async (jarId: string,
 
 
 
-export const getCreateContributionMutationOptions = <TError = ErrorType<unknown>,
+export const getCreateContributionMutationOptions = <TError = ErrorType<JarLifecycleError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createContribution>>, TError,{jarId: string;data: BodyType<CreateContributionRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createContribution>>, TError,{jarId: string;data: BodyType<CreateContributionRequest>}, TContext> => {
 
@@ -3073,12 +3074,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateContributionMutationResult = NonNullable<Awaited<ReturnType<typeof createContribution>>>
     export type CreateContributionMutationBody = BodyType<CreateContributionRequest>
-    export type CreateContributionMutationError = ErrorType<unknown>
+    export type CreateContributionMutationError = ErrorType<JarLifecycleError>
 
     /**
  * @summary Add a contribution to a jar
  */
-export const useCreateContribution = <TError = ErrorType<unknown>,
+export const useCreateContribution = <TError = ErrorType<JarLifecycleError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createContribution>>, TError,{jarId: string;data: BodyType<CreateContributionRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof createContribution>>,

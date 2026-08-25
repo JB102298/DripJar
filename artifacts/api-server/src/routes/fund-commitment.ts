@@ -7,7 +7,10 @@
  *   POST /jars/:jarId/commitment/confirm  — confirm a snapshot, post ledger
  *   GET  /jars/:jarId/commitment/mine     — fetch this member's commitment
  *
- * Phase gate: jar.status = 'Saving' AND cutoffDate IS NOT NULL AND today (UTC) >= cutoffDate
+ * Lifecycle gate: jar.status = 'Saving' AND cutoffDate IS NOT NULL AND the
+ * jar's OWN calendar date (jars.time_zone, not server UTC) >= cutoffDate.
+ * Enforced by lifecycleAllowsFundCommitment and re-asserted inside the confirm
+ * transaction under a jars row lock.
  * Agreement gate: jar has an active agreement AND caller has accepted it.
  *   - If no agreement configured: preview/confirm are rejected (422 no_active_agreement).
  *   - At confirm time the agreement version is re-checked against the snapshot;
@@ -40,6 +43,7 @@ import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
 import { deriveJarPhase, toUTCDateString } from "../lib/phase.js";
+import { lifecycleAllowsFundCommitment, fundCommitmentLifecycleMessage } from "../lib/jar-status.js";
 import { getRefundableLots, allocateFromLots } from "../lib/lot-allocation.js";
 import { postCommitPrincipalInTx } from "../lib/ledger.js";
 import { computeRefundableBalanceInTx } from "../lib/ledger.js";
@@ -47,6 +51,17 @@ import { logActivity } from "../lib/activity.js";
 import { logger } from "../lib/logger.js";
 
 const router = Router();
+
+/**
+ * Thrown inside the confirm transaction when the jar row, once locked, no
+ * longer permits committing. Carries the status so the 422 can name it.
+ */
+class JarLifecycleAbort extends Error {
+  constructor(public readonly jarStatus: string) {
+    super(`Jar lifecycle no longer permits committing (status: ${jarStatus})`);
+    this.name = "JarLifecycleAbort";
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -106,13 +121,13 @@ router.post("/jars/:jarId/commitment/preview", requireAuth, async (req, res) => 
     return;
   }
 
-  // Phase gate: must be in Commitment phase
-  const phase = deriveJarPhase(jar.status, jar.cutoffDate);
-  if (phase !== "Commitment") {
+  // Lifecycle gate — lib/jar-status.ts. Allowlist of statuses plus a cutoff
+  // date evaluated in the jar's own timezone, not the server's UTC date.
+  if (!lifecycleAllowsFundCommitment(jar.status, jar.cutoffDate, jar.timeZone)) {
     res.status(422).json({
-      error: "PhaseGate",
-      message: "Commitment is only available once the jar has reached its cutoff date.",
-      phase,
+      error: "JarLifecycle",
+      message: fundCommitmentLifecycleMessage(jar.status),
+      phase: deriveJarPhase(jar.status, jar.cutoffDate),
     });
     return;
   }
@@ -243,13 +258,15 @@ router.post("/jars/:jarId/commitment/confirm", requireAuth, async (req, res) => 
     return;
   }
 
-  // Phase gate re-check
-  const phase = deriveJarPhase(jar.status, jar.cutoffDate);
-  if (phase !== "Commitment") {
+  // Lifecycle gate — cheap pre-check so an obviously ineligible request is
+  // refused before any snapshot or ledger work. This read is NOT authoritative:
+  // the jar can be cancelled between here and the write, so the gate is
+  // re-asserted inside the transaction under a row lock. See below.
+  if (!lifecycleAllowsFundCommitment(jar.status, jar.cutoffDate, jar.timeZone)) {
     res.status(422).json({
-      error: "PhaseGate",
-      message: "Commitment is only available once the jar has reached its cutoff date.",
-      phase,
+      error: "JarLifecycle",
+      message: fundCommitmentLifecycleMessage(jar.status),
+      phase: deriveJarPhase(jar.status, jar.cutoffDate),
     });
     return;
   }
@@ -406,6 +423,37 @@ router.post("/jars/:jarId/commitment/confirm", requireAuth, async (req, res) => 
     await db.transaction(async (tx) => {
       const txDb = tx as unknown as DbOrTx;
 
+      // ── Lock order: jars, THEN jar_members. Keep it that way. ──────────────
+      //
+      // The jar row is locked FIRST and the lifecycle gate re-asserted under
+      // that lock. The pre-transaction check above is advisory only: it reads
+      // the jar outside any transaction, so `POST /jars/:id/cancel` — a bare
+      // `UPDATE jars` — could land between that read and this write and leave a
+      // fund commitment sitting on a cancelled jar. That would convert the
+      // member's refundable principal into unrecoverable principal after the
+      // organizer had already ended the jar.
+      //
+      // Holding the jar row makes the two orderings deterministic:
+      //   cancel first  → this SELECT blocks, then sees "Cancelled" and aborts;
+      //                   no commitment, no allocation, nothing posted.
+      //   confirm first → cancel's UPDATE blocks until this transaction
+      //                   commits, then proceeds; principal committed before
+      //                   cancellation stays committed, which is correct.
+      //
+      // There is no interleaving that produces a commitment after the jar is
+      // canonically cancelled.
+      const [lockedJar] = await txDb
+        .select({ status: jars.status, cutoffDate: jars.cutoffDate, timeZone: jars.timeZone })
+        .from(jars)
+        .where(eq(jars.id, jarId))
+        .for("update");
+
+      if (!lockedJar) throw new Error("Jar not found");
+
+      if (!lifecycleAllowsFundCommitment(lockedJar.status, lockedJar.cutoffDate, lockedJar.timeZone)) {
+        throw new JarLifecycleAbort(lockedJar.status);
+      }
+
       // Lock the jar_members row to serialize concurrent operations
       const [locked] = await txDb
         .select({ id: jarMembers.id })
@@ -489,7 +537,16 @@ router.post("/jars/:jarId/commitment/confirm", requireAuth, async (req, res) => 
     const message = (err as Error).message;
     logger.error({ err: { message }, jarId, memberId: member.id }, "Commitment confirm failed");
 
-    if (message.startsWith("Insufficient")) {
+    if (err instanceof JarLifecycleAbort) {
+      // The jar changed under us between the advisory pre-check and the row
+      // lock — almost always a cancellation racing this confirmation. The
+      // transaction rolled back, so no commitment, allocation, or ledger
+      // posting exists, and the member's principal is still refundable.
+      res.status(422).json({
+        error: "JarLifecycle",
+        message: fundCommitmentLifecycleMessage(err.jarStatus),
+      });
+    } else if (message.startsWith("Insufficient")) {
       res.status(409).json({ error: "InsufficientBalance", code: "balance_changed", message });
     } else {
       res.status(500).json({ error: "InternalError", message: "Failed to confirm commitment" });

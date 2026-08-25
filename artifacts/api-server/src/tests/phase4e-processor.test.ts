@@ -78,6 +78,12 @@ beforeAll(async () => {
     organizerId: contributorId, name: "Processor Test Jar",
     slug: `proc-jar-${Date.now()}`,
     targetDate: "2027-12-31", goalAmountCents: 100000, timeZone: "America/New_York",
+    // `jars.status` defaults to "Draft". AutoDrip is a recurring PAYMENT
+    // authorization — it stores a saved payment method and recorded consent —
+    // so it is only permitted on a jar that can actually take money. This
+    // fixture previously relied on the default and passed only because the old
+    // guard was a denylist naming the two terminal phases.
+    status: "Saving",
   }).returning();
   jarId = jar!.id;
 

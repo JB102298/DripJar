@@ -37,6 +37,7 @@ import { Feather } from '@expo/vector-icons';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
 import { CircularProgress } from '@/components/CircularProgress';
 import { JarHealthBadge } from '@/components/JarHealthBadge';
+import { describeJarLifecycle } from '@/lib/jar-status';
 import { ProgressBar } from '@/components/ProgressBar';
 import { MemberAvatar } from '@/components/MemberAvatar';
 import { resolveDisplayName, UNKNOWN_DISPLAY_NAME } from '@/lib/display-name';
@@ -392,7 +393,12 @@ export default function JarDetailScreen() {
     // an older server still renders.
     const targetPrecision = resolvePrecision((jar as any)?.targetDatePrecision);
     const targetDateLabel = `${resolveCategory(jar.category).targetDateLabel}: ${formatISOForPrecision(jar.targetDate, targetPrecision)}`;
-    const timeRemaining = describeTimeRemaining(jar.targetDate, targetPrecision, jar.daysRemaining);
+    // One source of truth for what a terminal jar may claim — lib/jar-status.ts.
+    // A cancelled jar must not count down to a date it will never reach.
+    const lifecycle = describeJarLifecycle(jar);
+    const timeRemaining = lifecycle.showCountdown
+      ? describeTimeRemaining(jar.targetDate, targetPrecision, jar.daysRemaining)
+      : null;
 
     return (
       <View style={styles.tabContent}>
@@ -430,16 +436,46 @@ export default function JarDetailScreen() {
                 </Text>
               </View>
             ) : null}
-            {renderPhaseBadge()}
+            {lifecycle.isTerminal ? (
+              // Terminal jars state what they are. `renderPhaseBadge` would
+              // render "Cancelled Phase" here, which reads as a stage the jar is
+              // passing through rather than the end of it.
+              <View style={[styles.daysLeftChip, { backgroundColor: colors.muted }]}>
+                <Text
+                  testID="jar-detail-terminal-status"
+                  style={[styles.daysLeftText, { color: colors.mutedForeground }]}
+                >
+                  {lifecycle.label}
+                </Text>
+              </View>
+            ) : (
+              renderPhaseBadge()
+            )}
           </View>
         </View>
 
-        {renderCutoffBanner()}
+        {/* The cutoff banner is a scheduling prompt ("Commitment phase starts
+            in N days"). There is no next phase for a terminal jar. */}
+        {!lifecycle.isTerminal && renderCutoffBanner()}
 
-        {health && (
+        {lifecycle.showHealth && health && (
           <View style={[styles.healthCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <JarHealthBadge status={health.status} />
             <Text style={[styles.healthMessage, { color: colors.foreground }]}>{health.message}</Text>
+          </View>
+        )}
+
+        {/* Explains the terminal state in place of the risk card. Deliberately
+            says nothing about refunds: refund access is decided by the member's
+            refundable balance, not by this status. */}
+        {lifecycle.terminalCopy && (
+          <View style={[styles.healthCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text
+              testID="jar-detail-terminal-copy"
+              style={[styles.healthMessage, { color: colors.mutedForeground }]}
+            >
+              {lifecycle.terminalCopy}
+            </Text>
           </View>
         )}
 

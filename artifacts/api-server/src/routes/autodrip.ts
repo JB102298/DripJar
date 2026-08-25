@@ -39,7 +39,6 @@ import {
 } from "@workspace/db";
 import { eq, and, inArray, sql, lte, desc } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
-import { deriveJarPhase } from "../lib/phase.js";
 import {
   computeNextDueDate,
   toISODate,
@@ -53,6 +52,7 @@ import { logActivity } from "../lib/activity.js";
 import { createNotification } from "../lib/notifications.js";
 import { sendAutoDripSucceededEmail, sendAutoDripNeedsAttentionEmail } from "../lib/autodrip-email.js";
 import { logger } from "../lib/logger.js";
+import { lifecycleAllowsNewContribution, contributionLifecycleMessage } from "../lib/jar-status.js";
 import { randomUUID } from "node:crypto";
 
 const router = Router();
@@ -381,9 +381,11 @@ router.post("/jars/:jarId/autodrip", requireAuth, async (req, res) => {
   const [jar] = await db.select({ id: jars.id, status: jars.status, cutoffDate: jars.cutoffDate, timeZone: jars.timeZone }).from(jars).where(eq(jars.id, jarId));
   if (!jar) { res.status(404).json({ error: "NotFound", message: "Jar not found" }); return; }
 
-  const jarPhase = deriveJarPhase(jar.status, jar.cutoffDate);
-  if (jarPhase === "Cancelled" || jarPhase === "Completed") {
-    res.status(409).json({ error: "Conflict", message: "Cannot enable AutoDrip on a terminal jar" });
+  // Allowlist, not a denylist. The previous check named the two terminal
+  // phases, so any status it did not recognise — a legacy value, or one the
+  // server gains later — fell through and was allowed to schedule real money.
+  if (!lifecycleAllowsNewContribution(jar.status)) {
+    res.status(422).json({ error: "JarLifecycle", message: contributionLifecycleMessage(jar.status) });
     return;
   }
 
@@ -617,9 +619,9 @@ router.post("/jars/:jarId/autodrip/resume", requireAuth, async (req, res) => {
   const [jar] = await db.select({ id: jars.id, status: jars.status, cutoffDate: jars.cutoffDate, timeZone: jars.timeZone }).from(jars).where(eq(jars.id, jarId));
   if (!jar) { res.status(404).json({ error: "NotFound", message: "Jar not found" }); return; }
 
-  const jarPhase = deriveJarPhase(jar.status, jar.cutoffDate);
-  if (jarPhase === "Cancelled" || jarPhase === "Completed") {
-    res.status(409).json({ error: "Conflict", message: "Cannot resume AutoDrip on a terminal jar" });
+  // Allowlist — see the note on the enable path above.
+  if (!lifecycleAllowsNewContribution(jar.status)) {
+    res.status(422).json({ error: "JarLifecycle", message: contributionLifecycleMessage(jar.status) });
     return;
   }
 
@@ -816,9 +818,11 @@ async function processOneAuthorization(
 
     if (!jar) { results.skipped++; return; }
 
-    const jarPhase = deriveJarPhase(jar.status, jar.cutoffDate);
-    if (jarPhase === "Cancelled" || jarPhase === "Completed") {
-      // Jar is terminal — cancel this authorization
+    // Allowlist — automation must not create a charge against a jar whose
+    // status it cannot classify, so an unrecognised value stops the run here
+    // rather than falling through to the charge below.
+    if (!lifecycleAllowsNewContribution(jar.status)) {
+      // Jar no longer accepts contributions — cancel this authorization
       await txDb
         .update(autoDripAuthorizations)
         .set({ status: "cancelled", cancelledAt: now, updatedAt: now })

@@ -96,6 +96,13 @@ beforeAll(async () => {
   const [jar] = await db.insert(jars).values({
     organizerId, name: "AutoDrip Test Jar", slug: `ad-jar-${Date.now()}`,
     targetDate: "2027-12-31", goalAmountCents: 100000, timeZone: "America/New_York",
+    // `jars.status` defaults to "Draft". AutoDrip is a recurring PAYMENT
+    // authorization — saved payment method plus recorded consent — so it is
+    // only permitted on a jar that can actually take money. This fixture
+    // relied on the default and passed only because the old guard was a
+    // denylist naming the two terminal phases; an unlaunched jar was never an
+    // intended AutoDrip target.
+    status: "Saving",
   }).returning();
   jarId = jar!.id;
 

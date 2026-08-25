@@ -40,6 +40,36 @@ import { mapStripeRefundStatus, recomputeRefundRequestStatus } from "../lib/refu
 
 const router = Router();
 
+/**
+ * Resolve the caller's membership row for refund purposes.
+ *
+ * Deliberately does NOT require `status = "active"`.
+ *
+ * Both refund endpoints used to demand an active membership, which meant a
+ * member who left the jar — or whose membership was marked inactive by an
+ * organizer — lost access to principal they had already paid in and never
+ * committed. Leaving a jar is not a forfeiture of your own money.
+ *
+ * This is authorization tied to *historical* membership: the caller must have a
+ * `jar_members` row for this jar, in any state. That row is also what scopes
+ * `getRefundableLots`, which only ever returns financial transactions carrying
+ * this member id — so a former member can reach exactly their own lots and an
+ * outsider, having no row at all, is refused before any balance is computed.
+ *
+ * The gate is membership history, never jar lifecycle.
+ */
+async function resolveRefundMember(
+  jarId: string,
+  userId: string,
+): Promise<{ id: string } | null> {
+  const [member] = await db
+    .select({ id: jarMembers.id })
+    .from(jarMembers)
+    .where(and(eq(jarMembers.jarId, jarId), eq(jarMembers.userId, userId)))
+    .limit(1);
+  return member ?? null;
+}
+
 type DbOrTx = typeof db;
 
 // ─── Internal token guard (same pattern as reminders) ─────────────────────────
@@ -93,11 +123,7 @@ router.get("/jars/:jarId/refunds/preview", requireAuth, async (req, res) => {
     return;
   }
 
-  const [member] = await db
-    .select({ id: jarMembers.id })
-    .from(jarMembers)
-    .where(and(eq(jarMembers.jarId, jarId), eq(jarMembers.userId, userId), eq(jarMembers.status, "active")))
-    .limit(1);
+  const member = await resolveRefundMember(jarId, userId);
   if (!member) {
     res.status(403).json({ error: "Forbidden", message: "Access denied" });
     return;
@@ -179,28 +205,37 @@ router.post("/jars/:jarId/refunds", requireAuth, async (req, res) => {
     return;
   }
 
-  // Refunds are available while the jar is active (Saving or Commitment phase)
-  if (jar.status !== "Saving") {
-    res.status(422).json({
-      error: "PhaseGate",
-      message: `Refunds are only available while the jar is in Saving or Commitment phase (current status: ${jar.status})`,
-    });
-    return;
-  }
+  // NO JAR-STATUS GATE. Refundability is not a function of the jar's lifecycle.
+  //
+  // This route used to require `jar.status === "Saving"`, which meant cancelling
+  // a jar silently stranded every member's uncommitted principal — while
+  // `GET /refunds/preview`, which has never had that gate, went on showing them
+  // the balance they could no longer withdraw. Uncommitted principal belongs to
+  // the member who paid it until that member explicitly commits it. A phase
+  // label must never convert uncommitted principal into committed principal.
+  //
+  // The only authority on what may be released is `getRefundableLots`, shared
+  // with the preview below, so the two cannot disagree.
 
-  const [member] = await db
-    .select({ id: jarMembers.id })
-    .from(jarMembers)
-    .where(and(eq(jarMembers.jarId, jarId), eq(jarMembers.userId, userId), eq(jarMembers.status, "active")))
-    .limit(1);
+  const member = await resolveRefundMember(jarId, userId);
   if (!member) {
     res.status(403).json({ error: "Forbidden", message: "Access denied" });
     return;
   }
 
-  // FIFO lot query to find which lots to refund from
+  // FIFO lot query to find which lots to refund from — the same canonical
+  // calculation the preview endpoint uses.
   const lots = await getRefundableLots(jarId, member.id);
   const refundableCents = lots.reduce((s, l) => s + l.remainingCents, 0);
+
+  if (refundableCents <= 0) {
+    res.status(422).json({
+      error: "NoRefundableBalance",
+      message: "You have no uncommitted principal available to refund in this jar.",
+      refundableCents: 0,
+    });
+    return;
+  }
 
   if (requestedCents > refundableCents) {
     res.status(422).json({

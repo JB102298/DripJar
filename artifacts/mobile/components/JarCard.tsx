@@ -9,6 +9,7 @@ import { useRouter } from 'expo-router';
 import type { JarSummary } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
 import { describeTimeRemaining, resolvePrecision } from '@/lib/date-precision';
+import { describeJarLifecycle } from '@/lib/jar-status';
 
 interface JarCardProps {
   jar: JarSummary;
@@ -19,12 +20,20 @@ export function JarCard({ jar, hero = false }: JarCardProps) {
   const colors = useColors();
   const router = useRouter();
 
+  // Single source for what this card may claim. A cancelled jar used to show
+  // "23 days left" and an "At Risk" badge because the card asked the date
+  // helper and the health field directly, without ever asking whether the jar
+  // was still running.
+  const lifecycle = describeJarLifecycle(jar);
+
   // Phrased at the jar's stored precision — see lib/date-precision.ts.
-  const timeRemaining = describeTimeRemaining(
-    jar.targetDate,
-    resolvePrecision(jar.targetDatePrecision),
-    jar.daysRemaining,
-  );
+  const timeRemaining = lifecycle.showCountdown
+    ? describeTimeRemaining(
+        jar.targetDate,
+        resolvePrecision(jar.targetDatePrecision),
+        jar.daysRemaining,
+      )
+    : null;
 
   const formatCurrency = (cents: number) => {
     return '$' + (cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -62,6 +71,13 @@ export function JarCard({ jar, hero = false }: JarCardProps) {
             {timeRemaining ? (
               <View style={styles.daysChip}>
                 <Text testID="jar-card-time-remaining" style={styles.daysText}>{timeRemaining}</Text>
+              </View>
+            ) : lifecycle.isTerminal ? (
+              // A terminal jar states what it is. It does not count down to a
+              // date it will never reach, and it does not borrow `updatedAt` to
+              // fake a "cancelled on" date.
+              <View style={styles.daysChip}>
+                <Text testID="jar-card-terminal-status" style={styles.daysText}>{lifecycle.label}</Text>
               </View>
             ) : null}
             <View style={styles.titleContainer}>
@@ -101,7 +117,7 @@ export function JarCard({ jar, hero = false }: JarCardProps) {
               {jar.memberCount} members
             </Text>
           </View>
-          {jar.health && <JarHealthBadge status={jar.health.status} />}
+          {lifecycle.showHealth && jar.health && <JarHealthBadge status={jar.health.status} />}
         </View>
       </View>
     </Pressable>

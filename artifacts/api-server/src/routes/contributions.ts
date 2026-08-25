@@ -6,6 +6,7 @@ import { requireAuth, type AuthenticatedRequest } from "../lib/auth.js";
 import { getJarSavedPrincipalCents } from "../lib/financial-balance.js";
 import { resolveDisplayName } from "../lib/display-name.js";
 import { logActivity } from "../lib/activity.js";
+import { lifecycleAllowsNewContribution, contributionLifecycleMessage } from "../lib/jar-status.js";
 import { createNotification, notifyAllMembers } from "../lib/notifications.js";
 import { contributionLimiter } from "../lib/rate-limit.js";
 import { enforceAgreement } from "../lib/agreement-check.js";
@@ -85,8 +86,13 @@ router.post("/jars/:jarId/contributions", requireAuth, contributionLimiter, asyn
   const jar = await db.select().from(jars).where(eq(jars.id, jarId)).limit(1);
   if (!jar[0]) { res.status(404).json({ error: "NotFound", message: "Jar not found" }); return; }
 
-  if (!["Saving", "CommitmentPending"].includes(jar[0].status)) {
-    res.status(400).json({ error: "BadRequest", message: "Contributions can only be added to active jars" });
+  // Centralised lifecycle gate — lib/jar-status.ts. This route used to inline
+  // its own status array while the two real money paths had none at all.
+  // 422 + `JarLifecycle`, matching every other money-in route. This used to be
+  // a generic 400, indistinguishable from a malformed amount. Neither the
+  // OpenAPI spec nor any client branches on the old code.
+  if (!lifecycleAllowsNewContribution(jar[0].status)) {
+    res.status(422).json({ error: "JarLifecycle", message: contributionLifecycleMessage(jar[0].status) });
     return;
   }
 

@@ -102,6 +102,11 @@ export default function RefundScreen() {
       const apiMsg = e?.body?.message ?? '';
 
       if (
+        // The refund route no longer has a jar-status gate at all, so it cannot
+        // return `JarLifecycle` — deliberately not listed here. What it can now
+        // return is `NoRefundableBalance`, introduced when the status gate was
+        // removed; without this the screen fell through to a generic error.
+        apiError === 'NoRefundableBalance' ||
         apiError === 'PhaseGate' ||
         apiError === 'NothingToRefund' ||
         apiError === 'NoRefundableFunds'

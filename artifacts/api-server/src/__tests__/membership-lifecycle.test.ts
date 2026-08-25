@@ -235,7 +235,10 @@ describe("leave jar", () => {
       .post(`/api/jars/${jar.id}/contributions`)
       .set("Authorization", `Bearer ${member.accessToken}`)
       .send({ amountCents: 1_000, contributionDate: new Date().toISOString().slice(0, 10) });
-    expect([400, 403]).toContain(contribRes.status);
+    // 422 = refused by the jar's lifecycle, 403 = refused for membership.
+    // Either is a correct "you cannot contribute here"; the lifecycle gate now
+    // runs first and answers 422 where it used to answer a generic 400.
+    expect([422, 403]).toContain(contribRes.status);
 
     // Member no longer appears in the members list (organizer view)
     const orgMembers = await request(app)
@@ -409,7 +412,10 @@ describe("jar settings and lifecycle guards", () => {
       .post(`/api/jars/${jar.id}/contributions`)
       .set("Authorization", `Bearer ${member.accessToken}`)
       .send({ amountCents: 1_000, contributionDate: new Date().toISOString().slice(0, 10) });
-    expect(contrib.status).toBe(400);
+    // Standardised lifecycle refusal: 422 / JarLifecycle, shared by every
+    // money-in route. Previously an undifferentiated 400.
+    expect(contrib.status).toBe(422);
+    expect(contrib.body.error).toBe("JarLifecycle");
 
     const sched = await request(app)
       .post(`/api/jars/${jar.id}/schedule`)
