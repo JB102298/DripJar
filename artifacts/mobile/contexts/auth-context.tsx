@@ -1,4 +1,18 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+// ─── Cross-account cache isolation ───────────────────────────────────────────
+//
+// The QueryClient is a module-level singleton that outlives any session, so
+// every cached response — jars, dashboard, and the unread notification count
+// among them — survived sign-out and was still there when the next account
+// signed in. `enabled: isAuthenticated` does not help: React Query serves the
+// cached value immediately and refetches afterwards, so the new user saw the
+// previous user's badge for as long as the request took.
+//
+// Every identity change below therefore calls `queryClient.clear()`. Clearing
+// the whole cache rather than a list of keys means a query added later cannot
+// leak by being forgotten here. The client is imported rather than taken from
+// context so this does not depend on provider placement.
+import { queryClient } from '@/lib/query-client';
 import { getItem, setItem, deleteItem } from '@/lib/token-storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { setBaseUrl, setAuthTokenGetter } from '@workspace/api-client-react';
@@ -113,6 +127,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await deleteItem(REFRESH_TOKEN_KEY);
     setAccessToken(null);
     setAuthTokenGetter(null);
+    queryClient.clear();
   };
 
   // ── Wire up the auth token getter ────────────────────────────────────────
@@ -192,6 +207,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshToken: string;
     };
 
+    // Before the new token is wired up, so nothing cached under the previous
+    // identity can be read by the incoming one.
+    queryClient.clear();
     await setItem(ACCESS_TOKEN_KEY, data.token);
     await setItem(REFRESH_TOKEN_KEY, data.refreshToken);
     setAccessToken(data.token);
@@ -216,6 +234,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshToken: string;
     };
 
+    queryClient.clear();
     await setItem(ACCESS_TOKEN_KEY, data.token);
     await setItem(REFRESH_TOKEN_KEY, data.refreshToken);
     setAccessToken(data.token);

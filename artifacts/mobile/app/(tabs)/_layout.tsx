@@ -4,8 +4,12 @@ import { useColors } from '@/hooks/useColors';
 import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { Tabs } from 'expo-router';
-import { useListNotifications, getListNotificationsQueryKey } from '@workspace/api-client-react';
+import {
+  useGetUnreadNotificationCount,
+  getGetUnreadNotificationCountQueryKey,
+} from '@workspace/api-client-react';
 import { useAuth } from '@/contexts/auth-context';
+import { formatBadgeCount } from '@/lib/notification-presentation';
 
 export default function TabLayout() {
   const colors = useColors();
@@ -13,12 +17,24 @@ export default function TabLayout() {
   const isWeb = Platform.OS === 'web';
   const { isAuthenticated } = useAuth();
 
-  const { data: notifications } = useListNotifications(
-    undefined,
-    { query: { queryKey: getListNotificationsQueryKey(), enabled: isAuthenticated } },
-  );
-  
-  const unreadCount = notifications?.filter(n => !n.isRead).length || 0;
+  // The caller's true unread total, straight from the server.
+  //
+  // This used to be `notifications.filter(n => !n.isRead).length` over the
+  // notification LIST — the count of unread rows in one page, capped by the
+  // page size and reading 0 whenever the loaded page happened to be fully read.
+  // The badge is not a property of a page, so it no longer reads one. Loading
+  // more notifications cannot change this number.
+  //
+  // Gated on `isAuthenticated`, and the query cache is cleared on login and
+  // logout (contexts/auth-context.tsx), so a signed-out or newly switched
+  // account cannot render the previous user's count.
+  const { data: unread } = useGetUnreadNotificationCount({
+    query: { queryKey: getGetUnreadNotificationCountQueryKey(), enabled: isAuthenticated },
+  });
+
+  // undefined at zero — the badge is not rendered at all rather than rendered
+  // showing "0". Above 99 it reads "99+".
+  const badge = isAuthenticated ? formatBadgeCount(unread?.unreadCount) : undefined;
 
   return (
     <Tabs
@@ -77,7 +93,7 @@ export default function TabLayout() {
         options={{
           title: 'Notifications',
           tabBarIcon: ({ color }) => <Feather name="bell" size={24} color={color} />,
-          tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
+          tabBarBadge: badge,
           tabBarBadgeStyle: { backgroundColor: colors.destructive },
         }}
       />

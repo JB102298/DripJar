@@ -1351,6 +1351,19 @@ paths:
           in: query
           schema:
             type: boolean
+        - name: limit
+          in: query
+          description: Page size. Defaults to 50, capped at 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: Rows to skip. Ordering is newest first and stable.
+          schema:
+            type: integer
+            minimum: 0
       responses:
         "200":
           description: OK
@@ -1360,6 +1373,22 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Notification"
+
+  /notifications/unread-count:
+    get:
+      operationId: getUnreadNotificationCount
+      tags: [notifications]
+      summary: Exact unread notification total for the current user
+      description: >-
+        The caller's complete unread total, independent of any page size. The
+        bottom-tab badge reads this and nothing else.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnreadNotificationCount"
 
   /notifications/{notificationId}/read:
     patch:
@@ -2748,9 +2777,36 @@ components:
           type: string
         userId:
           type: string
+        # Mirrors NotificationType in artifacts/api-server/src/lib/notifications.ts.
+        # Six values the server already emits were missing here — including the
+        # two AutoDrip types produced since Phase 2B1 — so the generated client
+        # union excluded types it was certain to receive. Clients must still
+        # render an unrecognised value safely; this enum is the contract, not a
+        # guarantee that it can never grow.
         type:
           type: string
-          enum: [invitation_received, member_joined, contribution_recorded, contribution_due, contribution_overdue, jar_halfway_funded, milestone_funded, commitment_requested, member_approved_commitment, member_rejected_commitment, lock_date_approaching, goal_fully_funded, general]
+          enum:
+            [
+              invitation_received,
+              member_joined,
+              contribution_recorded,
+              contribution_due,
+              contribution_missed,
+              contribution_overdue,
+              jar_halfway_funded,
+              milestone_funded,
+              commitment_requested,
+              member_approved_commitment,
+              member_rejected_commitment,
+              lock_date_approaching,
+              goal_fully_funded,
+              cutoff_upcoming,
+              cutoff_reached,
+              agreement_required,
+              autodrip_succeeded,
+              autodrip_needs_attention,
+              general,
+            ]
         title:
           type: string
         message:
@@ -2770,6 +2826,14 @@ components:
           type: string
           format: date-time
       required: [id, userId, type, title, message, isRead, createdAt]
+
+    UnreadNotificationCount:
+      type: object
+      properties:
+        unreadCount:
+          type: integer
+          minimum: 0
+      required: [unreadCount]
 
     # ACTIVITY
     ActivityEvent:

@@ -54,18 +54,30 @@ import {
   resolvePrecision,
 } from '@/lib/date-precision';
 import { resolveCategory } from '@/lib/jar-categories';
+import { isLinkableJarTab } from '@/lib/notification-presentation';
 
 type Tab = 'Overview' | 'Members' | 'Milestones' | 'Activity' | 'Agreements' | 'Settings';
 const TABS: Tab[] = ['Overview', 'Members', 'Milestones', 'Activity', 'Agreements', 'Settings'];
 
 export default function JarDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, tab: requestedTab } = useLocalSearchParams<{ id: string; tab?: string }>();
   const router = useRouter();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  
-  const [activeTab, setActiveTab] = useState<Tab>('Overview');
+
+  // Optional deep-link target, used by notification navigation so a
+  // milestone-funded or member-joined notification lands on the tab it is about
+  // instead of always on Overview.
+  //
+  // Validated against the linkable set rather than against `TABS`: `Settings`
+  // is organizer-only and its tab button is hidden for members, but the tab
+  // BODY renders from `activeTab` alone — so accepting it from a URL would show
+  // organizer controls to a member. Anything unrecognised falls back to
+  // Overview.
+  const [activeTab, setActiveTab] = useState<Tab>(
+    isLinkableJarTab(requestedTab) ? requestedTab : 'Overview',
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
   const [inviteModalVisible, setInviteModalVisible] = useState(false);

@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AppState, type AppStateStatus, Platform } from "react-native";
+import { QueryClientProvider, focusManager } from "@tanstack/react-query";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -17,11 +18,31 @@ import { AuthProvider, useAuth } from "@/contexts/auth-context";
 import { CreateJarProvider } from "@/contexts/create-jar-context";
 import { setBaseUrl } from "@workspace/api-client-react";
 import { isPublicRoute } from "@/lib/auth-gate";
+import { queryClient } from "@/lib/query-client";
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
-const queryClient = new QueryClient();
+/**
+ * App-foreground refresh on native.
+ *
+ * React Query's `refetchOnWindowFocus` is on by default, but its default focus
+ * detection listens for DOM `visibilitychange`/`focus` events. Those do not
+ * exist in React Native, so on iOS and Android the app returning from the
+ * background refetched nothing — a stale unread badge and a stale notification
+ * list survived indefinitely. Bridging AppState into `focusManager` is the
+ * supported way to make that default true off the web.
+ *
+ * Web is left alone: the DOM listeners already work there, and installing a
+ * second source of truth would fight them.
+ */
+function subscribeAppStateFocus(): () => void {
+  if (Platform.OS === "web") return () => {};
+  const subscription = AppState.addEventListener("change", (status: AppStateStatus) => {
+    focusManager.setFocused(status === "active");
+  });
+  return () => subscription.remove();
+}
 
 // API base URL for the generated client.
 //
@@ -94,6 +115,8 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [fontsLoaded, fontError]);
+
+  useEffect(subscribeAppStateFocus, []);
 
   if (!fontsLoaded && !fontError) return null;
 

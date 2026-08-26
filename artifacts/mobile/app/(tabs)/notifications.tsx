@@ -1,12 +1,36 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useColors } from '@/hooks/useColors';
+/**
+ * Notifications.
+ *
+ * Renders the server's `title`, `message`, `type`, and `createdAt` and nothing
+ * else. No amount, percentage, progress figure, or milestone state is computed
+ * here — those are settled against the ledger before the notification row is
+ * written (see api-server/src/lib/notification-financial.ts), and recomputing
+ * any of them on the client is exactly how the two-sources-of-truth defect got
+ * in. There is no sample, seeded, or locally synthesised notification in this
+ * file; an account with no rows renders the empty state.
+ *
+ * Icons and destinations come from lib/notification-presentation.ts; the paged
+ * data, the unread total, and the optimistic read behaviour come from
+ * hooks/useNotificationFeed.ts. This file is presentation.
+ */
+
+import React, { useCallback } from 'react';
+import { ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useListNotifications } from '@workspace/api-client-react';
+import { Feather } from '@expo/vector-icons';
+import { useColors } from '@/hooks/useColors';
 import { EmptyState } from '@/components/EmptyState';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
-import { Feather } from '@expo/vector-icons';
+import { useNotificationFeed } from '@/hooks/useNotificationFeed';
+import {
+  formatNotificationTimestamp,
+  notificationAccessibilityHint,
+  notificationAccessibilityLabel,
+  notificationHref,
+  notificationIcon,
+  resolveNotificationDestination,
+} from '@/lib/notification-presentation';
 import type { Notification } from '@workspace/api-client-react';
 
 export default function NotificationsScreen() {
@@ -14,83 +38,183 @@ export default function NotificationsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const { data: notifications, isLoading, refetch, isRefetching } = useListNotifications();
+  const {
+    notifications,
+    unreadCount,
+    isLoading,
+    isError,
+    isRefreshing,
+    hasMore,
+    isLoadingMore,
+    loadMore,
+    refresh,
+    markRead,
+    markAllRead,
+    isMarkingAllRead,
+  } = useNotificationFeed();
 
-  // Mock mark as read (actual API might have a mutation for this)
-  const markAsRead = (id: string) => {
-    // API call would go here
-  };
+  // Returning to the tab re-reads both the page and the unread total, so a
+  // notification generated while the user was elsewhere appears without a
+  // manual pull. Opening the screen does NOT mark anything read — reading the
+  // list and reading a notification are different acts.
+  useFocusEffect(
+    useCallback(() => {
+      void refresh();
+    }, [refresh]),
+  );
 
-  const getIconForType = (type: string) => {
-    switch (type) {
-      case 'contribution_recorded': return 'dollar-sign';
-      case 'invitation_received': return 'mail';
-      case 'member_joined': return 'user-plus';
-      case 'goal_fully_funded': return 'check-circle';
-      case 'jar_halfway_funded': return 'trending-up';
-      default: return 'bell';
-    }
-  };
+  const handlePress = useCallback(
+    (item: Notification) => {
+      // Read state is settled first and unconditionally. A destination that does
+      // not exist is not a reason to leave a tapped row unread.
+      markRead(item.id);
 
-  const renderItem = ({ item }: { item: Notification }) => {
-    return (
-      <Pressable
-        style={({ pressed }) => [
-          styles.notificationItem,
-          { borderBottomColor: colors.border },
-          !item.isRead && { backgroundColor: colors.secondary },
-          pressed && { opacity: 0.7 },
-        ]}
-        onPress={() => {
-          if (!item.isRead) markAsRead(item.id);
-          if (item.relatedJarId) {
-            router.push(`/jar/${item.relatedJarId}`);
-          } else if (item.actionUrl) {
-            // handle other URLs if needed
-          }
-        }}
-      >
-        <View style={[styles.iconContainer, { backgroundColor: item.isRead ? colors.card : colors.background }]}>
-          <Feather name={getIconForType(item.type)} size={20} color={colors.primary} />
-        </View>
-        <View style={styles.content}>
-          <Text style={[styles.title, { color: colors.foreground }]}>{item.title}</Text>
-          <Text style={[styles.message, { color: colors.mutedForeground }]}>{item.message}</Text>
-          <Text style={[styles.time, { color: colors.mutedForeground }]}>
-            {new Date(item.createdAt).toLocaleDateString()}
-          </Text>
-        </View>
-        {!item.isRead && <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />}
-      </Pressable>
-    );
-  };
+      const href = notificationHref(resolveNotificationDestination(item));
+      // No safe existing destination for this type: stay on the list rather
+      // than inventing a route.
+      if (href) router.push(href as never);
+    },
+    [markRead, router],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: Notification }) => {
+      const unread = !item.isRead;
+      const destination = resolveNotificationDestination(item);
+
+      return (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={notificationAccessibilityLabel({
+            title: item.title,
+            message: item.message,
+            isRead: item.isRead,
+          })}
+          accessibilityHint={notificationAccessibilityHint(destination)}
+          testID={`notification-${item.id}`}
+          onPress={() => handlePress(item)}
+          style={({ pressed }) => [
+            styles.row,
+            { borderBottomColor: colors.border, backgroundColor: colors.background },
+            unread && { backgroundColor: colors.secondary },
+            pressed && { opacity: 0.7 },
+          ]}
+        >
+          {/* Unread is carried by three independent signals — this accent bar,
+              the heavier title, and the "New" pill — so the distinction does not
+              depend on the background tint alone. */}
+          <View
+            style={[
+              styles.accent,
+              { backgroundColor: unread ? colors.primary : 'transparent' },
+            ]}
+          />
+
+          <View style={[styles.iconContainer, { backgroundColor: colors.card }]}>
+            <Feather
+              name={notificationIcon(item.type) as never}
+              size={20}
+              color={unread ? colors.primary : colors.mutedForeground}
+            />
+          </View>
+
+          <View style={styles.content}>
+            <View style={styles.titleRow}>
+              <Text
+                style={[
+                  styles.title,
+                  { color: colors.foreground, fontWeight: unread ? '700' : '500' },
+                ]}
+              >
+                {item.title}
+              </Text>
+              {unread && (
+                <View style={[styles.newPill, { backgroundColor: colors.primary }]}>
+                  <Text style={[styles.newPillText, { color: colors.primaryForeground }]}>New</Text>
+                </View>
+              )}
+            </View>
+            <Text style={[styles.message, { color: colors.mutedForeground }]}>{item.message}</Text>
+            <Text style={[styles.time, { color: colors.mutedForeground }]}>
+              {formatNotificationTimestamp(item.createdAt)}
+            </Text>
+          </View>
+        </Pressable>
+      );
+    },
+    [colors, handlePress],
+  );
+
+  const header = (
+    <View style={[styles.header, { borderBottomColor: colors.border }]}>
+      <Text style={[styles.headerTitle, { color: colors.foreground }]}>Notifications</Text>
+      {/* Offered only when there is something to mark. A permanently visible
+          control on an all-read list is a button that does nothing. */}
+      {unreadCount > 0 && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Mark all as read"
+          testID="mark-all-read"
+          disabled={isMarkingAllRead}
+          onPress={markAllRead}
+          style={({ pressed }) => [styles.markAll, pressed && { opacity: 0.6 }]}
+        >
+          <Text style={[styles.markAllText, { color: colors.primary }]}>Mark all as read</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+
+  // Loading, error, empty, and populated are four distinct renders. Collapsing
+  // error into empty is what tells an account whose request failed that it has
+  // nothing — the defect already fixed on Home and My Jars.
+  const listEmptyComponent = isLoading ? (
+    <View testID="notifications-loading" style={styles.skeletons}>
+      <SkeletonLoader height={80} />
+      <SkeletonLoader height={80} />
+      <SkeletonLoader height={80} />
+    </View>
+  ) : isError ? (
+    <View testID="notifications-error">
+      <EmptyState
+        icon="alert-circle"
+        title="We couldn't load your notifications"
+        description="Check your connection and try again."
+        action={{ label: 'Try again', onPress: () => void refresh() }}
+      />
+    </View>
+  ) : (
+    <View testID="notifications-empty">
+      <EmptyState
+        icon="bell"
+        title="You're all caught up"
+        description="We'll notify you when there's activity in your jars."
+      />
+    </View>
+  );
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>Notifications</Text>
-      </View>
+      {header}
 
       <FlatList
-        data={notifications || []}
+        data={notifications}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
-        refreshing={isRefetching}
-        onRefresh={refetch}
-        ListEmptyComponent={
-          isLoading ? (
-            <View style={{ padding: 16, gap: 16 }}>
-              <SkeletonLoader height={80} />
-              <SkeletonLoader height={80} />
+        refreshing={isRefreshing}
+        onRefresh={refresh}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
+        ListEmptyComponent={listEmptyComponent}
+        ListFooterComponent={
+          isLoadingMore ? (
+            <View testID="notifications-loading-more" style={styles.footer}>
+              <ActivityIndicator color={colors.primary} />
             </View>
-          ) : (
-            <EmptyState
-              icon="bell"
-              title="You're all caught up"
-              description="We'll notify you when there's activity in your jars."
-            />
-          )
+          ) : hasMore ? (
+            <View style={styles.footer} />
+          ) : null
         }
       />
     </View>
@@ -98,27 +222,21 @@ export default function NotificationsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.05)',
   },
-  headerTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-  },
-  listContent: {
-    flexGrow: 1,
-  },
-  notificationItem: {
-    flexDirection: 'row',
-    padding: 16,
-    borderBottomWidth: 1,
-  },
+  headerTitle: { fontSize: 32, fontWeight: 'bold' },
+  markAll: { paddingVertical: 6, paddingHorizontal: 4 },
+  markAllText: { fontSize: 14, fontWeight: '600' },
+  listContent: { flexGrow: 1 },
+  row: { flexDirection: 'row', padding: 16, borderBottomWidth: 1, alignItems: 'flex-start' },
+  accent: { width: 3, alignSelf: 'stretch', borderRadius: 2, marginRight: 13 },
   iconContainer: {
     width: 48,
     height: 48,
@@ -126,33 +244,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
-    elevation: 2,
+    ...Platform.select({
+      web: {},
+      default: {
+        shadowColor: '#000',
+        shadowOpacity: 0.05,
+        shadowOffset: { width: 0, height: 2 },
+        shadowRadius: 4,
+        elevation: 2,
+      },
+    }),
   },
-  content: {
-    flex: 1,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  message: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 8,
-  },
-  time: {
-    fontSize: 12,
-  },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginLeft: 8,
-    marginTop: 8,
-  },
+  content: { flex: 1 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  title: { fontSize: 16, flexShrink: 1 },
+  newPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  newPillText: { fontSize: 11, fontWeight: '700' },
+  message: { fontSize: 14, lineHeight: 20, marginBottom: 8 },
+  time: { fontSize: 12 },
+  skeletons: { padding: 16, gap: 16 },
+  footer: { paddingVertical: 24 },
 });

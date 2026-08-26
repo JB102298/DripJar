@@ -894,6 +894,7 @@ export const NotificationType = {
   member_joined: 'member_joined',
   contribution_recorded: 'contribution_recorded',
   contribution_due: 'contribution_due',
+  contribution_missed: 'contribution_missed',
   contribution_overdue: 'contribution_overdue',
   jar_halfway_funded: 'jar_halfway_funded',
   milestone_funded: 'milestone_funded',
@@ -902,6 +903,11 @@ export const NotificationType = {
   member_rejected_commitment: 'member_rejected_commitment',
   lock_date_approaching: 'lock_date_approaching',
   goal_fully_funded: 'goal_fully_funded',
+  cutoff_upcoming: 'cutoff_upcoming',
+  cutoff_reached: 'cutoff_reached',
+  agreement_required: 'agreement_required',
+  autodrip_succeeded: 'autodrip_succeeded',
+  autodrip_needs_attention: 'autodrip_needs_attention',
   general: 'general',
 } as const;
 
@@ -916,6 +922,11 @@ export interface Notification {
   relatedJarName?: string | null;
   actionUrl?: string | null;
   createdAt: string;
+}
+
+export interface UnreadNotificationCount {
+  /** @minimum 0 */
+  unreadCount: number;
 }
 
 export type ActivityEventEventType = typeof ActivityEventEventType[keyof typeof ActivityEventEventType];
@@ -1083,6 +1094,17 @@ memberId?: string;
 
 export type ListNotificationsParams = {
 unreadOnly?: boolean;
+/**
+ * Page size. Defaults to 50, capped at 100.
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Rows to skip. Ordering is newest first and stable.
+ * @minimum 0
+ */
+offset?: number;
 };
 
 export type ListJarActivityParams = {

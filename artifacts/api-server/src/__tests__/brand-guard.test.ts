@@ -51,6 +51,9 @@ const SCAN_DIRS = [
   "artifacts/mobile/hooks",
   "artifacts/mobile/contexts",
   "artifacts/mobile/components",
+  // Customer-facing copy lives here too (jar category placeholders, the
+  // notification presentation table), and it was outside the guard entirely.
+  "artifacts/mobile/lib",
   "lib/api-spec",
   "scripts/src",
 ];
