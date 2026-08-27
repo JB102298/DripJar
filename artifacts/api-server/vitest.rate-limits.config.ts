@@ -14,6 +14,9 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    // Same fail-closed database check as the main config — this suite is
+    // equally DB-backed and must not reach dripjar_dev either.
+    globalSetup: ["./src/__tests__/support/db-global-setup.ts"],
     // Rate-limit tests can issue many sequential requests against the DB;
     // allow slightly more time than the normal suite.
     testTimeout: 60_000,

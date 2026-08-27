@@ -37,6 +37,13 @@ yarn-error.log
 testem.log
 /typings
 
+# Local environment files — never commit credentials.
+# Templates are kept so the required variables stay documented in the repo.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
 # System Files
 .DS_Store
 Thumbs.db

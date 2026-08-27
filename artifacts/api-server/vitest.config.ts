@@ -4,6 +4,10 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    // Fail-closed database check, once, before any worker is forked.
+    // The environment itself is set by scripts/test-db.mjs before vitest
+    // starts; this only asserts. See support/db-global-setup.ts.
+    globalSetup: ["./src/__tests__/support/db-global-setup.ts"],
     // Raised from 30 000 to 60 000 so that tests which call process-reminders
     // without an explicit per-test override do not time-out under full-suite load
     // (~25–30 s per reminder flush when all prior test files have populated the DB).

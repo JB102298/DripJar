@@ -65,7 +65,9 @@ describe("reset guards", () => {
       expect(r.ok, `database ${db} must be refused`).toBe(false);
       if (!r.ok) expect(r.failure.code).toBe("UNKNOWN_DATABASE");
     }
-    expect(APPROVED_DATABASES).toEqual(["dripjar_dev"]);
+    // Exactly two entries, both literals: the owner QA database and the
+    // disposable test database that M1 provisions. Never a pattern.
+    expect(APPROVED_DATABASES).toEqual(["dripjar_dev", "dripjar_test"]);
   });
 
   it("refuses a non-synthetic email domain", () => {

@@ -82,8 +82,21 @@ export const APPROVED_SYNTHETIC_EMAILS: readonly string[] = [
   "demo@dripjar.dev",
 ];
 
-/** Databases this tool may touch. Anything else is refused by name. */
-export const APPROVED_DATABASES: readonly string[] = ["dripjar_dev"];
+/**
+ * Databases this tool may touch. Anything else is refused by name.
+ *
+ * Two exact literals, never a pattern:
+ *   - `dripjar_dev`   the local owner QA/demo database, reset by hand
+ *   - `dripjar_test`  the disposable local test database (`pnpm test:clean`),
+ *                     where suites purge their own tagged fixtures
+ *
+ * `dripjar_test` is listed because the in-process cleanup helper
+ * `purgeSyntheticAccounts` runs the same guards as the CLI, so a suite running
+ * against the test database would otherwise be refused with UNKNOWN_DATABASE.
+ * Adding it here widens nothing else: the email allowlist, the local-host rule,
+ * and the production refusal all still apply, unchanged, to both databases.
+ */
+export const APPROVED_DATABASES: readonly string[] = ["dripjar_dev", "dripjar_test"];
 
 /** Hosts considered local. A remote host is refused even if the name matches. */
 export const LOCAL_HOSTS: readonly string[] = ["localhost", "127.0.0.1", "::1", "[::1]", ""];
