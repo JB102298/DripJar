@@ -26,6 +26,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { pool } from "@workspace/db";
 import { runReset, buildManifest } from "../lib/owner-reset.js";
+import { withGlobalSweepExclusion } from "./support/fixtures.js";
 
 const unique = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const q = async (sql: string, params: unknown[] = []) => (await pool.query(sql, params)).rows;
@@ -342,7 +343,9 @@ describe("owner reset against a ledger-backed jar", () => {
   });
 
   it("deletes the entire ledger-backed graph and leaves nothing orphaned", async () => {
-    const res = await runReset({ email: g.targetEmail, confirm: true, quiet: true, approvedEmails: approvedFor(g.targetEmail) });
+    const res = await withGlobalSweepExclusion(() =>
+      runReset({ email: g.targetEmail, confirm: true, quiet: true, approvedEmails: approvedFor(g.targetEmail) }),
+    );
     const r = res.reconciliation!;
 
     // The cycle resolved.
@@ -389,7 +392,9 @@ describe("owner reset against a ledger-backed jar", () => {
     const beforeEntries = await q(`select id, account_id, entry_type, amount_cents from ledger_entries where ledger_transaction_id=$1 order by entry_type`, [g.otherLedgerTxId]);
     const beforeUser = await q(`select id,email,password_hash,email_verified from users where id=$1`, [g.otherId]);
 
-    await runReset({ email: g.targetEmail, confirm: true, quiet: true, approvedEmails: approvedFor(g.targetEmail) });
+    await withGlobalSweepExclusion(() =>
+      runReset({ email: g.targetEmail, confirm: true, quiet: true, approvedEmails: approvedFor(g.targetEmail) }),
+    );
 
     expect(await q(`select * from financial_transactions where id=$1`, [g.otherFtId])).toEqual(beforeFt);
     expect(await q(`select id, account_id, entry_type, amount_cents from ledger_entries where ledger_transaction_id=$1 order by entry_type`, [g.otherLedgerTxId])).toEqual(beforeEntries);
@@ -402,7 +407,9 @@ describe("owner reset against a ledger-backed jar", () => {
   });
 
   it("removes ghost notices for every recipient without touching unrelated ones", async () => {
-    await runReset({ email: g.targetEmail, confirm: true, quiet: true, approvedEmails: approvedFor(g.targetEmail) });
+    await withGlobalSweepExclusion(() =>
+      runReset({ email: g.targetEmail, confirm: true, quiet: true, approvedEmails: approvedFor(g.targetEmail) }),
+    );
 
     // The co-member's notice ABOUT the deleted jar is gone.
     expect(await count(`select count(*)::int c from notifications where user_id=$1 and message='about the deleted jar'`, [g.otherId])).toBe(0);

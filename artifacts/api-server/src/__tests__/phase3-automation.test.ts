@@ -9,14 +9,38 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import request from "supertest";
 import app from "../app.js";
+import {
+  captureOrphanBaseline,
+  createFixtureTag,
+  teardownFixtures,
+  withGlobalSweepExclusion,
+  type OrphanBaseline,
+} from "./support/fixtures.js";
 
 const BASE = "/api";
 const INTERNAL_TOKEN = "test-internal-token-phase3";
 
+/**
+ * One tag for the whole file. Every account and jar this file creates carries
+ * it, so teardown can find them by query even when a setup helper threw
+ * half-way through building one.
+ */
+const FIXTURES = createFixtureTag("phase3");
+
+let orphanBaseline: OrphanBaseline;
+
+beforeAll(async () => {
+  orphanBaseline = await captureOrphanBaseline();
+});
+
+afterAll(async () => {
+  await teardownFixtures(FIXTURES, { baseline: orphanBaseline });
+});
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 async function register(suffix: string) {
-  const email = `phase3-${suffix}-${Date.now()}@test.invalid`;
+  const email = FIXTURES.email(`phase3${suffix}`);
   const res = await request(app).post(`${BASE}/auth/register`).send({
     email, password: "P@ssword1!", firstName: "Test", lastName: `User${suffix}`,
   });
@@ -28,7 +52,7 @@ async function createJar(token: string, extra: Record<string, unknown> = {}) {
   const future = new Date(); future.setFullYear(future.getFullYear() + 1);
   const targetDate = future.toISOString().slice(0, 10);
   const res = await request(app).post(`${BASE}/jars`).set("Authorization", `Bearer ${token}`).send({
-    name: "Test Jar", category: "Vacation", targetDate, goalAmountCents: 100000,
+    name: FIXTURES.name("Test Jar"), category: "Vacation", targetDate, goalAmountCents: 100000,
     ...extra,
   });
   expect(res.status).toBe(201);
@@ -46,6 +70,128 @@ async function getJar(token: string, jarId: string) {
   expect(res.status).toBe(200);
   return res.body as { id: string; status: string; cutoffDate: string | null; phase: string; daysUntilCutoff: number | null };
 }
+
+// ── Owned reminder fixtures ──────────────────────────────────────────────────
+//
+// The reminder endpoint is deliberately global: one call sweeps every active
+// schedule and every Saving jar in the database, and that is the production
+// contract. It is therefore the wrong thing to *measure*. Under
+// `fileParallelism` the response totals include work created by whatever other
+// test files happen to be running, and rows those files clean up disappear
+// between two calls — so a test that compares global totals across two runs is
+// asserting on other people's fixtures, not on the processor.
+//
+// What follows builds a reminder this file owns end to end: its own account,
+// its own jar, its own schedule, and therefore its own event key. Every
+// idempotency assertion below reads only rows belonging to that account, which
+// makes the proof exact instead of statistical, and leaves the endpoint's
+// global behaviour completely untouched.
+
+/**
+ * A launched jar whose organizer has an active schedule starting today, which
+ * makes exactly one `contribution_due` reminder eligible on the next run.
+ *
+ * The jar carries no cutoff date and the organizer has accepted the current
+ * agreement, so no cutoff or agreement reminder is eligible for this account —
+ * "every reminder event for this user" is therefore the same set as "the one
+ * reminder this fixture owns", which is what lets the assertions be exact.
+ */
+async function createOwnedDueReminder(suffix: string) {
+  const org = await register(suffix);
+  const jar = await createJar(org.token);
+  await launchJar(org.token, jar.id);
+
+  const agreements = await request(app)
+    .get(`${BASE}/jars/${jar.id}/agreements`)
+    .set("Authorization", `Bearer ${org.token}`);
+  expect(agreements.status).toBe(200);
+  const agreementId = agreements.body[0]?.id as string | undefined;
+  expect(agreementId, "a launched jar must carry an agreement").toBeTruthy();
+
+  const accept = await request(app)
+    .post(`${BASE}/jars/${jar.id}/agreements/${agreementId}/accept`)
+    .set("Authorization", `Bearer ${org.token}`);
+  expect(accept.status, JSON.stringify(accept.body)).toBe(200);
+
+  // Starting today makes the schedule `due_today` with nothing outstanding.
+  // TZ is pinned to UTC by the test-db wrapper, so this matches the date the
+  // processor derives.
+  const todayUTC = new Date().toISOString().slice(0, 10);
+  const sched = await request(app)
+    .post(`${BASE}/jars/${jar.id}/schedule`)
+    .set("Authorization", `Bearer ${org.token}`)
+    .send({ frequency: "monthly", amountCents: 25_000, startDate: todayUTC });
+  expect(sched.status, JSON.stringify(sched.body)).toBe(201);
+
+  return {
+    ...org,
+    jarId: jar.id,
+    scheduleId: sched.body.id as string,
+    /**
+     * The processor's idempotency key for this schedule. Recomputed rather than
+     * hard-coded so a change to the key format fails loudly here instead of
+     * silently making the assertions vacuous.
+     */
+    eventKey: `contribution_due:${sched.body.id}:${todayUTC}`,
+  };
+}
+
+/** Every reminder event belonging to one account. This file's unit of ownership. */
+async function reminderEventsForUser(userId: string) {
+  return _db
+    .select()
+    .from(_rse)
+    .where(_eq(_rse.userId, userId));
+}
+
+/** Financial rows attached to one jar. The reminder processor must create none. */
+async function financialRowsForJar(jarId: string) {
+  const fts = await _db
+    .select({ id: _financialTransactions.id })
+    .from(_financialTransactions)
+    .where(_eq(_financialTransactions.jarId, jarId));
+
+  let entries = 0;
+  for (const ft of fts) {
+    const [row] = await _db
+      .select({ n: _count() })
+      .from(_ledgerEntries)
+      .innerJoin(
+        _ledgerTransactions,
+        _eq(_ledgerTransactions.id, _ledgerEntries.ledgerTransactionId),
+      )
+      .where(_eq(_ledgerTransactions.financialTransactionId, ft.id));
+    entries += Number(row?.n ?? 0);
+  }
+
+  return { financialTransactions: fts.length, ledgerEntries: entries };
+}
+
+/** Every in-app notification belonging to one account. */
+async function notificationsForUser(userId: string) {
+  return _db
+    .select()
+    .from(_notifications)
+    .where(_eq(_notifications.userId, userId));
+}
+
+/**
+ * Drive the global reminder sweep.
+ *
+ * Held under the shared sweep lock: the endpoint reads every schedule and every
+ * Saving jar in the database and then writes a row per eligible reminder, so a
+ * concurrent file's teardown deleting one of those users or jars mid-sweep
+ * makes the insert fail its foreign key. Excluding the two operations from
+ * overlapping is what makes this deterministic — nothing about the endpoint's
+ * behaviour changes, and no other file is slowed. See support/fixtures.ts.
+ */
+const runProcessor = () =>
+  withGlobalSweepExclusion(() =>
+    request(app)
+      .post(`${BASE}/internal/process-reminders`)
+      .set("X-Internal-Token", INTERNAL_TOKEN)
+      .then((res) => res),
+  );
 
 // ── PART 1: Cutoff date model ─────────────────────────────────────────────────
 
@@ -389,22 +535,22 @@ describe("Email notification preferences", () => {
 describe("Reminder processor idempotency", () => {
   const originalToken = process.env["INTERNAL_REMINDER_TOKEN"];
 
-  // 60s: a single processor flush scans all active schedules and saving jars.
-  // When the full test suite runs (singleFork), earlier test files create many
-  // jars/schedules, making each processor call take ~25–30s.  60s gives enough
-  // headroom so the flush beforeAll does not itself time out.
+  /** The single reminder this block owns. Every assertion below reads only it. */
+  let owned: Awaited<ReturnType<typeof createOwnedDueReminder>>;
+
+  // 60s: one processor call sweeps every active schedule and Saving jar in the
+  // database, which under full-suite load is every fixture the other files have
+  // built. That cost is Phase M3's subject, not this file's — the budget here
+  // only has to be large enough that it is not the thing under test.
   beforeAll(async () => {
     process.env["INTERNAL_REMINDER_TOKEN"] = INTERNAL_TOKEN;
-    // Flush all accumulated reminder events (from previous test runs or earlier
-    // describe blocks) to terminal state before the idempotency tests start.
-    // In NODE_ENV=test the processor returns vacuous-success for every email,
-    // so a single run drains every pending/failed row to 'sent' or
-    // 'skipped_preference'. This ensures the deduplication assertions below are
-    // not polluted by pre-existing pending events.
-    await request(app)
-      .post(`${BASE}/internal/process-reminders`)
-      .set("X-Internal-Token", INTERNAL_TOKEN);
+    owned = await createOwnedDueReminder("idem-owned");
+    // One run to fire the owned reminder. Its *effects* are what the first test
+    // inspects; no global total from this call is recorded or asserted on.
+    const first = await runProcessor();
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
   }, 60_000);
+
   afterAll(() => {
     if (originalToken !== undefined) process.env["INTERNAL_REMINDER_TOKEN"] = originalToken;
     else delete process.env["INTERNAL_REMINDER_TOKEN"];
@@ -423,9 +569,7 @@ describe("Reminder processor idempotency", () => {
   });
 
   it("runs successfully and returns stats object", async () => {
-    const res = await request(app)
-      .post(`${BASE}/internal/process-reminders`)
-      .set("X-Internal-Token", INTERNAL_TOKEN);
+    const res = await runProcessor();
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("schedulesProcessed");
     expect(res.body).toHaveProperty("contributionDueSent");
@@ -437,33 +581,95 @@ describe("Reminder processor idempotency", () => {
     expect(res.body).toHaveProperty("runAt");
   });
 
-  // 90s: this test calls the processor twice in sequence.  Under full-suite load
-  // each call can take ~25–30s (processor scans all active schedules/jars created
-  // by the 14 other test files).  90s covers 2 × 30s comfortably.
-  it("running twice does not double-count notifications (deduplication)", { timeout: 90_000 }, async () => {
-    // First run
-    const r1 = await request(app)
-      .post(`${BASE}/internal/process-reminders`)
-      .set("X-Internal-Token", INTERNAL_TOKEN);
-    expect(r1.status).toBe(200);
-    const firstSent = r1.body.contributionDueSent + r1.body.contributionMissedSent
-      + r1.body.cutoffUpcoming7dSent + r1.body.cutoffUpcoming1dSent
-      + r1.body.cutoffReachedSent + r1.body.agreementRequiredSent;
+  it("the owned reminder produces exactly one event, one notification, one send", async () => {
+    const events = await reminderEventsForUser(owned.userId);
+    expect(events, "the owned account must hold exactly one reminder event").toHaveLength(1);
 
-    // Second run immediately after — everything r1 sent must be skipped.
-    // Note: vitest runs test files in parallel, so other workers may create new
-    // reminder-eligible events between r1 and r2. Those are legitimately new and
-    // will be processed by r2 — that is not a deduplication failure.
-    // The invariant we verify: skippedDuplicate in r2 >= firstSent (r1's sends
-    // were not re-sent).
-    const r2 = await request(app)
-      .post(`${BASE}/internal/process-reminders`)
-      .set("X-Internal-Token", INTERNAL_TOKEN);
-    expect(r2.status).toBe(200);
-    // If r1 sent anything, r2 must have skipped at least that many as duplicates
-    if (firstSent > 0) {
-      expect(r2.body.skippedDuplicate).toBeGreaterThanOrEqual(firstSent);
-    }
+    const [event] = events;
+    expect(event!.eventKey).toBe(owned.eventKey);
+    expect(event!.eventType).toBe("contribution_due");
+    expect(event!.jarId).toBe(owned.jarId);
+    expect(event!.emailStatus, "the owned reminder must reach a terminal sent state").toBe("sent");
+    expect(event!.emailSentAt).not.toBeNull();
+    expect(event!.emailAttemptCount).toBe(1);
+
+    const notices = await notificationsForUser(owned.userId);
+    const due = notices.filter((n) => n.type === "contribution_due");
+    expect(due, "exactly one in-app notification for the owned reminder").toHaveLength(1);
+    expect(due[0]!.relatedJarId).toBe(owned.jarId);
+  });
+
+  it("running again does not resend, renotify, or re-attempt the owned reminder", { timeout: 90_000 }, async () => {
+    const [before] = await reminderEventsForUser(owned.userId);
+    const noticesBefore = (await notificationsForUser(owned.userId))
+      .filter((n) => n.type === "contribution_due");
+    expect(before).toBeDefined();
+    expect(noticesBefore).toHaveLength(1);
+
+    const again = await runProcessor();
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+
+    const after = await reminderEventsForUser(owned.userId);
+    expect(after, "a second run must not add a reminder event").toHaveLength(1);
+
+    // Same row, untouched: not re-sent, not re-attempted, not re-timestamped.
+    expect(after[0]!.id).toBe(before!.id);
+    expect(after[0]!.emailStatus).toBe("sent");
+    expect(after[0]!.emailAttemptCount, "the send must not have been retried").toBe(
+      before!.emailAttemptCount,
+    );
+    expect(after[0]!.emailSentAt?.getTime()).toBe(before!.emailSentAt?.getTime());
+    expect(after[0]!.sentAt.getTime()).toBe(before!.sentAt.getTime());
+
+    const noticesAfter = (await notificationsForUser(owned.userId))
+      .filter((n) => n.type === "contribution_due");
+    expect(noticesAfter, "a second run must not add a notification").toHaveLength(1);
+    expect(noticesAfter[0]!.id).toBe(noticesBefore[0]!.id);
+  });
+
+  it("a processor run moves no money — no financial transaction, no ledger entry", async () => {
+    // The processor is a read-and-notify sweep. It reads every Saving jar in
+    // the database, so if it ever posted money it would post it on jars owned by
+    // whichever file happened to be running. Scoped to the owned jar, this is a
+    // statement about the endpoint rather than about the database's contents.
+    const before = await financialRowsForJar(owned.jarId);
+    expect(before).toEqual({ financialTransactions: 0, ledgerEntries: 0 });
+
+    const res = await runProcessor();
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    expect(await financialRowsForJar(owned.jarId)).toEqual(before);
+  });
+
+  it("stays idempotent when an unrelated eligible reminder appears between runs", { timeout: 90_000 }, async () => {
+    const [before] = await reminderEventsForUser(owned.userId);
+    expect(before).toBeDefined();
+
+    // A second, independently eligible schedule — the same situation another
+    // test file creates concurrently, made deterministic by creating it here.
+    const other = await createOwnedDueReminder("idem-unrelated");
+    expect(
+      await reminderEventsForUser(other.userId),
+      "the unrelated reminder must not have fired yet",
+    ).toHaveLength(0);
+
+    const res = await runProcessor();
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    // The unrelated reminder fired — so the run genuinely did new work and this
+    // assertion is not vacuous.
+    const otherEvents = await reminderEventsForUser(other.userId);
+    expect(otherEvents, "the unrelated reminder must fire exactly once").toHaveLength(1);
+    expect(otherEvents[0]!.eventKey).toBe(other.eventKey);
+    expect(otherEvents[0]!.emailStatus).toBe("sent");
+
+    // …and the owned reminder is still exactly where it was. New work elsewhere
+    // is not a deduplication failure, and it is not allowed to disturb this one.
+    const after = await reminderEventsForUser(owned.userId);
+    expect(after).toHaveLength(1);
+    expect(after[0]!.id).toBe(before!.id);
+    expect(after[0]!.emailAttemptCount).toBe(before!.emailAttemptCount);
+    expect(after[0]!.emailSentAt?.getTime()).toBe(before!.emailSentAt?.getTime());
   });
 });
 
@@ -549,17 +755,13 @@ describe("Email environment guard (Part 2)", () => {
   });
 
   it("NODE_ENV=test: processor completes without error (no real emails sent)", async () => {
-    const res = await request(app)
-      .post(`${BASE}/internal/process-reminders`)
-      .set("X-Internal-Token", INTERNAL_TOKEN);
+    const res = await runProcessor();
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("runAt");
   });
 
   it("processor stats do not contain credential strings in response", async () => {
-    const res = await request(app)
-      .post(`${BASE}/internal/process-reminders`)
-      .set("X-Internal-Token", INTERNAL_TOKEN);
+    const res = await runProcessor();
     expect(res.status).toBe(200);
     const body = JSON.stringify(res.body);
     expect(body).not.toContain("RESEND_API_KEY");
@@ -567,9 +769,7 @@ describe("Email environment guard (Part 2)", () => {
   });
 
   it("all numeric stat fields are present and numeric after any run", async () => {
-    const res = await request(app)
-      .post(`${BASE}/internal/process-reminders`)
-      .set("X-Internal-Token", INTERNAL_TOKEN);
+    const res = await runProcessor();
     expect(res.status).toBe(200);
     const numericFields = [
       "schedulesProcessed", "contributionDueSent", "contributionMissedSent",
@@ -586,23 +786,26 @@ describe("Email environment guard (Part 2)", () => {
 // ── Part 4: Email delivery state tracking ─────────────────────────────────────
 
 import { db as _db } from "@workspace/db";
-import { reminderSentEvents as _rse } from "@workspace/db";
-import { eq as _eq } from "drizzle-orm";
+import {
+  reminderSentEvents as _rse,
+  notifications as _notifications,
+  financialTransactions as _financialTransactions,
+  ledgerTransactions as _ledgerTransactions,
+  ledgerEntries as _ledgerEntries,
+} from "@workspace/db";
+import { eq as _eq, count as _count } from "drizzle-orm";
 
 describe("Email delivery state tracking (Part 4)", () => {
   const originalToken = process.env["INTERNAL_REMINDER_TOKEN"];
 
-  // 60s: same reasoning as "Reminder processor idempotency" above — a single
-  // processor flush scans every active schedule and saving jar in the DB, which
-  // can take ~25–30s in the full-suite context.
+  /** This block's own reminder, so its delivery-state claims are about one row. */
+  let owned: Awaited<ReturnType<typeof createOwnedDueReminder>>;
+
+  // 60s: the processor sweeps every schedule and Saving jar in the database.
+  // See the note on the idempotency block above.
   beforeAll(async () => {
     process.env["INTERNAL_REMINDER_TOKEN"] = INTERNAL_TOKEN;
-    // Same flush strategy as "Reminder processor idempotency" above: drain all
-    // accumulated pending/failed rows to terminal state before the dedup
-    // assertion tests run, so cross-run DB state does not contaminate them.
-    await request(app)
-      .post(`${BASE}/internal/process-reminders`)
-      .set("X-Internal-Token", INTERNAL_TOKEN);
+    owned = await createOwnedDueReminder("delivery-owned");
   }, 60_000);
   afterAll(() => {
     if (originalToken !== undefined) process.env["INTERNAL_REMINDER_TOKEN"] = originalToken;
@@ -610,33 +813,53 @@ describe("Email delivery state tracking (Part 4)", () => {
   });
 
   it("all reminder_sent_events rows have a valid email_status after a processor run", async () => {
-    await request(app)
-      .post(`${BASE}/internal/process-reminders`)
-      .set("X-Internal-Token", INTERNAL_TOKEN);
+    const res = await runProcessor();
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
 
-    const rows = await _db.select({ status: _rse.emailStatus }).from(_rse).limit(100);
-    const validStatuses = new Set(["pending", "sent", "failed", "skipped_preference"]);
+    // Deliberately whole-table: "no row anywhere may hold a status outside the
+    // enum" is a product-level invariant, and reading rows another file wrote
+    // strengthens it rather than making it fragile — there is no count here to
+    // race against. The owned row is checked separately below.
+    const rows = await _db.select({ status: _rse.emailStatus }).from(_rse);
+    const validStatuses = new Set(["pending", "sending", "sent", "failed", "skipped_preference"]);
     for (const row of rows) {
       expect(validStatuses.has(row.status), `email_status '${row.status}' is not a valid state`).toBe(true);
     }
   });
 
-  // 90s: calls the processor twice — same reasoning as "running twice" above.
-  it("second run: events already sent are reported as skipped_duplicate (not re-sent)", { timeout: 90_000 }, async () => {
-    const r1 = await request(app)
-      .post(`${BASE}/internal/process-reminders`)
-      .set("X-Internal-Token", INTERNAL_TOKEN);
-    expect(r1.status).toBe(200);
+  it("the owned reminder reaches 'sent' with a delivery timestamp and one attempt", async () => {
+    const res = await runProcessor();
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
 
-    const r2 = await request(app)
-      .post(`${BASE}/internal/process-reminders`)
-      .set("X-Internal-Token", INTERNAL_TOKEN);
-    expect(r2.status).toBe(200);
+    const events = await reminderEventsForUser(owned.userId);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.eventKey).toBe(owned.eventKey);
+    expect(events[0]!.emailStatus).toBe("sent");
+    expect(events[0]!.emailSentAt).not.toBeNull();
+    expect(events[0]!.emailAttemptCount).toBe(1);
+  });
 
-    const newOnSecond = r2.body.contributionDueSent + r2.body.contributionMissedSent
-      + r2.body.cutoffUpcoming7dSent + r2.body.cutoffUpcoming1dSent
-      + r2.body.cutoffReachedSent + r2.body.agreementRequiredSent;
-    expect(newOnSecond).toBe(0);
+  // 90s: calls the processor twice.
+  it("second run: an already-sent event is not re-sent", { timeout: 90_000 }, async () => {
+    const r1 = await runProcessor();
+    expect(r1.status, JSON.stringify(r1.body)).toBe(200);
+
+    const [before] = await reminderEventsForUser(owned.userId);
+    expect(before, "the owned reminder must already have fired").toBeDefined();
+    expect(before!.emailStatus).toBe("sent");
+
+    const r2 = await runProcessor();
+    expect(r2.status, JSON.stringify(r2.body)).toBe(200);
+
+    // Proven on the owned row rather than on the response totals. Another file
+    // creating a legitimately-new eligible reminder between r1 and r2 would move
+    // those totals without meaning anything went wrong here, which is why the
+    // former `newOnSecond === 0` assertion could not survive concurrency.
+    const after = await reminderEventsForUser(owned.userId);
+    expect(after).toHaveLength(1);
+    expect(after[0]!.id).toBe(before!.id);
+    expect(after[0]!.emailAttemptCount).toBe(before!.emailAttemptCount);
+    expect(after[0]!.emailSentAt?.getTime()).toBe(before!.emailSentAt?.getTime());
   });
 
   it("inserting a 'failed' row and re-checking state leaves it retry-eligible (DB state test)", async () => {
@@ -671,9 +894,7 @@ describe("Email delivery state tracking (Part 4)", () => {
       .set("Authorization", `Bearer ${user.token}`)
       .send({ emailPrefContributionReminders: false });
 
-    const res = await request(app)
-      .post(`${BASE}/internal/process-reminders`)
-      .set("X-Internal-Token", INTERNAL_TOKEN);
+    const res = await runProcessor();
     expect(res.status).toBe(200);
     expect(typeof res.body.emailSkippedPreference).toBe("number");
   });
@@ -909,9 +1130,7 @@ describe("Timing-safe internal token guard (Part 9)", () => {
   });
 
   it("correct token → 200", async () => {
-    const res = await request(app)
-      .post(`${BASE}/internal/process-reminders`)
-      .set("X-Internal-Token", INTERNAL_TOKEN);
+    const res = await runProcessor();
     expect(res.status).toBe(200);
   });
 

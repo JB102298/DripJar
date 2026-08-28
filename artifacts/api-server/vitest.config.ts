@@ -14,9 +14,22 @@ export default defineConfig({
     // This is a test-only change; production reminder logic is unaffected.
     testTimeout: 60_000,
     hookTimeout: 60_000,
-    // Run files sequentially to avoid DB conflicts between integration tests
+    // ─── Test files run in PARALLEL ──────────────────────────────────────────
+    //
+    // This block used to carry `singleFork: true` and a comment claiming files
+    // ran sequentially. Neither was true. `singleFork` lived under
+    // `poolOptions.forks` and was removed outright in Vitest 4, so as written it
+    // was an unknown key that Vitest silently ignored — `fileParallelism`
+    // defaults to true, and the suite has been running roughly seven files at a
+    // time (a full run reports ~230s of test time inside ~33s of wall clock).
+    //
+    // The option is gone rather than relocated. Serialising the suite would hide
+    // cross-file interference instead of fixing it, and would multiply the run
+    // time by that same factor. Integration tests are expected to tolerate
+    // concurrency: fixtures are uniquely tagged, assertions are scoped to rows
+    // the file owns, and teardown removes exactly those rows.
+    // See src/__tests__/support/fixtures.ts.
     pool: "forks",
-    singleFork: true,
     // The rate-limit suite runs under a separate config (vitest.rate-limits.config.ts)
     // with TEST_RATE_LIMITS=1.  Excluding it here keeps the normal suite fast and
     // prevents exhausted in-memory counters from leaking across test commands.

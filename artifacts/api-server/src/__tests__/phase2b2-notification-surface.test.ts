@@ -28,6 +28,7 @@ import { eq } from "drizzle-orm";
 
 import app from "../app.js";
 import { purgeSyntheticAccounts } from "../lib/owner-reset.js";
+import { withGlobalSweepExclusion } from "./support/fixtures.js";
 
 const BASE = "/api";
 
@@ -89,8 +90,22 @@ async function seedNotifications(
   return inserted.map((r) => r.id);
 }
 
-const countAllNotifications = async () =>
-  Number((await pool.query(`select count(*)::int c from notifications`)).rows[0].c);
+/**
+ * Notifications belonging to one account.
+ *
+ * This was `select count(*) from notifications` with no predicate, used to prove
+ * that reading never writes. Under parallel test files that measured the whole
+ * database: any other file creating a notification between the two reads made it
+ * fail (`expected 647 to be 644`), and no such failure had anything to do with
+ * the read routes. Scoping to the account under test proves the same thing about
+ * the same routes — the reads are all single-account routes — and observes
+ * nobody else's rows.
+ */
+const countNotificationsFor = async (userId: string) =>
+  Number(
+    (await pool.query(`select count(*)::int c from notifications where user_id = $1`, [userId]))
+      .rows[0].c,
+  );
 
 const unreadCountFor = async (userId: string) =>
   Number(
@@ -118,7 +133,9 @@ afterAll(async () => {
   ).rows.map((r) => r.email as string);
 
   if (tagged.length) {
-    await purgeSyntheticAccounts(tagged, { approvedEmails: tagged, quiet: true });
+    await withGlobalSweepExclusion(() =>
+        purgeSyntheticAccounts(tagged, { approvedEmails: tagged, quiet: true }),
+      );
   }
 
   expect(
@@ -520,7 +537,8 @@ describe("reading never creates a notification", () => {
     const user = await register("noside");
     const ids = await seedNotifications(user.userId, 3);
 
-    const totalBefore = await countAllNotifications();
+    const ownedBefore = await countNotificationsFor(user.userId);
+    expect(ownedBefore, "the seeded rows are the account's whole history").toBe(3);
 
     await request(app).get(`${BASE}/notifications`).set(user.auth).expect(200);
     await request(app).get(`${BASE}/notifications?unreadOnly=true`).set(user.auth).expect(200);
@@ -530,7 +548,14 @@ describe("reading never creates a notification", () => {
     await request(app).post(`${BASE}/notifications/read-all`).set(user.auth).expect(200);
     await request(app).get(`${BASE}/notifications`).set(user.auth).expect(200);
 
-    expect(await countAllNotifications()).toBe(totalBefore);
+    // Reads created nothing, and the ids are the same rows — not three
+    // replacements that happen to total three.
+    expect(await countNotificationsFor(user.userId)).toBe(ownedBefore);
+    const after = await pool.query(
+      `select id from notifications where user_id = $1 order by id`,
+      [user.userId],
+    );
+    expect(after.rows.map((r) => r.id).sort()).toEqual([...ids].sort());
   });
 
   it("does not create a notification for a listing account with none", async () => {

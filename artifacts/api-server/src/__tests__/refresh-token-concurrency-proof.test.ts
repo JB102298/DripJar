@@ -1,135 +1,194 @@
 /**
- * Concurrency connection proof for Task 4 final verification.
+ * Concurrency proof for refresh-token rotation.
  *
- * Proves that concurrent refresh genuinely exercises PostgreSQL row locking
- * across SEPARATE database connections (distinct backend PIDs), rather than
- * being serialised inside a single connection.
+ * The invariant under test is a product contract: two refresh attempts using
+ * the same token can never both rotate it, and whatever state the race leaves
+ * behind must be the state the replay design specifies.
  *
  * Two layers of proof:
  *
- *  A. HTTP layer — two concurrent POST /api/auth/refresh requests with the
- *     same token. The pg Pool's "acquire" events record client.processID
- *     (the PostgreSQL backend PID established at connection startup) for
- *     every connection handed out during the concurrent window. We assert
- *     that at least two DISTINCT backend PIDs were acquired concurrently,
- *     one response is 200, one is 401, and exactly one replacement row
- *     exists.
+ *  A. HTTP layer — two concurrent POST /api/auth/refresh with the same token.
+ *     Exactly one 200 and one 401, and the resulting rows say *why*: the
+ *     original session is revoked as 'rotated' by the winner, and the
+ *     replacement the winner issued is revoked as 'token_reuse_detected' by
+ *     the loser. That second reason is what makes this a concurrency proof —
+ *     it can only be written by a request that found the row already rotated,
+ *     which means the two attempts contended for the same row and the lock
+ *     serialised them. The winner's new token is then rejected, because the
+ *     replay response revoked the whole family.
  *
- *  B. Direct SQL layer — two dedicated pool connections replicate the exact
- *     locking pattern of the refresh route (SELECT … FOR UPDATE on the same
- *     session row). Each records SELECT pg_backend_pid(). Connection A locks
- *     the row, revokes it, and commits while connection B is provably
- *     blocked waiting on the row lock; B then observes the COMMITTED revoked
- *     state. PIDs are asserted different.
+ *  B. Direct SQL layer — two dedicated pool connections replicate the route's
+ *     locking pattern (SELECT … FOR UPDATE on the same session row).
+ *     Connection A locks the row, revokes it, and commits while B is *provably*
+ *     blocked — established by polling `pg_locks` for an ungranted lock held by
+ *     B's backend, not by sleeping and hoping. B then observes the committed
+ *     revoked state.
  *
- * No raw tokens are logged. Only backend PIDs and row ids are recorded.
+ * ─── WHY NO BACKEND-PID ASSERTION ────────────────────────────────────────────
+ *
+ * This file used to assert that the concurrent window acquired at least two
+ * distinct PostgreSQL backend PIDs, read from the pool's "acquire" events.
+ * That is not a product contract — nothing in DripJar promises which backend
+ * serves a request — and it is not reliably true either: if one request
+ * finishes with its connection before the other acquires, the pool hands back
+ * the same client and the same PID, and the assertion fails on a suite that is
+ * behaving perfectly. Connection topology was standing in for the thing that
+ * actually matters, which is the row state above.
+ *
+ * `pg_backend_pid()` still appears in layer B, but as a lookup key for
+ * `pg_locks` — identifying which backend to inspect — never as an assertion.
+ *
+ * No raw tokens are logged. Only row ids and revocation reasons are recorded.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
-import type { PoolClient } from "pg";
 import { db, pool, refreshSessions } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { hashToken } from "../lib/auth.js";
 import app from "../app.js";
+import {
+  captureOrphanBaseline,
+  createFixtureTag,
+  teardownFixtures,
+  type OrphanBaseline,
+} from "./support/fixtures.js";
 
-const makeUser = () => {
-  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return {
-    email: `ccp-${id}@example.com`,
-    password: "Password1!",
-    firstName: "CC",
-    lastName: "Proof",
-  };
-};
+const FIXTURES = createFixtureTag("ccproof");
 
-describe("Concurrency connection proof — separate PostgreSQL backends", () => {
-  it("A. concurrent HTTP refreshes use distinct backend PIDs; one 200 / one 401 / one replacement", async () => {
-    const u = makeUser();
-    const regRes = await request(app).post("/api/auth/register").send(u);
-    expect(regRes.status).toBe(201);
-    const { refreshToken } = regRes.body;
-    const originalHash = hashToken(refreshToken);
+let orphanBaseline: OrphanBaseline;
 
-    const [originalSession] = await db
-      .select({ id: refreshSessions.id, familyId: refreshSessions.familyId })
-      .from(refreshSessions)
-      .where(eq(refreshSessions.tokenHash, originalHash))
-      .limit(1);
-    expect(originalSession).toBeDefined();
+beforeAll(async () => {
+  orphanBaseline = await captureOrphanBaseline();
+});
 
-    // Record backend PIDs of every pool connection acquired during the
-    // concurrent window. pg exposes the backend PID negotiated at connection
-    // startup as client.processID — no extra query, no token exposure.
-    const acquiredPids: number[] = [];
-    const onAcquire = (client: PoolClient) => {
-      const pid = (client as unknown as { processID?: number }).processID;
-      if (typeof pid === "number") acquiredPids.push(pid);
-    };
-    pool.on("acquire", onAcquire);
+afterAll(async () => {
+  await teardownFixtures(FIXTURES, { baseline: orphanBaseline });
+});
 
-    let res1, res2;
-    try {
-      [res1, res2] = await Promise.all([
-        request(app).post("/api/auth/refresh").send({ refreshToken }),
-        request(app).post("/api/auth/refresh").send({ refreshToken }),
-      ]);
-    } finally {
-      pool.removeListener("acquire", onAcquire);
-    }
+const makeUser = () => ({
+  email: FIXTURES.email("ccp"),
+  password: "Password1!",
+  firstName: "CC",
+  lastName: "Proof",
+});
 
-    // Exactly one 200 and one 401.
+/** Register and return the session row the issued refresh token points at. */
+async function registerWithSession() {
+  const u = makeUser();
+  const regRes = await request(app).post("/api/auth/register").send(u);
+  expect(regRes.status, JSON.stringify(regRes.body)).toBe(201);
+
+  const refreshToken = regRes.body.refreshToken as string;
+  const tokenHash = hashToken(refreshToken);
+
+  const [session] = await db
+    .select({ id: refreshSessions.id, familyId: refreshSessions.familyId })
+    .from(refreshSessions)
+    .where(eq(refreshSessions.tokenHash, tokenHash))
+    .limit(1);
+  expect(session, "registration did not create a refresh session").toBeDefined();
+
+  return { refreshToken, tokenHash, session: session! };
+}
+
+describe("Concurrent refresh rotation — exactly one rotation, family state correct", () => {
+  it("A. two concurrent refreshes: one 200, one 401, and the row state names the race", async () => {
+    const { refreshToken, tokenHash, session } = await registerWithSession();
+
+    const [res1, res2] = await Promise.all([
+      request(app).post("/api/auth/refresh").send({ refreshToken }),
+      request(app).post("/api/auth/refresh").send({ refreshToken }),
+    ]);
+
+    // Exactly one attempt rotated. This is the contract.
     expect([res1.status, res2.status].sort()).toEqual([200, 401]);
 
-    // Both transactions ran during the window; a transaction pins its
-    // connection, so two overlapping transactions REQUIRE two distinct
-    // backends. Assert we saw at least two distinct PIDs acquired.
-    const distinctPids = [...new Set(acquiredPids)];
-    expect(distinctPids.length).toBeGreaterThanOrEqual(2);
+    const winner = res1.status === 200 ? res1 : res2;
+    expect(typeof winner.body.token, "winner must receive an access token").toBe("string");
+    expect(typeof winner.body.refreshToken, "winner must receive a refresh token").toBe("string");
 
-    // Both requests targeted the same original row: it is now revoked.
-    const [after] = await db
-      .select({ revokedAt: refreshSessions.revokedAt })
+    // ── Family state ────────────────────────────────────────────────────────
+    const family = await db
+      .select({
+        id: refreshSessions.id,
+        tokenHash: refreshSessions.tokenHash,
+        revokedAt: refreshSessions.revokedAt,
+        revokeReason: refreshSessions.revokeReason,
+      })
       .from(refreshSessions)
-      .where(eq(refreshSessions.id, originalSession!.id))
-      .limit(1);
-    expect(after!.revokedAt).not.toBeNull();
+      .where(eq(refreshSessions.familyId, session.familyId));
 
-    // Exactly one replacement row in the family.
-    const familyRows = await db
-      .select({ tokenHash: refreshSessions.tokenHash })
-      .from(refreshSessions)
-      .where(eq(refreshSessions.familyId, originalSession!.familyId));
-    expect(familyRows).toHaveLength(2);
-    expect(familyRows.filter(r => r.tokenHash !== originalHash)).toHaveLength(1);
+    // The original plus exactly one replacement — never two replacements,
+    // which is what a double rotation would have produced.
+    expect(family, "expected the original session and exactly one replacement").toHaveLength(2);
+
+    const original = family.find((r) => r.id === session.id);
+    const replacement = family.find((r) => r.id !== session.id);
+    expect(original).toBeDefined();
+    expect(replacement).toBeDefined();
+    expect(replacement!.tokenHash).not.toBe(tokenHash);
+    expect(replacement!.tokenHash).toBe(hashToken(winner.body.refreshToken as string));
+
+    // The winner rotated the original.
+    expect(original!.revokedAt).not.toBeNull();
+    expect(original!.revokeReason).toBe("rotated");
+
+    // The loser found it already rotated and revoked the family. Only a request
+    // that contended for this row could have written this reason, so the row
+    // itself is the evidence that the two attempts raced.
+    expect(replacement!.revokedAt, "replay response must revoke the replacement").not.toBeNull();
+    expect(replacement!.revokeReason).toBe("token_reuse_detected");
+
+    // Session state is therefore correct end-to-end: the token the winner was
+    // handed is dead, so the client must re-authenticate.
+    const reuse = await request(app)
+      .post("/api/auth/refresh")
+      .send({ refreshToken: winner.body.refreshToken });
+    expect(reuse.status, "the revoked replacement must not refresh").toBe(401);
   });
 
-  it("B. direct two-connection FOR UPDATE proof — distinct PIDs, blocked waiter observes committed revoked state", async () => {
-    const u = makeUser();
-    const regRes = await request(app).post("/api/auth/register").send(u);
-    expect(regRes.status).toBe(201);
-    const sessionHash = hashToken(regRes.body.refreshToken);
+  it("A2. an uncontended refresh rotates cleanly — the 401 above is the race, not the norm", async () => {
+    const { refreshToken, session } = await registerWithSession();
 
-    const [row] = await db
-      .select({ id: refreshSessions.id })
+    const res = await request(app).post("/api/auth/refresh").send({ refreshToken });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const family = await db
+      .select({
+        id: refreshSessions.id,
+        revokedAt: refreshSessions.revokedAt,
+        revokeReason: refreshSessions.revokeReason,
+      })
       .from(refreshSessions)
-      .where(eq(refreshSessions.tokenHash, sessionHash))
-      .limit(1);
-    const rowId = row!.id;
+      .where(eq(refreshSessions.familyId, session.familyId));
+
+    expect(family).toHaveLength(2);
+    const original = family.find((r) => r.id === session.id)!;
+    const replacement = family.find((r) => r.id !== session.id)!;
+
+    expect(original.revokeReason).toBe("rotated");
+    // Nothing revoked the replacement, so replay detection did not fire — which
+    // is what distinguishes this from the concurrent case above.
+    expect(replacement.revokedAt).toBeNull();
+    expect(replacement.revokeReason).toBeNull();
+  });
+
+  it("B. direct two-connection FOR UPDATE proof — the waiter is provably blocked, then sees the commit", async () => {
+    const { session } = await registerWithSession();
+    const rowId = session.id;
 
     const connA = await pool.connect();
     const connB = await pool.connect();
     try {
-      const pidA: number = (await connA.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      // Used to locate B's rows in pg_locks below. Not an assertion: which
+      // backend serves a connection is not part of any product contract.
       const pidB: number = (await connB.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
-
-      // Separate connections ⇒ separate PostgreSQL backends.
-      expect(pidA).not.toBe(pidB);
 
       // Transaction A: lock the session row (same pattern as the route).
       await connA.query("BEGIN");
       const lockA = await connA.query(
-        `SELECT id, revoked_at FROM refresh_sessions WHERE id = $1 FOR UPDATE`,
+        `SELECT id, revoked_at, revoke_reason FROM refresh_sessions WHERE id = $1 FOR UPDATE`,
         [rowId],
       );
       expect(lockA.rows).toHaveLength(1);
@@ -140,7 +199,7 @@ describe("Concurrency connection proof — separate PostgreSQL backends", () => 
       const bPromise = (async () => {
         await connB.query("BEGIN");
         const lockB = await connB.query(
-          `SELECT id, revoked_at FROM refresh_sessions WHERE id = $1 FOR UPDATE`,
+          `SELECT id, revoked_at, revoke_reason FROM refresh_sessions WHERE id = $1 FOR UPDATE`,
           [rowId],
         );
         bCompleted = true;
@@ -149,20 +208,20 @@ describe("Concurrency connection proof — separate PostgreSQL backends", () => 
       })();
 
       // Poll pg_locks until B's backend is provably waiting on a lock
-      // (granted = false). Polling avoids fixed-sleep timing flakiness.
+      // (granted = false). This is a condition, not a duration: the test does
+      // not proceed on a guess about how long the lock takes to register.
       let bIsWaiting = false;
       const deadline = Date.now() + 5000;
       while (!bIsWaiting && Date.now() < deadline) {
         const waiting = await connA.query(
-          `SELECT count(*)::int AS n FROM pg_locks
-           WHERE pid = $1 AND granted = false`,
+          `SELECT count(*)::int AS n FROM pg_locks WHERE pid = $1 AND granted = false`,
           [pidB],
         );
         bIsWaiting = waiting.rows[0].n >= 1;
-        if (!bIsWaiting) await new Promise(r => setTimeout(r, 25));
+        if (!bIsWaiting) await new Promise((r) => setTimeout(r, 25));
       }
-      expect(bIsWaiting).toBe(true);
-      expect(bCompleted).toBe(false); // still blocked while A holds the lock
+      expect(bIsWaiting, "B never registered as waiting on the row lock").toBe(true);
+      expect(bCompleted, "B completed while A still held the lock").toBe(false);
 
       // A revokes the row and commits (the route's "rotation" write).
       await connA.query(
@@ -173,10 +232,12 @@ describe("Concurrency connection proof — separate PostgreSQL backends", () => 
       );
       await connA.query("COMMIT");
 
-      // B unblocks and must observe the COMMITTED revoked state.
+      // B unblocks and must observe the COMMITTED revoked state — the read that
+      // makes a second rotation impossible.
       const seenByB = await bPromise;
       expect(bCompleted).toBe(true);
       expect(seenByB.revoked_at).not.toBeNull();
+      expect(seenByB.revoke_reason).toBe("rotated");
     } finally {
       try { await connA.query("ROLLBACK"); } catch { /* already committed */ }
       try { await connB.query("ROLLBACK"); } catch { /* already committed */ }

@@ -18,6 +18,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { pool } from "@workspace/db";
 import { purgeSyntheticAccounts } from "../lib/owner-reset.js";
+import { withGlobalSweepExclusion } from "./support/fixtures.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -79,7 +80,9 @@ async function buildSeedShapedRun(tag: string): Promise<SeedShape> {
 let toClean: string[] = [];
 afterEach(async () => {
   if (toClean.length) {
-    await purgeSyntheticAccounts(toClean, { approvedEmails: toClean, quiet: true }).catch(() => {});
+    await withGlobalSweepExclusion(() =>
+      purgeSyntheticAccounts(toClean, { approvedEmails: toClean, quiet: true }),
+    ).catch(() => {});
     toClean = [];
   }
 });
@@ -98,7 +101,9 @@ describe("seed cleanup is dependency-aware and repeatable", () => {
 
   it("purges a full seed-shaped run without a foreign-key failure", async () => {
     const s = await buildSeedShapedRun(unique());
-    const removed = await purgeSyntheticAccounts(s.emails, { approvedEmails: s.emails, quiet: true });
+    const removed = await withGlobalSweepExclusion(() =>
+      purgeSyntheticAccounts(s.emails, { approvedEmails: s.emails, quiet: true }),
+    );
 
     expect(Object.values(removed).every((n) => n === 1)).toBe(true);
     for (const email of s.emails) {
@@ -120,7 +125,9 @@ describe("seed cleanup is dependency-aware and repeatable", () => {
       members: await count(`select count(*)::int c from jar_members where jar_id=$1`, [first.jarId]),
       acceptances: await count(`select count(*)::int c from agreement_acceptances where agreement_id in (select id from agreements where jar_id=$1)`, [first.jarId]),
     };
-    await purgeSyntheticAccounts(first.emails, { approvedEmails: first.emails, quiet: true });
+    await withGlobalSweepExclusion(() =>
+      purgeSyntheticAccounts(first.emails, { approvedEmails: first.emails, quiet: true }),
+    );
 
     // Run 2 — the same seed running a second time.
     const second = await buildSeedShapedRun(`${tag}-r2`);
@@ -142,8 +149,12 @@ describe("seed cleanup is dependency-aware and repeatable", () => {
 
   it("purging an already-purged run is a no-op rather than an error", async () => {
     const s = await buildSeedShapedRun(unique());
-    await purgeSyntheticAccounts(s.emails, { approvedEmails: s.emails, quiet: true });
-    const again = await purgeSyntheticAccounts(s.emails, { approvedEmails: s.emails, quiet: true });
+    await withGlobalSweepExclusion(() =>
+      purgeSyntheticAccounts(s.emails, { approvedEmails: s.emails, quiet: true }),
+    );
+    const again = await withGlobalSweepExclusion(() =>
+      purgeSyntheticAccounts(s.emails, { approvedEmails: s.emails, quiet: true }),
+    );
     expect(Object.values(again).every((n) => n === 0)).toBe(true);
   });
 

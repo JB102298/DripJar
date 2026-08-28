@@ -32,6 +32,7 @@ import { postContributionAccounting, clearLedgerAccountCache } from "../lib/ledg
 // owner reset uses. Never `DELETE FROM users`: four FKs into `users` are
 // NO ACTION and would raise, leaving fixtures behind.
 import { purgeSyntheticAccounts } from "../lib/owner-reset.js";
+import { withGlobalSweepExclusion } from "./support/fixtures.js";
 
 const BASE = "/api";
 const mockGetStripeClient = vi.mocked(getStripeClient);
@@ -209,7 +210,9 @@ afterAll(async () => {
     //    tagged list doubles as its own allowlist, so no seeded or live account
     //    is reachable from here.
     if (tagged.length) {
-      await purgeSyntheticAccounts(tagged, { approvedEmails: tagged, quiet: true });
+      await withGlobalSweepExclusion(() =>
+        purgeSyntheticAccounts(tagged, { approvedEmails: tagged, quiet: true }),
+      );
     }
 
     // 3. Nothing tagged may remain — jars first, since a failed setup can leave

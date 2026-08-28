@@ -22,6 +22,7 @@ import {
   APPROVED_SYNTHETIC_EMAILS,
   APPROVED_DATABASES,
 } from "../lib/owner-reset.js";
+import { withGlobalSweepExclusion } from "./support/fixtures.js";
 
 const LOCAL_URL = "postgresql://u:p@localhost:5432/dripjar_dev";
 const unique = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -248,7 +249,9 @@ describe("reset execution", () => {
   it("removes owned jars and dependants, keeps the account, and spares everyone else", async () => {
     const otherBefore = await q(`select id, email, password_hash, email_verified from users where id=$1`, [f.otherId]);
 
-    const res = await runReset({ email: f.targetEmail, confirm: true, quiet: true, approvedEmails: approvedFor(f.targetEmail) });
+    const res = await withGlobalSweepExclusion(() =>
+      runReset({ email: f.targetEmail, confirm: true, quiet: true, approvedEmails: approvedFor(f.targetEmail) }),
+    );
     const r = res.reconciliation!;
 
     // Account survives, untouched.
@@ -287,7 +290,9 @@ describe("reset execution", () => {
   });
 
   it("leaves the reset idempotent — a second run finds nothing to do", async () => {
-    const res = await runReset({ email: f.targetEmail, confirm: true, quiet: true, approvedEmails: approvedFor(f.targetEmail) });
+    const res = await withGlobalSweepExclusion(() =>
+      runReset({ email: f.targetEmail, confirm: true, quiet: true, approvedEmails: approvedFor(f.targetEmail) }),
+    );
     expect(res.manifest.ownedJars).toHaveLength(0);
     expect(res.reconciliation!.ownedJars).toBe(0);
     expect(res.reconciliation!.userStillExists).toBe(true);

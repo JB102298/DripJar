@@ -14,19 +14,49 @@
  *   PART J  — PATCH /jars/:jarId goal amount constraint (goal sum must fit)
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
 import app from "../app.js";
 import { db } from "@workspace/db";
-import { ledgerEntries, financialTransactions, jarGoals, jars } from "@workspace/db";
+import {
+  ledgerEntries,
+  ledgerTransactions,
+  financialTransactions,
+  jarGoals,
+  jarMembers,
+  jars,
+} from "@workspace/db";
 import { eq, and, count } from "drizzle-orm";
+import { postContributionAccounting } from "../lib/ledger.js";
+import {
+  captureOrphanBaseline,
+  createFixtureTag,
+  teardownFixtures,
+  type OrphanBaseline,
+} from "./support/fixtures.js";
 
 const BASE = "/api";
+
+/**
+ * One tag for the whole file, fixed before any fixture exists, so teardown can
+ * find this file's rows by query rather than from ids a setup helper returned.
+ */
+const FIXTURES = createFixtureTag("goals");
+
+let orphanBaseline: OrphanBaseline;
+
+beforeAll(async () => {
+  orphanBaseline = await captureOrphanBaseline();
+});
+
+afterAll(async () => {
+  await teardownFixtures(FIXTURES, { baseline: orphanBaseline });
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function register(suffix: string) {
-  const email = `goals-${suffix}-${Date.now()}@test.invalid`;
+  const email = FIXTURES.email(`goals${suffix}`);
   const res = await request(app).post(`${BASE}/auth/register`).send({
     email,
     password: "P@ssword1!",
@@ -42,7 +72,7 @@ async function createJar(token: string, goalAmountCents = 100_000, status = "Dra
     .post(`${BASE}/jars`)
     .set("Authorization", `Bearer ${token}`)
     .send({
-      name: `Goals Test Jar ${Date.now()}`,
+      name: FIXTURES.name("Goals Test Jar"),
       targetDate: "2027-12-31",
       goalAmountCents,
       currency: "USD",
@@ -76,14 +106,49 @@ async function createGoal(
   return res.body as { id: string; name: string; targetPrincipalCents: number; sortOrder: number };
 }
 
-async function countLedgerEntries(): Promise<number> {
-  const [row] = await db.select({ n: count() }).from(ledgerEntries);
+/**
+ * Financial-invariant counters, scoped to one jar.
+ *
+ * These were whole-table counts. That made PART I an assertion about the entire
+ * database rather than about the goal endpoints: any other test file posting a
+ * contribution between the "before" and "after" reads moved the number, and the
+ * file failed for a reason that had nothing to do with goals. Scoping to the
+ * jar under test proves the same invariant — a goal mutation posts no money —
+ * without observing anyone else's rows.
+ *
+ * `ledger_entries` has no `jar_id`, so it is reached the only way the schema
+ * allows: entry → ledger_transaction → financial_transaction → jar.
+ */
+async function countLedgerEntriesForJar(jarId: string): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(ledgerEntries)
+    .innerJoin(ledgerTransactions, eq(ledgerTransactions.id, ledgerEntries.ledgerTransactionId))
+    .innerJoin(
+      financialTransactions,
+      eq(financialTransactions.id, ledgerTransactions.financialTransactionId),
+    )
+    .where(eq(financialTransactions.jarId, jarId));
   return Number(row?.n ?? 0);
 }
 
-async function countFinancialTransactions(): Promise<number> {
-  const [row] = await db.select({ n: count() }).from(financialTransactions);
+async function countFinancialTransactionsForJar(jarId: string): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(financialTransactions)
+    .where(eq(financialTransactions.jarId, jarId));
   return Number(row?.n ?? 0);
+}
+
+/** The organizer's own membership row, needed to post money to a jar. */
+async function organizerMemberId(jarId: string, userId: string): Promise<string> {
+  const [row] = await db
+    .select({ id: jarMembers.id })
+    .from(jarMembers)
+    .where(and(eq(jarMembers.jarId, jarId), eq(jarMembers.userId, userId)))
+    .limit(1);
+  expect(row, `no membership row for user ${userId} in jar ${jarId}`).toBeDefined();
+  return row!.id;
 }
 
 // ─── PART A — GET goals (empty state) ─────────────────────────────────────────
@@ -597,31 +662,41 @@ describe("PART I — Invariant: goal mutations leave ledger unchanged", () => {
     goalId = goal.id;
   });
 
+  /**
+   * The invariant, asserted the same way for every mutation: this jar's ledger
+   * and financial-transaction rows are untouched, and — because a goal jar that
+   * has taken no money should have none at all — the absolute count stays zero.
+   * Proving both the delta and the absolute value is strictly stronger than the
+   * whole-table delta this replaced.
+   */
+  async function expectNoMoneyPosted(fn: () => Promise<unknown>): Promise<void> {
+    const leBefore = await countLedgerEntriesForJar(jarId);
+    const ftBefore = await countFinancialTransactionsForJar(jarId);
+
+    await fn();
+
+    expect(await countLedgerEntriesForJar(jarId), "goal mutation posted ledger entries").toBe(
+      leBefore,
+    );
+    expect(
+      await countFinancialTransactionsForJar(jarId),
+      "goal mutation posted a financial transaction",
+    ).toBe(ftBefore);
+    expect(leBefore, "goal-only jar must hold no ledger entries at all").toBe(0);
+    expect(ftBefore, "goal-only jar must hold no financial transactions at all").toBe(0);
+  }
+
   it("POST /goals does not create ledger_entries or financial_transactions", async () => {
-    const leBefore = await countLedgerEntries();
-    const ftBefore = await countFinancialTransactions();
-
-    await createGoal(token, jarId, "New Goal", 10_000);
-
-    const leAfter = await countLedgerEntries();
-    const ftAfter = await countFinancialTransactions();
-    expect(leAfter).toBe(leBefore);
-    expect(ftAfter).toBe(ftBefore);
+    await expectNoMoneyPosted(() => createGoal(token, jarId, "New Goal", 10_000));
   });
 
   it("PATCH /goals does not create ledger_entries or financial_transactions", async () => {
-    const leBefore = await countLedgerEntries();
-    const ftBefore = await countFinancialTransactions();
-
-    await request(app)
-      .patch(`${BASE}/jars/${jarId}/goals/${goalId}`)
-      .set("Authorization", `Bearer ${token}`)
-      .send({ name: "Renamed Invariant" });
-
-    const leAfter = await countLedgerEntries();
-    const ftAfter = await countFinancialTransactions();
-    expect(leAfter).toBe(leBefore);
-    expect(ftAfter).toBe(ftBefore);
+    await expectNoMoneyPosted(() =>
+      request(app)
+        .patch(`${BASE}/jars/${jarId}/goals/${goalId}`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({ name: "Renamed Invariant" }),
+    );
   });
 
   it("POST /goals/reorder does not create ledger_entries or financial_transactions", async () => {
@@ -630,18 +705,12 @@ describe("PART I — Invariant: goal mutations leave ledger unchanged", () => {
       .set("Authorization", `Bearer ${token}`);
     const ids: string[] = allGoalsRes.body.goals.map((g: any) => g.id);
 
-    const leBefore = await countLedgerEntries();
-    const ftBefore = await countFinancialTransactions();
-
-    await request(app)
-      .post(`${BASE}/jars/${jarId}/goals/reorder`)
-      .set("Authorization", `Bearer ${token}`)
-      .send({ goalIds: ids.reverse() });
-
-    const leAfter = await countLedgerEntries();
-    const ftAfter = await countFinancialTransactions();
-    expect(leAfter).toBe(leBefore);
-    expect(ftAfter).toBe(ftBefore);
+    await expectNoMoneyPosted(() =>
+      request(app)
+        .post(`${BASE}/jars/${jarId}/goals/reorder`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({ goalIds: ids.reverse() }),
+    );
   });
 
   it("Launch jar + POST /goals/archive does not create ledger entries", async () => {
@@ -654,19 +723,62 @@ describe("PART I — Invariant: goal mutations leave ledger unchanged", () => {
       .get(`${BASE}/jars/${jarId}/goals`)
       .set("Authorization", `Bearer ${token}`);
     const firstGoalId = allGoalsRes.body.goals[0]?.id as string;
-    if (!firstGoalId) return; // No active goals to archive
+    expect(firstGoalId, "expected an active goal to archive").toBeDefined();
 
-    const leBefore = await countLedgerEntries();
-    const ftBefore = await countFinancialTransactions();
+    await expectNoMoneyPosted(() =>
+      request(app)
+        .post(`${BASE}/jars/${jarId}/goals/${firstGoalId}/archive`)
+        .set("Authorization", `Bearer ${token}`),
+    );
+  });
 
+  /**
+   * The regression guard for the scoping itself.
+   *
+   * Unrelated ledger and financial-transaction rows are created deliberately —
+   * on a different jar, owned by a different account — and the goal jar's
+   * counts must not move. Under the whole-table counts this replaced, this test
+   * would fail; that is exactly the cross-file interference the old assertion
+   * was silently exposed to.
+   */
+  it("scoped counts ignore ledger and transaction rows belonging to another jar", async () => {
+    const leBefore = await countLedgerEntriesForJar(jarId);
+    const ftBefore = await countFinancialTransactionsForJar(jarId);
+
+    // A real posting on an unrelated jar, through the production accounting
+    // path — not hand-inserted rows, so this moves the same tables by the same
+    // route a concurrently-running test file would.
+    const other = await register("unrelated-poster");
+    const otherJar = await createJar(other.token, 500_000);
     await request(app)
-      .post(`${BASE}/jars/${jarId}/goals/${firstGoalId}/archive`)
-      .set("Authorization", `Bearer ${token}`);
+      .post(`${BASE}/jars/${otherJar.id}/launch`)
+      .set("Authorization", `Bearer ${other.token}`);
+    const memberId = await organizerMemberId(otherJar.id, other.userId);
 
-    const leAfter = await countLedgerEntries();
-    const ftAfter = await countFinancialTransactions();
-    expect(leAfter).toBe(leBefore);
-    expect(ftAfter).toBe(ftBefore);
+    const posted = await postContributionAccounting({
+      jarId: otherJar.id,
+      memberId,
+      principalCents: 20_000,
+      estimatedProcessingFeeCents: 160,
+    });
+    expect(posted.financialTransactionId).toBeTruthy();
+
+    // Non-vacuity, proven on the unrelated jar rather than on a whole-table
+    // count. A global count is not usable even here: another file's teardown can
+    // remove more rows than this test adds inside the same window, which is
+    // precisely the interference this test exists to rule out.
+    expect(
+      await countFinancialTransactionsForJar(otherJar.id),
+      "the unrelated jar must really have gained a transaction",
+    ).toBeGreaterThan(0);
+    expect(
+      await countLedgerEntriesForJar(otherJar.id),
+      "the unrelated jar must really have gained ledger entries",
+    ).toBeGreaterThan(0);
+
+    // The jar under test is unmoved.
+    expect(await countLedgerEntriesForJar(jarId)).toBe(leBefore);
+    expect(await countFinancialTransactionsForJar(jarId)).toBe(ftBefore);
   });
 });
 

@@ -1,10 +1,26 @@
 import { describe, it, expect } from "vitest";
 import { calculateJarHealth, calculateMemberHealth } from "../lib/jar-health.js";
 
+/**
+ * A date `daysFromNow` away, placed mid-day rather than exactly on the tick.
+ *
+ * `calculateJarHealth` reads its own `new Date()` and derives whole days with
+ * `Math.ceil`. An offset landing exactly on a day boundary therefore sits on the
+ * discontinuity: if the function is reached within the same millisecond the
+ * elapsed span is exactly 60 days and ceils to 60, and if a single millisecond
+ * has passed it ceils to 61. The test passed only because it usually won that
+ * race, and lost it under full-suite load — `expected 61 to be close to 60`.
+ *
+ * Shifting by half a day puts every span strictly inside a day, so `ceil` gives
+ * the same answer no matter how long the call takes. The assertions below are
+ * unchanged; only the ambiguity is removed.
+ */
+const HALF_DAY_MS = 43_200_000;
+
 function makeDate(daysFromNow: number): Date {
   const d = new Date();
   d.setDate(d.getDate() + daysFromNow);
-  return d;
+  return new Date(d.getTime() + HALF_DAY_MS);
 }
 
 describe("calculateJarHealth", () => {

@@ -33,6 +33,7 @@ import { db, pool, jars, jarMembers, fundCommitments, commitmentAllocations } fr
 import { eq, and } from "drizzle-orm";
 import app from "../app.js";
 import { purgeSyntheticAccounts } from "../lib/owner-reset.js";
+import { withGlobalSweepExclusion } from "./support/fixtures.js";
 import { lifecycleAllowsFundCommitment, fundCommitmentLifecycleMessage } from "../lib/jar-status.js";
 import { jarToday } from "../lib/jar-time.js";
 import { postContributionAccounting, clearLedgerAccountCache } from "../lib/ledger.js";
@@ -146,7 +147,9 @@ afterAll(async () => {
     const tagged = (
       await pool.query(`select email from users where email like $1 order by email`, [TAGGED_EMAIL_LIKE])
     ).rows.map((r) => r.email as string);
-    if (tagged.length) await purgeSyntheticAccounts(tagged, { approvedEmails: tagged, quiet: true });
+    if (tagged.length) await withGlobalSweepExclusion(() =>
+        purgeSyntheticAccounts(tagged, { approvedEmails: tagged, quiet: true }),
+      );
 
     expect(await countRow(`select count(*)::int c from jars where name like $1`, [TAGGED_JAR_LIKE]),
       "tagged jars survived").toBe(0);

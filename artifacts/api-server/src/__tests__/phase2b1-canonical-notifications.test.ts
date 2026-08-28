@@ -40,6 +40,7 @@ import { getStripeClient } from "../lib/stripe.js";
 import app from "../app.js";
 import { postContributionAccounting, clearLedgerAccountCache } from "../lib/ledger.js";
 import { purgeSyntheticAccounts } from "../lib/owner-reset.js";
+import { withGlobalSweepExclusion } from "./support/fixtures.js";
 import {
   notifyJarProgressThresholds,
   notifyMilestonesFunded,
@@ -304,7 +305,9 @@ afterAll(async () => {
     ).rows.map((r) => r.email as string);
 
     if (tagged.length) {
-      await purgeSyntheticAccounts(tagged, { approvedEmails: tagged, quiet: true });
+      await withGlobalSweepExclusion(() =>
+        purgeSyntheticAccounts(tagged, { approvedEmails: tagged, quiet: true }),
+      );
     }
 
     expect(
