@@ -24,12 +24,34 @@ import {
   jarMembers,
 } from "@workspace/db";
 import { eq, and, sql, inArray } from "drizzle-orm";
+import type { PgDatabase } from "drizzle-orm/pg-core";
 import { generateQuote, DRIPJAR_FEE_RATE_BPS } from "./fee-engine.js";
 import { randomUUID } from "node:crypto";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type DbOrTx = typeof db;
+/**
+ * The query executor shared by `db` itself and by the `tx` that a
+ * `db.transaction` callback receives.
+ *
+ * Derived from the driver rather than written by hand. Drizzle declares
+ * `PgTransaction<Q, F, S> extends PgDatabase<Q, F, S>`, and `db.transaction`
+ * hands its callback exactly the instantiation `db`'s own base was built from —
+ * so re-forming that base from the callback parameter's type yields the one type
+ * both values genuinely satisfy. Nothing is asserted at either call site, and
+ * every builder the accounting body uses (`select`, `insert`, `update`,
+ * `execute`, `query`) lives on `PgDatabase`, at the same type arguments.
+ *
+ * The name predates this: these helpers always took "a db or a tx". Until M2.5
+ * the alias said `typeof db`, which is why every caller had to launder its
+ * transaction through `as unknown as`.
+ */
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+type DbOrTx =
+  DbTransaction extends PgDatabase<infer TResult, infer TFullSchema, infer TSchema>
+    ? PgDatabase<TResult, TFullSchema, TSchema>
+    : never;
 
 export interface LedgerEntryInput {
   accountCode: string;
@@ -171,26 +193,13 @@ export async function postLedgerTransaction(
   input: PostLedgerTransactionInput,
 ): Promise<PostedLedger> {
   return db.transaction((tx) =>
-    _postLedgerEntriesInTx(tx as unknown as DbOrTx, input),
+    _postLedgerEntriesInTx(tx, input),
   );
 }
 
 // ─── Contribution accounting ───────────────────────────────────────────────────
 
-/**
- * Post the full financial record + ledger entries for a contribution.
- *
- * Journal entry for $200 principal, $6 DripJar fee, $1.60 processing fee:
- *
- *   DR EXT_PAY_CLR       20760  (customer charged $207.60)
- *   CR CTRB_REFUNDABLE   20000  (contributor refundable principal)
- *   CR DJ_FEE_REVENUE      600  (DripJar service fee earned)
- *   CR PROC_FEE_CLR        160  (processing fee pass-through)
- *
- * Checks idempotency key uniqueness — duplicate keys return the existing
- * financial transaction ID without re-posting.
- */
-export async function postContributionAccounting(params: {
+export interface ContributionAccountingParams {
   jarId: string;
   memberId: string;
   principalCents: number;
@@ -203,7 +212,43 @@ export async function postContributionAccounting(params: {
   providerType?: string;
   providerTransactionId?: string;
   providerStatus?: string;
-}): Promise<ContributionPostResult> {
+}
+
+/**
+ * Post the full financial record + ledger entries for a contribution INSIDE an
+ * existing DB transaction supplied by the caller. Does NOT open one.
+ *
+ * Journal entry for $200 principal, $6 DripJar fee, $1.60 processing fee:
+ *
+ *   DR EXT_PAY_CLR       20760  (customer charged $207.60)
+ *   CR CTRB_REFUNDABLE   20000  (contributor refundable principal)
+ *   CR DJ_FEE_REVENUE      600  (DripJar service fee earned)
+ *   CR PROC_FEE_CLR        160  (processing fee pass-through)
+ *
+ * Checks idempotency key uniqueness — duplicate keys return the existing
+ * financial transaction ID without re-posting.
+ *
+ * ─── WHY THIS VARIANT EXISTS ─────────────────────────────────────────────────
+ *
+ * A caller already inside a transaction must use this, never the self-opening
+ * wrapper below. Calling the wrapper from inside a transaction checks out a
+ * SECOND pool connection and holds both at once, so ten concurrent postings
+ * consume every connection in a pool of ten with none left for the inner
+ * transactions they are all waiting on. `connectionTimeoutMillis` is 0, so that
+ * state never errors — it waits forever.
+ *
+ * It also breaks atomicity: the inner transaction COMMITS the financial
+ * transaction, the ledger transaction and its entries before the outer one
+ * commits, so an outer rollback leaves posted ledger money behind with no
+ * contribution row against it.
+ *
+ * Same shape as `postCommitPrincipalInTx` and the other Phase 4C primitives:
+ * one implementation, two entry points, no logic that can drift apart.
+ */
+export async function postContributionAccountingInTx(
+  txDb: DbOrTx,
+  params: ContributionAccountingParams,
+): Promise<ContributionPostResult> {
   const {
     jarId,
     memberId,
@@ -219,107 +264,117 @@ export async function postContributionAccounting(params: {
 
   const quote = generateQuote(principalCents, estimatedProcessingFeeCents, currency);
 
-  return db.transaction(async (tx) => {
-    const txDb = tx as unknown as DbOrTx;
+  // Check idempotency: if already posted, return existing IDs
+  const [existing] = await txDb
+    .select({
+      id: financialTransactions.id,
+      ledgerId: financialTransactions.ledgerId,
+      status: financialTransactions.ledgerPostingStatus,
+    })
+    .from(financialTransactions)
+    .where(eq(financialTransactions.idempotencyKey, idempotencyKey));
 
-    // Check idempotency: if already posted, return existing IDs
-    const [existing] = await txDb
-      .select({
-        id: financialTransactions.id,
-        ledgerId: financialTransactions.ledgerId,
-        status: financialTransactions.ledgerPostingStatus,
-      })
-      .from(financialTransactions)
-      .where(eq(financialTransactions.idempotencyKey, idempotencyKey));
-
-    if (existing) {
-      if (!existing.ledgerId) {
-        throw new Error("Duplicate idempotency key with unposted ledger");
-      }
-      return {
-        financialTransactionId: existing.id,
-        ledgerTransactionId: existing.ledgerId,
-      };
+  if (existing) {
+    if (!existing.ledgerId) {
+      throw new Error("Duplicate idempotency key with unposted ledger");
     }
-
-    // Insert financial_transaction (pending)
-    const [finTx] = await txDb
-      .insert(financialTransactions)
-      .values({
-        jarId,
-        memberId,
-        transactionType: transactionType as string,
-        currency,
-        requestedPrincipalCents: principalCents,
-        dripJarFeeCents: quote.dripJarFeeCents,
-        dripJarFeeRateBps: DRIPJAR_FEE_RATE_BPS,
-        processingFeeEstimatedCents: estimatedProcessingFeeCents,
-        processingFeeActualCents: null,
-        totalQuotedCents: quote.totalChargeCents,
-        providerType: providerType as string | null,
-        providerTransactionId: providerTransactionId as string | null,
-        providerStatus: providerStatus as string,
-        ledgerPostingStatus: "pending",
-        ledgerId: null,
-        idempotencyKey,
-      })
-      .returning({ id: financialTransactions.id });
-
-    if (!finTx) throw new Error("Failed to insert financial_transaction");
-
-    // Post balanced ledger entries
-    const posted = await _postLedgerEntriesInTx(txDb, {
-      description: `Contribution: ${currency} ${(principalCents / 100).toFixed(2)} principal`,
-      currency,
-      financialTransactionId: finTx.id,
-      entries: [
-        {
-          accountCode: "EXT_PAY_CLR",
-          entryType: "debit",
-          amountCents: quote.totalChargeCents,
-          memo: `Total customer charge: ${quote.totalChargeCents}¢`,
-        },
-        {
-          accountCode: "CTRB_REFUNDABLE",
-          entryType: "credit",
-          amountCents: principalCents,
-          memo: `Refundable principal: ${principalCents}¢`,
-        },
-        {
-          accountCode: "DJ_FEE_REVENUE",
-          entryType: "credit",
-          amountCents: quote.dripJarFeeCents,
-          memo: `DripJar ${DRIPJAR_FEE_RATE_BPS / 100}% fee: ${quote.dripJarFeeCents}¢`,
-        },
-        // Only add processing-fee entry when non-zero
-        ...(estimatedProcessingFeeCents > 0
-          ? [
-              {
-                accountCode: "PROC_FEE_CLR",
-                entryType: "credit" as const,
-                amountCents: estimatedProcessingFeeCents,
-                memo: `Processing fee pass-through (estimated): ${estimatedProcessingFeeCents}¢`,
-              },
-            ]
-          : []),
-      ],
-    });
-
-    // Mark financial_transaction as posted
-    await txDb
-      .update(financialTransactions)
-      .set({
-        ledgerPostingStatus: "posted",
-        ledgerId: posted.ledgerTransactionId,
-        updatedAt: new Date(),
-      })
-      .where(eq(financialTransactions.id, finTx.id));
-
     return {
-      financialTransactionId: finTx.id,
-      ledgerTransactionId: posted.ledgerTransactionId,
+      financialTransactionId: existing.id,
+      ledgerTransactionId: existing.ledgerId,
     };
+  }
+
+  // Insert financial_transaction (pending)
+  const [finTx] = await txDb
+    .insert(financialTransactions)
+    .values({
+      jarId,
+      memberId,
+      transactionType: transactionType as string,
+      currency,
+      requestedPrincipalCents: principalCents,
+      dripJarFeeCents: quote.dripJarFeeCents,
+      dripJarFeeRateBps: DRIPJAR_FEE_RATE_BPS,
+      processingFeeEstimatedCents: estimatedProcessingFeeCents,
+      processingFeeActualCents: null,
+      totalQuotedCents: quote.totalChargeCents,
+      providerType: providerType as string | null,
+      providerTransactionId: providerTransactionId as string | null,
+      providerStatus: providerStatus as string,
+      ledgerPostingStatus: "pending",
+      ledgerId: null,
+      idempotencyKey,
+    })
+    .returning({ id: financialTransactions.id });
+
+  if (!finTx) throw new Error("Failed to insert financial_transaction");
+
+  // Post balanced ledger entries
+  const posted = await _postLedgerEntriesInTx(txDb, {
+    description: `Contribution: ${currency} ${(principalCents / 100).toFixed(2)} principal`,
+    currency,
+    financialTransactionId: finTx.id,
+    entries: [
+      {
+        accountCode: "EXT_PAY_CLR",
+        entryType: "debit",
+        amountCents: quote.totalChargeCents,
+        memo: `Total customer charge: ${quote.totalChargeCents}¢`,
+      },
+      {
+        accountCode: "CTRB_REFUNDABLE",
+        entryType: "credit",
+        amountCents: principalCents,
+        memo: `Refundable principal: ${principalCents}¢`,
+      },
+      {
+        accountCode: "DJ_FEE_REVENUE",
+        entryType: "credit",
+        amountCents: quote.dripJarFeeCents,
+        memo: `DripJar ${DRIPJAR_FEE_RATE_BPS / 100}% fee: ${quote.dripJarFeeCents}¢`,
+      },
+      // Only add processing-fee entry when non-zero
+      ...(estimatedProcessingFeeCents > 0
+        ? [
+            {
+              accountCode: "PROC_FEE_CLR",
+              entryType: "credit" as const,
+              amountCents: estimatedProcessingFeeCents,
+              memo: `Processing fee pass-through (estimated): ${estimatedProcessingFeeCents}¢`,
+            },
+          ]
+        : []),
+    ],
   });
+
+  // Mark financial_transaction as posted
+  await txDb
+    .update(financialTransactions)
+    .set({
+      ledgerPostingStatus: "posted",
+      ledgerId: posted.ledgerTransactionId,
+      updatedAt: new Date(),
+    })
+    .where(eq(financialTransactions.id, finTx.id));
+
+  return {
+    financialTransactionId: finTx.id,
+    ledgerTransactionId: posted.ledgerTransactionId,
+  };
+}
+
+/**
+ * Post the full financial record + ledger entries for a contribution,
+ * opening and owning the DB transaction.
+ *
+ * For standalone callers only. A caller that is already inside a transaction
+ * must call `postContributionAccountingInTx` with its own executor instead —
+ * see the note there.
+ */
+export async function postContributionAccounting(
+  params: ContributionAccountingParams,
+): Promise<ContributionPostResult> {
+  return db.transaction((tx) => postContributionAccountingInTx(tx, params));
 }
 
 // ─── Refund accounting ────────────────────────────────────────────────────────
@@ -361,7 +416,7 @@ export async function postRefundPrincipal(params: {
   }
 
   return db.transaction(async (tx) => {
-    const txDb = tx as unknown as DbOrTx;
+    const txDb = tx;
 
     // Check idempotency
     const [existing] = await txDb
@@ -482,7 +537,7 @@ export async function postCommitPrincipal(params: {
   }
 
   return db.transaction(async (tx) => {
-    const txDb = tx as unknown as DbOrTx;
+    const txDb = tx;
 
     // Check idempotency
     const [existing] = await txDb

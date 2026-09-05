@@ -146,42 +146,40 @@ function buildMockStripeWithRealSig() {
 /**
  * How many *posting* webhook deliveries these scenarios fire at once.
  *
- * ─── WHY THIS IS BOUNDED AND WHY THE BOUND IS FOUR ───────────────────────────
+ * ─── WHY THIS WAS FOUR, AND WHY IT IS TEN AGAIN ──────────────────────────────
  *
- * A delivery that actually posts a contribution holds TWO pool connections at
- * the same time, not one:
+ * Phase M2 lowered this to four to keep the suite green around a production
+ * defect it was not chartered to fix. A delivery that actually posted a
+ * contribution held TWO pool connections at the same time:
  *
- *   routes/stripe-webhooks.ts   opens `db.transaction(...)` and takes
+ *   routes/stripe-webhooks.ts   opened `db.transaction(...)` and took
  *                               `SELECT … FOR UPDATE` on the financial
  *                               transaction            → connection 1
- *   lib/ledger.ts               `postContributionAccounting` is then called
- *                               from inside that transaction and opens its
- *                               own `db.transaction(...)`, because it takes
- *                               no `tx` parameter       → connection 2
+ *   lib/ledger.ts               `postContributionAccounting` was called from
+ *                               inside that transaction and opened its own
+ *                               `db.transaction(...)`, taking no `tx`
+ *                               parameter               → connection 2
  *
  * `lib/db` builds its pool as `new Pool({ connectionString })`, so node-postgres
  * defaults apply: `max: 10` and `connectionTimeoutMillis: 0` — a request that
- * cannot get a connection waits forever rather than failing. Fire ten deliveries
- * that all reach the outer transaction together and all ten connections are held
- * by transactions each waiting for an eleventh that cannot exist. Nothing errors;
- * the run simply stops until the test's own timeout fires.
+ * cannot get a connection waits forever rather than failing. Ten deliveries that
+ * all reached the outer transaction together held all ten connections, each
+ * waiting on an eleventh that could not exist. Nothing errored; the run stopped
+ * until the test's own timeout fired.
  *
- * That is what the "documented pool-timeout flake" in Scenarios B and C always
- * was. It is intermittent only because ten supertest requests rarely reach the
- * outer transaction at the same instant — which is why it survived isolated
- * reruns and surfaced roughly once in ten full-suite runs.
+ * Phase M2.5 removed the nested transaction: the webhook handler now passes its
+ * own executor to `postContributionAccountingInTx`, so a posting delivery holds
+ * exactly one connection and ten concurrent deliveries are bounded by the pool
+ * rather than deadlocked by it. Ten is restored because it is the number that
+ * used to hang — a bound of four could no longer detect a regression of the
+ * thing M2.5 fixed.
  *
- * Four keeps the worst case at eight simultaneous connections with headroom, so
- * the scenario proves what it is named for — two event IDs racing to post the
- * same payment intent cannot double-post — without its result depending on how
- * the pool happens to be scheduled. Ten was never load-bearing for that
- * invariant; the assertions below are unchanged and still exact.
- *
- * The underlying nested-transaction pattern is a production concern, not a test
- * one, and is deliberately left untouched here: `routes/stripe-webhooks.ts` and
- * `lib/ledger.ts` are out of scope for Phase M2. It is reported for triage.
+ * The deterministic version of this race — all ten deliveries proven to be
+ * inside their outer transaction simultaneously, rather than merely fired
+ * together — lives in `m25-webhook-atomicity.test.ts`. This bound keeps the
+ * probabilistic form here too, because it is the shape production actually sees.
  */
-const CONCURRENT_POSTING_DELIVERIES = 4;
+const CONCURRENT_POSTING_DELIVERIES = 10;
 
 // ─── Pool health helper (Scenario A) ─────────────────────────────────────────
 
@@ -199,10 +197,12 @@ const CONCURRENT_POSTING_DELIVERIES = 4;
  * NOTE: this file's earlier comments claimed `singleFork: true` made all test
  * files share one process and one pool.  That option never took effect (see
  * vitest.config.ts); files run in parallel, each fork holding its own pool.
- * The documented pool-timeout flake in Scenarios B and C was a symptom of the
- * shared, residue-laden `dripjar_dev` database and did not reproduce once the
- * suite moved to a freshly-migrated disposable `dripjar_test` — verified over
- * repeated isolated runs and repeated full-suite runs during Phase M2.
+ *
+ * An earlier revision of this note also attributed the pool-timeout flake in
+ * Scenarios B and C to residue in the shared `dripjar_dev` database. That was
+ * wrong. The cause was the nested transaction described under
+ * CONCURRENT_POSTING_DELIVERIES, which M2.5 removed; moving to a disposable
+ * database only made the flake rarer by making the suite faster.
  */
 async function waitForPoolConnections(
   minIdle = 5,

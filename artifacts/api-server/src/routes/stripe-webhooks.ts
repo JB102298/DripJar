@@ -43,7 +43,7 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { getStripeClient } from "../lib/stripe.js";
 import {
-  postContributionAccounting,
+  postContributionAccountingInTx,
   clearLedgerAccountCache,
   postRefundFinalizationInTx,
   postRefundReversalInTx,
@@ -286,8 +286,15 @@ async function handlePaymentIntentSucceeded(
     return;
   }
 
-  // Post ledger accounting + update financial_transaction + insert contribution
-  // All in a single atomic DB transaction
+  // Post ledger accounting + update financial_transaction + insert contribution.
+  //
+  // Genuinely one transaction, on one pool connection. This used to call
+  // `postContributionAccounting`, which opens a transaction of its own: the
+  // handler therefore held two connections at once and committed the ledger
+  // posting before the enclosing transaction reached COMMIT. At ten concurrent
+  // deliveries every connection in the pool of ten was an outer transaction
+  // waiting for an inner one that could never be served, and node-postgres is
+  // configured to wait rather than time out. See `postContributionAccountingInTx`.
   type DbOrTx = typeof db;
   await db.transaction(async (tx) => {
     const txDb = tx as unknown as DbOrTx;
@@ -309,8 +316,8 @@ async function handlePaymentIntentSucceeded(
       return;
     }
 
-    // Post the contribution accounting
-    const { ledgerTransactionId } = await postContributionAccounting({
+    // Post the contribution accounting on THIS transaction's executor.
+    const { ledgerTransactionId } = await postContributionAccountingInTx(txDb, {
       jarId: ft.jarId,
       memberId: ft.memberId,
       principalCents: Number(ft.requestedPrincipalCents),
@@ -460,9 +467,12 @@ async function handleAutoDripSucceeded(
       return;
     }
 
-    // Post contribution accounting (creates FT + ledger entries + updates FT to posted)
+    // Post contribution accounting (creates FT + ledger entries + updates FT to
+    // posted) on THIS transaction's executor, for the reason given in the card
+    // handler above: the self-opening variant would take a second pool
+    // connection and commit the posting ahead of this transaction.
     const idempotencyKey = `autodrip-webhook:${run.id}:${pi.id}`;
-    const { financialTransactionId } = await postContributionAccounting({
+    const { financialTransactionId } = await postContributionAccountingInTx(txDb, {
       jarId: auth.jarId,
       memberId: auth.memberId,
       principalCents: run.principalCents,
