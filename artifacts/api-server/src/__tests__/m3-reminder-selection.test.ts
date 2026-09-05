@@ -744,33 +744,44 @@ describe("M3 — read-only routes have no reminder side effects", () => {
     expect(jar.status).toBe(201);
     await request(app).post(`${BASE}/jars/${jar.body.id}/launch`).set(auth);
 
-    const eventsBefore = await reminderEventsFor([userId]);
-    const notesBefore = await notificationsFor([userId]);
+    // ── The measurement window is held against the global sweep ─────────────
+    //
+    // Launching the jar publishes an agreement nobody has accepted, which makes
+    // this account a legitimate `agreement_required` candidate. The subject
+    // under test is whether a GET writes anything — so a reminder emitted by
+    // another file's processor call mid-window is interference, not a side
+    // effect of the reads, and it would fail the assertion for the wrong
+    // reason. Every processor caller in the suite takes this same hold, so
+    // taking it here excludes them for the duration of the window.
+    await withGlobalSweepExclusion(async () => {
+      const eventsBefore = await reminderEventsFor([userId]);
+      const notesBefore = await notificationsFor([userId]);
 
-    for (const path of [
-      `/jars`,
-      `/jars/${jar.body.id}`,
-      `/jars/${jar.body.id}/members`,
-      `/jars/${jar.body.id}/schedule`,
-      `/jars/${jar.body.id}/agreements`,
-      `/jars/${jar.body.id}/agreements/status`,
-      `/jars/${jar.body.id}/activity`,
-      `/jars/${jar.body.id}/contributions`,
-      `/dashboard`,
-      `/me/jars`,
-      `/me/contributions`,
-      `/notifications`,
-      `/notifications/unread-count`,
-      `/activity`,
-      `/auth/preferences`,
-    ]) {
-      const res = await request(app).get(`${BASE}${path}`).set(auth);
-      // A 404 from a resource this jar has none of is still a read. What must
-      // never happen is a server error, or a side effect.
-      expect(res.status, path).toBeLessThan(500);
-    }
+      for (const path of [
+        `/jars`,
+        `/jars/${jar.body.id}`,
+        `/jars/${jar.body.id}/members`,
+        `/jars/${jar.body.id}/schedule`,
+        `/jars/${jar.body.id}/agreements`,
+        `/jars/${jar.body.id}/agreements/status`,
+        `/jars/${jar.body.id}/activity`,
+        `/jars/${jar.body.id}/contributions`,
+        `/dashboard`,
+        `/me/jars`,
+        `/me/contributions`,
+        `/notifications`,
+        `/notifications/unread-count`,
+        `/activity`,
+        `/auth/preferences`,
+      ]) {
+        const res = await request(app).get(`${BASE}${path}`).set(auth);
+        // A 404 from a resource this jar has none of is still a read. What must
+        // never happen is a server error, or a side effect.
+        expect(res.status, path).toBeLessThan(500);
+      }
 
-    expect(await reminderEventsFor([userId])).toEqual(eventsBefore);
-    expect(await notificationsFor([userId])).toEqual(notesBefore);
+      expect(await reminderEventsFor([userId])).toEqual(eventsBefore);
+      expect(await notificationsFor([userId])).toEqual(notesBefore);
+    });
   }, 60_000);
 });

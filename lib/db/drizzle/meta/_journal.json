@@ -176,6 +176,13 @@
       "when": 1787011200000,
       "tag": "0024_jar_target_date_precision",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788566400000,
+      "tag": "0025_activity_idempotency_key",
+      "breakpoints": true
     }
   ]
 }

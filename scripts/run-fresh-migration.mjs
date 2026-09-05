@@ -6,7 +6,7 @@
  * and idempotent.
  *
  * Steps:
- *   1. Validate the local migration chain on disk (journal 0000→0024 + SQL files).
+ *   1. Validate the local migration chain on disk (journal 0000→0025 + SQL files).
  *   2. Create a clean temporary database.
  *   3. Provision it with `pnpm --filter @workspace/db run migrate`.
  *   4. Verify 33 base tables, all 8 seeded ledger accounts, and no duplicates.
@@ -35,8 +35,8 @@ const JOURNAL_PATH = path.join(DRIZZLE_DIR, "meta", "_journal.json");
 // ─── Expectations ─────────────────────────────────────────────────────────────
 
 /** Highest migration index in the current chain. */
-const LAST_MIGRATION_IDX = 24;
-/** 25 migrations: 0000 … 0024. */
+const LAST_MIGRATION_IDX = 25;
+/** 26 migrations: 0000 … 0025. */
 const EXPECTED_MIGRATION_COUNT = LAST_MIGRATION_IDX + 1;
 /** Base tables in `public` after the full chain (34 created, 1 dropped in 0015). */
 const EXPECTED_TABLE_COUNT = 33;
@@ -99,7 +99,7 @@ try {
   const entries = journal.entries ?? [];
 
   if (entries.length === EXPECTED_MIGRATION_COUNT) {
-    pass(`Journal registers ${EXPECTED_MIGRATION_COUNT} migrations (0000→0024)`);
+    pass(`Journal registers ${EXPECTED_MIGRATION_COUNT} migrations (0000→0025)`);
   } else {
     fail(
       `Journal migration count`,
@@ -285,6 +285,85 @@ try {
     } else {
       fail("target_date_precision CHECK rejection", message.split("\n")[0]);
     }
+  }
+
+  // ── Migration 0025: activity_events.dedupe_key ─────────────────────────────
+  //
+  // Another column-only migration, so the table count cannot notice it either.
+  // What matters is not just that the column exists but that the unique index
+  // behaves the way the writer depends on: it must reject a duplicate non-NULL
+  // key and must still accept any number of NULLs.
+  const dedupeCol = await testClient.query(
+    `SELECT data_type, is_nullable
+       FROM information_schema.columns
+      WHERE table_schema='public' AND table_name='activity_events'
+        AND column_name='dedupe_key'`,
+  );
+  if (dedupeCol.rows.length === 1) {
+    pass("activity_events.dedupe_key exists (migration 0025)");
+    if (dedupeCol.rows[0].is_nullable === "YES") pass("activity_events.dedupe_key is nullable");
+    else fail("activity_events.dedupe_key is NOT NULL — unclaimed rows could not exist");
+  } else {
+    fail("activity_events.dedupe_key missing after full chain");
+  }
+
+  const dedupeIdx = await testClient.query(
+    `SELECT indexdef FROM pg_indexes
+      WHERE schemaname='public' AND indexname='activity_events_dedupe_key_idx'`,
+  );
+  if (dedupeIdx.rows.length === 1) {
+    pass("activity_events_dedupe_key_idx present");
+    const def = dedupeIdx.rows[0].indexdef;
+    if (/CREATE UNIQUE INDEX/i.test(def)) pass("activity_events_dedupe_key_idx is UNIQUE");
+    else fail("activity_events_dedupe_key_idx is not unique", def);
+    // A predicate would force every INSERT to repeat it to infer the target.
+    if (!/\bWHERE\b/i.test(def)) pass("activity_events_dedupe_key_idx is not partial");
+    else fail("activity_events_dedupe_key_idx unexpectedly carries a predicate", def);
+  } else {
+    fail("activity_events_dedupe_key_idx missing after full chain");
+  }
+
+  // The index must actually enforce uniqueness, and must actually tolerate
+  // repeated NULLs. Both are exercised against real rows and rolled back.
+  try {
+    await testClient.query("BEGIN");
+    await testClient.query(
+      `INSERT INTO users (id, email, password_hash)
+       VALUES ('00000000-0000-0000-0000-0000000000aa', 'chain-check@example.invalid', 'x')`,
+    );
+    await testClient.query(
+      `INSERT INTO jars (id, organizer_id, name, slug, target_date, goal_amount_cents)
+       VALUES ('00000000-0000-0000-0000-0000000000bb',
+               '00000000-0000-0000-0000-0000000000aa', 'chain', 'chain', '2030-01-01', 100)`,
+    );
+    const insertActivity = (dedupe) =>
+      testClient.query(
+        `INSERT INTO activity_events (jar_id, event_type, description, dedupe_key)
+         VALUES ('00000000-0000-0000-0000-0000000000bb', 'jar_commitment_phase', 'x', $1)`,
+        [dedupe],
+      );
+
+    await insertActivity(null);
+    await insertActivity(null);
+    await insertActivity(null);
+    pass("activity_events accepts repeated NULL dedupe_key values");
+
+    await insertActivity("chain-check-key");
+    try {
+      await insertActivity("chain-check-key");
+      fail("activity_events_dedupe_key_idx did not reject a duplicate key");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("activity_events_dedupe_key_idx")) {
+        pass("activity_events_dedupe_key_idx rejects a duplicate non-NULL key");
+      } else {
+        fail("Duplicate dedupe_key rejection", message.split("\n")[0]);
+      }
+    }
+    await testClient.query("ROLLBACK");
+  } catch (err) {
+    await testClient.query("ROLLBACK");
+    fail("dedupe_key uniqueness check", err instanceof Error ? err.message : String(err));
   }
 
   // ── Ledger accounts: all 8 present, exactly once each ──────────────────────

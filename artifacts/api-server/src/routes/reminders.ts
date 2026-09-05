@@ -32,7 +32,29 @@
  *           + 2 per cutoff-candidate page
  *           + 2 per agreement-candidate page
  *           + 1 per page (existing-event prefetch)
+ *           + 1 per cutoff page holding a commitment-phase jar (activity-claim
+ *                 prefetch — per PAGE, not per jar; see Phase M3.5 below)
  *           + per emitted event: 1 claim, 0–1 notification, 0–2 email writes
+ *           + 1 per jar entering the commitment phase, once in its lifetime
+ *
+ * ─── COMMITMENT-PHASE ACTIVITY IS WRITTEN ONCE (Phase M3.5) ──────────────────
+ *
+ * The organizer-side `jar_commitment_phase` activity used to be an
+ * unconditional insert on every invocation, because nothing recorded that it
+ * had already happened. In the development database that produced 57 641 rows
+ * over 283 jars — 90 % of the whole activity table — and cost one statement per
+ * settled jar on every run for ever.
+ *
+ * The identity now lives on the row itself: `activity_events.dedupe_key`
+ * carries `jar_commitment_phase:<jarId>` under a unique index (migration 0025).
+ * The claim and the activity are the same row, so there is no window where one
+ * exists without the other, and a write that fails leaves nothing behind to
+ * block the retry on the next run.
+ *
+ * This is orthogonal to the reminder machinery above. No reminder event key,
+ * recipient, window, retry rule, email, notification, or response counter is
+ * involved in it, and the activity is emitted whether the cutoff_reached
+ * reminder was new, retried, preference-skipped, or a settled duplicate.
  *
  * ─── WHAT SELECTION EXCLUDES, AND WHY IT IS EXACT ────────────────────────────
  *
@@ -156,7 +178,7 @@ import {
   sendCutoffReachedEmail,
   sendAgreementRequiredEmail,
 } from "../lib/reminder-email.js";
-import { logActivity } from "../lib/activity.js";
+import { activityDedupeKey, logActivityOnce, unclaimedActivityKeys } from "../lib/activity.js";
 import { logger } from "../lib/logger.js";
 
 const router = Router();
@@ -458,6 +480,13 @@ interface ReminderStats {
  * emitted, retried, or skipped as a duplicate. Exactly one reminder uses it
  * (the organizer-side commitment-phase activity entry), and it runs in the same
  * position relative to the event as it did before batching.
+ *
+ * That "whether or not" is the point — the activity must not inherit the
+ * reminder's preference, delivery or duplicate state — and it is also why the
+ * hook cannot be the thing that decides whether to write. Idempotency lives in
+ * `activity_events.dedupe_key`, one layer below: see the commitment-phase block
+ * in the cutoff pass. The hook is only attached when the page prefetch found no
+ * claim, so a settled jar carries no `alsoAfter` at all.
  */
 interface ReminderIntent {
   eventKey: string;
@@ -824,6 +853,28 @@ router.post("/internal/process-reminders", requireInternalToken, async (_req, re
        order by m.jar_id, m.id
       `);
       const byJar = groupByJar(recipients.rows);
+
+      // ── Commitment-phase activity: which jars still need one ──────────────
+      //
+      // The activity is jar-level and is written on the organizer's pass, so
+      // the candidate set is exactly the jars on this page that are at or past
+      // their cutoff AND have the organizer as an active member. That gating is
+      // unchanged; it is only evaluated here rather than inside the loop.
+      //
+      // One prefetch decides the whole page. A jar whose key is already claimed
+      // gets no hook, so a steady-state run over hundreds of settled jars costs
+      // this single statement rather than an insert attempt each — the previous
+      // code wrote one row per jar per invocation, for ever, which is how 283
+      // jars accumulated 57 641 activity rows.
+      const phaseEnteredKeys = page
+        .filter(
+          (jar) =>
+            daysUntil(jar.cutoffDate, now) <= 0 &&
+            (byJar.get(jar.jarId) ?? []).some((m) => m.userId === jar.organizerId),
+        )
+        .map((jar) => activityDedupeKey.jarCommitmentPhase(jar.jarId));
+      const unclaimedPhaseKeys = await unclaimedActivityKeys(phaseEnteredKeys);
+
       const intents: ReminderIntent[] = [];
 
       for (const jar of page) {
@@ -875,18 +926,34 @@ router.post("/internal/process-reminders", requireInternalToken, async (_req, re
               sendEmailFn: () => sendCutoffReachedEmail({ toEmail: member.email, displayName: member.displayName, jarName: jar.jarName, jarId: jar.jarId, cutoffDateISO: jar.cutoffDate }),
               newStatKey: "cutoffReachedSent",
               // Jar-level activity, logged by the organizer's pass and only by
-              // it. Unconditional per invocation, exactly as before — it does
-              // not depend on whether the reminder itself was a duplicate.
-              ...(member.userId === jar.organizerId
+              // it — the same gating as before. It still runs whether or not
+              // the reminder was a duplicate, whether or not the organizer has
+              // emails enabled, and whether or not delivery succeeded: a jar
+              // entered the commitment phase regardless of any of that.
+              //
+              // What changed is that it can no longer write twice. The hook is
+              // absent entirely once the key is claimed, and when it is present
+              // the write itself is guarded by the unique index, so two
+              // processors racing here still produce one row.
+              ...(member.userId === jar.organizerId &&
+              unclaimedPhaseKeys.has(activityDedupeKey.jarCommitmentPhase(jar.jarId))
                 ? {
                     alsoAfter: async () => {
                       try {
-                        await logActivity({
+                        await logActivityOnce({
+                          dedupeKey: activityDedupeKey.jarCommitmentPhase(jar.jarId),
                           jarId: jar.jarId,
                           eventType: "jar_commitment_phase",
                           description: `${jar.jarName} has entered the Commitment phase (cutoff: ${jar.cutoffDate})`,
                         });
-                      } catch { /* activity log failure is non-critical */ }
+                      } catch (err) {
+                        // Non-critical, and deliberately not treated as
+                        // "logged": no key was written, so the next run retries.
+                        logger.warn(
+                          { err: { message: (err as Error).message }, jarId: jar.jarId },
+                          "Failed to log commitment-phase activity; will retry on the next run",
+                        );
+                      }
                     },
                   }
                 : {}),

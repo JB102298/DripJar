@@ -406,6 +406,22 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
 }));
 
 // ─── Activity Events ──────────────────────────────────────────────────────────
+//
+// `dedupe_key` is an INTERNAL, OPT-IN idempotency key. It is not part of the
+// activity an account holder sees: every read surface selects columns
+// explicitly and none of them selects this one.
+//
+// NULL means "this row carries no uniqueness claim", which is what every
+// activity written before migration 0025 — and every activity still written
+// through the unconditional `logActivity` — stores. The unique index is a
+// plain one rather than a partial one precisely because PostgreSQL treats
+// NULLs as distinct in a unique index: unlimited unclaimed rows coexist, while
+// `ON CONFLICT (dedupe_key)` can still infer the index by column alone, with
+// no predicate to keep in sync between the migration and every INSERT.
+//
+// The key format is `<event_type>:<scope id>`, e.g.
+// `jar_commitment_phase:<jarId>`. Only writers that genuinely mean "at most one
+// of these, ever" set it; see `logActivityOnce` in the API server.
 
 export const activityEvents = pgTable("activity_events", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -416,9 +432,13 @@ export const activityEvents = pgTable("activity_events", {
   amountCents: integer("amount_cents"),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  // Declared last because migration 0025 appends it; a fresh install and an
+  // upgraded one therefore end up with identical physical column order.
+  dedupeKey: text("dedupe_key"),
 }, (t) => [
   index("activity_jar_idx").on(t.jarId),
   index("activity_user_idx").on(t.userId),
+  uniqueIndex("activity_events_dedupe_key_idx").on(t.dedupeKey),
 ]);
 
 export const activityEventsRelations = relations(activityEvents, ({ one }) => ({
